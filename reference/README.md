@@ -32,6 +32,12 @@ git -C reference/RE-UE4SS checkout 7f7cc36f8cdc082566cd676acc26975a22a41aaa
 
 git clone https://github.com/lsalzman/enet.git              reference/enet
 git -C reference/enet checkout 5a9c537fd464b3c6d3c55e1d3bd47588faf71b42
+
+git clone https://github.com/LuckPerms/LuckPerms.git       reference/LuckPerms
+git -C reference/LuckPerms checkout 25f223317a9ec2b6e73369126b630eca07d79506
+
+git clone https://github.com/ValveSoftware/source-sdk-2013.git reference/source-sdk-2013
+git -C reference/source-sdk-2013 checkout b8cfb12c0e083a2ef5b2f9f9b50f3902fa034474
 ```
 
 ## The trees
@@ -41,6 +47,8 @@ git -C reference/enet checkout 5a9c537fd464b3c6d3c55e1d3bd47588faf71b42
 | `mtasa-blue/` | https://github.com/multitheftauto/mtasa-blue | GPLv3 | `c07ccb00e30d973cebc4b907a9da15fab01ee6c1` | The architectural precedent: the parallel class hierarchy, the keysync packet, sessions, host-authoritative AI, the latent send queue, the server browser. **GPLv3, so SHAPES port and code does not.** |
 | `RE-UE4SS/` | https://github.com/UE4SS-RE/RE-UE4SS | MIT | `7f7cc36f8cdc082566cd676acc26975a22a41aaa` | How the engine is reached: AOB-resolved reflection, the `FUObjectArray` listener layout, the script-VM loop. **MIT, so code PORTS with per-site attribution** -- see `THIRD-PARTY-NOTICES.md`. |
 | `enet/` | https://github.com/lsalzman/enet | MIT | `5a9c537fd464b3c6d3c55e1d3bd47588faf71b42` | `enet_peer_throttle` (`peer.c`) and the RTT estimator that feeds it (`protocol.c`) were ported as the send-rate control law, measured, refuted and DELETED -- the pin stays because `docs/send-path.md` still cites `protocol.c:908-911` for the baseline drift that refuted it. **MIT; no ENet-derived line is linked today, so it carries no notice.** |
+| `LuckPerms/` | https://github.com/LuckPerms/LuckPerms | MIT | `25f223317a9ec2b6e73369126b630eca07d79506` | The permission-system precedent: holders and groups, nodes with a three-state value, inheritance, contexts, the calculator's processor chain, file storage. **MIT, so code may PORT with per-site attribution**; `THIRD-PARTY-NOTICES.md` gains its section with the first ported line. |
+| `source-sdk-2013/` | https://github.com/ValveSoftware/source-sdk-2013 | Source 1 SDK License | `b8cfb12c0e083a2ef5b2f9f9b50f3902fa034474` | The custom-content precedent: files a player brings (sprays) named by their checksum, the downloadables table, the client's download switches, a listen server's host beside a dedicated server. **Its licence covers Source-engine games only, so SHAPES port and no line is copied.** |
 | `baritone/` | https://github.com/cabaletta/baritone | LGPLv3 | -- | Pathfinding precedent for the bot director. Read only; no line is cited in our source. |
 | `VoiceChatMC/` | https://github.com/henkelmax/simple-voice-chat | MIT | -- | Voice-chat RE reference (a saved page plus a clone). Read only. |
 | `voidmod-extracted/` | -- | -- | -- | An extracted VOTV mod, read for its shape. Not redistributable. |
