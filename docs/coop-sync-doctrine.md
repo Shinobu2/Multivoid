@@ -63,9 +63,12 @@ Read the dispatch map first, then pick the cheapest seam that actually fires:
    the instance, the parameters and the calling frame in hand; the pre callback can refuse the
    body per call. It is the seam for a Blueprint-internal verb a client must not author; it
    sees nothing of a native function.
-3. The native function seam (`ue_wrap/core/ufunction_hook`, after the call): calls into native
-   functions on every route, because every route funnels through the function's thunk. It
-   cannot cancel; when a native must be cancelled, detour the C++ function itself.
+3. The native function seam (`ue_wrap/core/ufunction_hook`): calls into native functions on
+   every route, because every route funnels through the function's thunk. After the call it
+   reads the result and may overwrite it; its PRE form reads the parameters before the call and
+   can refuse it, for a native with no return value and no out or reference parameter
+   (`InstallPreHook`). Any other native that must be cancelled needs a detour of the C++
+   function itself.
 4. Per-site reconcile, the last resort: let the verb run, snapshot and diff the observable state,
    and converge to the authority's answer. Still the right shape in two cases: an outcome the
    acting peer's own Blueprint has already produced and must keep (a roll made locally, a state
