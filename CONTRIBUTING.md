@@ -48,7 +48,12 @@ And eight architectural principles; the reasoning behind them is in
 The architectural precedent is MTA:SA, read from `reference/mtasa-blue/` -- one of the upstream
 trees `reference/README.md` tells you how to clone, since they are read and never built. When a
 design question has an MTA answer, that answer is the default; a deliberate divergence says so
-in a comment at the site.
+in a comment at the site. The second precedent is Valve's Source SDK 2013
+(`reference/source-sdk-2013/`), read where MTA is silent or thin: content a player brings or
+downloads, the switches a client keeps over what a server sends, prediction and lag compensation,
+a listen server's host beside a dedicated server. When the two disagree, the one that fits
+multiplayer added to a single-player game wins, and the comment cites both. Its licence covers
+Source-engine games only, so its shapes are used and none of its code.
 
 The rules on this page are not a one-off cleanup. The repository was once hard for a person to
 read -- half its lines were prose, much of it stale, and its own history was the only way to tell
@@ -70,7 +75,7 @@ script that checks it, because a rule nothing enforces is a rule that decays.
 | `server/` | the master server and the signaling relay, in Rust |
 | `.github/ci/` | the scripts the workflows run: the public-surface gates, the release predicates |
 | `docs/` | the documentation; [docs/README.md](docs/README.md) is the index |
-| `reference/` | the reading room: upstream trees we read and never build (MTA:SA, RE-UE4SS, ENet). Cloned locally, not carried by this repository -- [reference/README.md](reference/README.md) lists each one, its licence and the commit our citations were read at |
+| `reference/` | the reading room: upstream trees we read and never build (MTA:SA, RE-UE4SS, the Source SDK, LuckPerms, ENet). Cloned locally, not carried by this repository -- [reference/README.md](reference/README.md) lists each one, its licence and the commit our citations were read at |
 
 Each source folder maps to one domain concept and is named after it. There are no catch-all
 folders (`utils`, `misc`, `helpers`), on purpose.
