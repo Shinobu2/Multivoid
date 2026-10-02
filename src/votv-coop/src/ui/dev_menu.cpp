@@ -6,6 +6,7 @@
 #include "coop/dev/event_force.h"
 #include "coop/dev/event_trigger.h"
 #include "coop/dev/force_weather.h"
+#include "coop/dev/mannequin_drill.h"
 #include "coop/dev/freecam.h"
 #include "coop/dev/object_overlay.h"
 #include "coop/dev/ragdoll_bone_overlay.h"
@@ -202,6 +203,14 @@ void RenderSpawnNpc() {
         ImGui::SetTooltip("The night 'Eyes' stalker. Each peer keeps its OWN native eyer\n"
                           "(it targets the peer that rolled it); every other peer renders a\n"
                           "display mirror -- AI and killsphere disabled on the mirror.");
+    if (ImGui::Button("Spawn walking mannequin")) coop::dev::mannequin_drill::SpawnWalker();
+    ImGui::SameLine();
+    ImGui::TextDisabled("(the game's own creature: use a throwaway save)");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The game's walking mannequin, spawned at its nearest spawn point that is not on screen "
+                          "(it normally appears from day 14).\n"
+                          "It opens doors, is saved with the world and returns angry after a load.\n"
+                          "In a session each client gets its own unsynced copy.");
 }
 
 void RenderGivePoints() {
