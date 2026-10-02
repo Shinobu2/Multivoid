@@ -108,6 +108,8 @@ void ReportEffectiveConfig() {
         if (unread) why = std::string("multivoid.ini ") + IniFaultWords(fault);
         const bool refused = !valid && r.failClosed;
         const std::string value = Redacted(r) ? "<set>" : refused ? Printable(raw) : Resolved(r, raw);
+        // The env/ini label holds only before the first SetValue: fromEnv is false when the
+        // runtime layer answered, so a row set this run reads "ini" here whatever its source.
         if (valid)
             UE_LOGI("config: EFFECTIVE %s=%s (%s)", r.key, value.c_str(),
                     fromEnv ? "env" : "ini");

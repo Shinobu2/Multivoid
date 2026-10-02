@@ -122,9 +122,19 @@ std::atomic<int> g_subscriberCalls{0};
 std::atomic<bool> g_subscriberOnNotifyThread{false};
 bool (*g_onNotifyThread)() = nullptr;
 
+// A subscriber that tries to set the row: the layer refuses it. The scratch path is the run's,
+// kept here because a subscriber takes no arguments.
+std::atomic<int> g_nestedSetResult{-1};
+std::wstring g_scratchPath;
+
 void ProbeSubscriber() {
     g_subscriberCalls.fetch_add(1);
     g_subscriberOnNotifyThread.store(g_onNotifyThread && g_onNotifyThread());
+}
+
+void NestedSetSubscriber() {
+    g_nestedSetResult.store(static_cast<int>(internal::SetValueAt(
+        g_scratchPath, config_registry::rows::selftest_runtime_probe.row, "9")));
 }
 
 }  // namespace
@@ -151,6 +161,7 @@ int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)()) {
         if (_wfopen_s(&f, scratch.c_str(), L"w") == 0 && f) std::fclose(f);
     }
     g_onNotifyThread = onNotifyThread;
+    g_scratchPath = scratch;
 
     // 0: a peer whose ini holds the probe row fails here, so no later check can pass or fail for
     // that reason.
@@ -187,12 +198,18 @@ int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)()) {
     {
         g_subscriberCalls.store(0);
         g_subscriberOnNotifyThread.store(false);
+        g_nestedSetResult.store(-1);
         Subscribe(P, &ProbeSubscriber);
         Subscribe(P, &ProbeSubscriber);
+        Subscribe(P, &NestedSetSubscriber);
         internal::SetValueAt(scratch, P.row, "6");
         drain();
         expect("subscriber on the game thread",
                g_subscriberCalls.load() == 1 && g_subscriberOnNotifyThread.load());
+        // 6b: the set made from inside the subscriber was refused and changed nothing.
+        expect("refused inside a subscriber",
+               g_nestedSetResult.load() == static_cast<int>(SetResult::Refused) &&
+                   ResolveInt(P) == 6);
     }
     // 7: with the layer entry dropped, the environment answers again.
     internal::RuntimeLayerDrop(P.row);

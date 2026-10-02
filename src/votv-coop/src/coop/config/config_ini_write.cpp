@@ -261,8 +261,6 @@ bool AtomicWriteAllLines(const std::wstring& path, const std::vector<std::string
 }
 }  // namespace internal
 
-// The one locked ini write: the key and the path are the caller's (SetValue, the identity write
-// door, the retired-value migration); everything below it is the string engine.
 namespace internal {
 // Scrub CR and LF from the value (an embedded newline, pasted into a text field, would split the
 // key line and corrupt the next key on read-back), then edge-trim. Interior spaces are part of
@@ -274,6 +272,8 @@ std::string NormalizeValue(const char* value) {
     return TrimEdgesStr(safe);
 }
 
+// The one locked ini write: the key and the path are the caller's (SetValue, the identity write
+// door, the retired-value migration); everything below it is the string engine.
 bool WriteIniKeyAtPath(const std::wstring& path, const char* key, const char* value) {
     std::lock_guard<std::mutex> lk(IniMutex());
     return WriteIniValueAt(path, key, value);
@@ -344,8 +344,20 @@ static bool RemoveDuplicateKeyLinesAt(const std::wstring& path, const char* key,
 }
 
 bool RemoveDuplicateKeyLines(const char* key, const char* keepValue) {
-    std::lock_guard<std::mutex> lk(internal::IniMutex());
-    return RemoveDuplicateKeyLinesAt(internal::LiveIniPath(), key, keepValue);
+    bool ok = false;
+    {
+        std::lock_guard<std::mutex> lk(internal::IniMutex());
+        ok = RemoveDuplicateKeyLinesAt(internal::LiveIniPath(), key, keepValue);
+    }
+    if (!ok) return false;
+    // The player repaired the STORED value, so the disk answers again (the environment above it, as
+    // at boot): a value set this run would otherwise shadow the kept line until relaunch. Not a
+    // live set, so it does not go through SetValueAt. Outside the ini lock: a subscriber re-resolves.
+    if (const config_registry::Row* row = config_registry::FindRow(key)) {
+        internal::RuntimeLayerDrop(row);
+        internal::PostNotify(row);
+    }
+    return true;
 }
 
 bool SelftestRemoveDuplicates(const std::wstring& path, const char* key, const char* keepValue) {

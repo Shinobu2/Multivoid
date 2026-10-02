@@ -99,6 +99,9 @@ void RuntimeLayerDrop(const config_registry::Row* row);
 // Whether `row` has a subscriber; and: call each of them, on the calling thread.
 bool HasSubscriber(const config_registry::Row* row);
 void NotifySubscribers(const config_registry::Row* row);
+// Deliver a change of `row` to its subscribers: through the notifier when one is set, else on the
+// calling thread; nothing when the row has none.
+void PostNotify(const config_registry::Row* row);
 // SetValue's whole body, with the ini to write as a parameter: SetValue passes LiveIniPath(), the
 // selftest a scratch file.
 SetResult SetValueAt(const std::wstring& iniPath, const config_registry::Row* row,

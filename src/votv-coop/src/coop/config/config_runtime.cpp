@@ -8,6 +8,11 @@
 // Two rules a later caller must keep. The lock order is g_setMutex, then g_layerMutex or
 // IniMutex(), never the reverse, and g_layerMutex is never held across a call out (a subscriber,
 // the notifier, the logger). And a subscriber never calls SetValue.
+// Also unlike the precedents: the ini is written on every accepted set (MTA saves only when
+// bSavable && bSave, CMainConfig.cpp:1477-1481); a live set beats the launch pin (MTA's command
+// line wins, CMainConfig.cpp:1050-1081; Source's +cvar is a first set a later set replaces, and we
+// follow Source); Source clamps and calls back only on a change (convar.cpp:794-798, 843-853), we
+// refuse and notify every accepted set, as MTA (CMainConfig.cpp:1485-1486).
 
 #include "coop/config/config.h"
 
@@ -36,8 +41,25 @@ std::unordered_map<const Row*, std::string> g_layer;
 std::vector<std::pair<const Row*, void (*)()>> g_subscribers;
 void (*g_post)(std::function<void()> task) = nullptr;
 
+// True on a thread while it runs a row's subscribers: SetValueAt refuses a set from there.
+thread_local bool t_notifying = false;
+
+// Sets t_notifying for its scope and restores the previous value, so an early return or a throw
+// cannot leave it set.
+struct NotifyScope {
+    const bool prev;
+    NotifyScope() : prev(t_notifying) { t_notifying = true; }
+    ~NotifyScope() { t_notifying = prev; }
+    NotifyScope(const NotifyScope&) = delete;
+    NotifyScope& operator=(const NotifyScope&) = delete;
+};
+
 void AddSubscriber(const Row* row, void (*onChange)()) {
-    if (!row || !onChange) return;
+    if (!row) return;
+    if (!onChange) {
+        UE_LOGE("config: Subscribe %s REFUSED -- onChange is null", row->key);
+        return;
+    }
     std::lock_guard<std::mutex> lk(g_layerMutex);
     for (const auto& s : g_subscribers)
         if (s.first == row && s.second == onChange) return;
@@ -82,14 +104,31 @@ void NotifySubscribers(const Row* row) {
         for (const auto& s : g_subscribers)
             if (s.first == row) fns.push_back(s.second);
     }
+    const NotifyScope scope;
     for (void (*fn)() : fns) fn();
 }
 
+void PostNotify(const Row* row) {
+    if (HasSubscriber(row)) {
+        void (*post)(std::function<void()> task) = nullptr;
+        {
+            std::lock_guard<std::mutex> lk(g_layerMutex);
+            post = g_post;
+        }
+        if (post) post([row] { NotifySubscribers(row); });
+        else NotifySubscribers(row);
+    }
+}
+
 SetResult SetValueAt(const std::wstring& iniPath, const Row* row, const char* value) {
+    if (t_notifying) {
+        UE_LOGE("config: SET %s REFUSED -- called from inside a change notification; a subscriber "
+                "never sets a row", row->key);
+        return SetResult::Refused;
+    }
     const std::string v = NormalizeValue(value);
     if (!ValueValidForKey(row->key, v, nullptr)) {
-        UE_LOGW("config: SET %s REFUSED -- the value would be rejected on read (registry "
-                "kind/range/tokens); nothing changed", row->key);
+        UE_LOGW("config: SET %s REFUSED", row->key);
         return SetResult::Refused;
     }
     bool saved = false;
@@ -104,15 +143,7 @@ SetResult SetValueAt(const std::wstring& iniPath, const Row* row, const char* va
     if (row->envVar && !ReadEnv(row->envVar).empty()) over = std::string(", over ") + row->envVar;
     UE_LOGI("config: SET %s=%s (runtime%s%s)", row->key, shown, saved ? "" : ", not saved",
             over.c_str());
-    if (HasSubscriber(row)) {
-        void (*post)(std::function<void()> task) = nullptr;
-        {
-            std::lock_guard<std::mutex> lk(g_layerMutex);
-            post = g_post;
-        }
-        if (post) post([row] { NotifySubscribers(row); });
-        else NotifySubscribers(row);
-    }
+    PostNotify(row);
     return saved ? SetResult::Saved : SetResult::HeldNotSaved;
 }
 

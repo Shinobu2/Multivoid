@@ -43,8 +43,8 @@ bool EnsureIniSkeleton();
 // discovered in the file.
 bool WriteIniValue(const config_registry::IdentityRow& row, const char* value);
 
-// What SetValue did. Refused: the value is one the reader would refuse, and nothing changed.
-// HeldNotSaved: in force for this run, but the ini could not be written. Saved: in force and
+// What SetValue did. Refused: the value is one the reader would refuse, or the call came from
+// inside a subscriber; nothing changed. HeldNotSaved: in force for this run, but the ini could not be written. Saved: in force and
 // written.
 enum class SetResult : unsigned char { Refused, HeldNotSaved, Saved };
 
@@ -60,7 +60,9 @@ SetResult SetValue(const config_registry::StringRow& row, const char* value);
 
 // Call `onChange` after each SetValue of `row` that was not Refused; it re-resolves what it
 // needs. It runs through the notifier (below): on the game thread in the game. Registering the
-// same (row, function) pair again is a no-op. Any thread. A subscriber never calls SetValue.
+// same (row, function) pair again is a no-op. Any thread. Subscribe before the first read of the
+// row; a set in between is then delivered. A subscriber never calls SetValue (such a call is
+// refused).
 void Subscribe(const config_registry::FlagRow& row, void (*onChange)());
 void Subscribe(const config_registry::IntRow& row, void (*onChange)());
 void Subscribe(const config_registry::FloatRow& row, void (*onChange)());
@@ -107,10 +109,11 @@ FailClosedRead ResolveFailClosed(const config_registry::FailClosedEnumRow& row, 
                                  std::string* refusedOut = nullptr,
                                  std::string* originOut = nullptr,
                                  IniFault* faultOut = nullptr);
-// Free strings: runtime layer, env, ini, row default, no validation.
+// Free strings: a value set while the game runs (the runtime layer), then the environment variable,
+// then the ini value, then the row default; no validation.
 std::string ResolveString(const config_registry::StringRow& row);
 
-// The net Config from env and ini; `enabled` is true iff a host or client role is configured,
+// The net Config from the runtime layer, env and ini; `enabled` is true iff a host or client role is configured,
 // otherwise hands-on play stays single-machine.
 coop::net::Config ReadNetConfig(bool& enabled);
 
@@ -138,7 +141,8 @@ bool ValueValidForKey(const char* key, const std::string& rawValue, std::string*
 // value equals `keepValue`, drop every other occurrence. Correlated by value, never by line
 // number, since the panel's snapshot ages and a stale index could delete the wrong copy of an
 // identity key; refused when no current line carries the value. The automatic write path never
-// deletes. An atomic swap.
+// deletes. An atomic swap. On success the key's runtime-layer value is dropped (the stored value
+// answers again) and its subscribers are notified.
 bool RemoveDuplicateKeyLines(const char* key, const char* keepValue);
 
 // The review panel's opt-in reformat, never automatic. It collapses value-identical duplicate
