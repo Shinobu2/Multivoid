@@ -7,9 +7,10 @@ namespace coop::net { class Session; }
 namespace coop::dev::mannequin_drill {
 
 // Spawn one native walking mannequin the way the game's own spawner does: every spawn point is
-// shown for a moment (prepareSpawn), and half a second later the nearest point to the local
-// player that is not on screen spawns the walker (wMannequinSpawn_C.spawn). The walker is the
-// game's real one: it opens doors, is saved with the world and returns angry after a load.
+// shown for a moment (prepareSpawn), and half a second later the points are asked in turn to spawn
+// the walker (wMannequinSpawn_C.spawn) until one accepts; a point on screen refuses. All of that is
+// the game's. The game shuffles its points; this instrument asks the nearest to the local player
+// first. The walker is the game's real one: it opens doors, is saved with the world and returns angry after a load.
 // Refused on a client in a session (dev_gate), while an earlier request is still running, and
 // when five walkers are alive (the game itself culls above four). Any thread.
 void SpawnWalker();

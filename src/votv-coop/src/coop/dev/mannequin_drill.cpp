@@ -62,17 +62,26 @@ std::mutex g_requestMutex;  // every transition INTO kSpawnPrepare, and the two 
 bool g_skipCall = false;    // the red arm: take the first point without the spawn call
 bool g_fromDrill = false;   // the drill's request is not refused at five walkers
 
+bool g_stepSkipCall = false;      // game thread: the request's flags, read once by PrepareStep
+bool g_stepFromDrill = false;     // game thread
 uint64_t g_dueMs = 0;             // game thread
 int g_tailsSincePrepare = 0;      // game thread
 uint64_t g_worldGeneration = 0;   // game thread
 size_t g_before = 0;              // game thread
 
-// A step ends in a state it chose: left any other way (a fault unwinding past it) the request is
-// failed, so no request stays running for the rest of the process.
+// A step ends in a state it chose, through End(): left any other way (a fault unwinding past it)
+// the request is failed, so no request stays running for the rest of the process. A step that
+// chose its end is done, so a request a button press queued after it is never failed by it.
 struct StepGuard {
     int from;
     const char* name;
+    bool done = false;
+    void End(int state) {
+        g_spawn.store(state, std::memory_order_release);
+        done = true;
+    }
     ~StepGuard() {
+        if (done) return;
         int expected = from;
         if (g_spawn.compare_exchange_strong(expected, kSpawnFailed))
             UE_LOGW("[MANNEQUIN-DRILL] FAIL: the %s step did not finish", name);
@@ -109,8 +118,9 @@ struct ListCtx {
     void* world;
 };
 
-void OnWalker(void* ctx, void* obj, int32_t) {
+void OnWalker(void* ctx, void* obj, int32_t index) {
     auto* c = static_cast<ListCtx*>(ctx);
+    if (R::SlotFlags(index) & (R::slot_flags::Dying | R::slot_flags::NotYetReadable)) return;
     if (!R::IsLive(obj)) return;
     if (R::NameStartsWith(R::NameOf(obj), L"Default__")) return;  // the class default, as FindObjectsByClass skips it
     if (WI::WorldOf(obj) != c->world) return;
@@ -180,20 +190,20 @@ bool RequestSpawn(bool skipCall, bool fromDrill) {
 
 void PrepareStep() {
     StepGuard guard{kSpawnPrepare, "prepare"};
-    bool fromDrill = false;
     {
         std::lock_guard<std::mutex> lock(g_requestMutex);
-        fromDrill = g_fromDrill;
+        g_stepSkipCall = g_skipCall;
+        g_stepFromDrill = g_fromDrill;
     }
     const std::vector<void*> points = ListPoints();
     if (points.empty()) {
         UE_LOGW("[MANNEQUIN-DRILL] FAIL: no spawn point in this world");
-        g_spawn.store(kSpawnFailed, std::memory_order_release);
+        guard.End(kSpawnFailed);
         return;
     }
-    if (!fromDrill && CountWalkers() > kGameCullAbove) {
+    if (!g_stepFromDrill && CountWalkers() > kGameCullAbove) {
         UE_LOGW("mannequin_drill: REFUSED -- five walkers are already alive (the game culls above four)");
-        g_spawn.store(kSpawnFailed, std::memory_order_release);
+        guard.End(kSpawnFailed);
         return;
     }
     for (void* point : points) {
@@ -201,7 +211,7 @@ void PrepareStep() {
         ue_wrap::ParamFrame f(fn);
         if (!fn || !f.valid() || !ue_wrap::Call(point, f)) {
             UE_LOGW("[MANNEQUIN-DRILL] FAIL: wMannequinSpawn_C.prepareSpawn is not callable");
-            g_spawn.store(kSpawnFailed, std::memory_order_release);
+            guard.End(kSpawnFailed);
             return;
         }
     }
@@ -209,20 +219,15 @@ void PrepareStep() {
     g_dueMs = GetTickCount64() + kPrepareWaitMs;
     g_tailsSincePrepare = 0;
     UE_LOGI("[MANNEQUIN-DRILL] host: prepared %zu spawn points", points.size());
-    g_spawn.store(kSpawnWaiting, std::memory_order_release);
+    guard.End(kSpawnWaiting);
 }
 
 void SpawnStep() {
     StepGuard guard{kSpawnWaiting, "spawn"};
     if (WI::Generation() != g_worldGeneration) {
         UE_LOGW("[MANNEQUIN-DRILL] FAIL: the world changed between prepareSpawn and spawn");
-        g_spawn.store(kSpawnFailed, std::memory_order_release);
+        guard.End(kSpawnFailed);
         return;
-    }
-    bool skipCall = false;
-    {
-        std::lock_guard<std::mutex> lock(g_requestMutex);
-        skipCall = g_skipCall;
     }
     std::vector<void*> raw = ListPoints();
     const std::vector<Item> points = Measure(raw);
@@ -230,29 +235,34 @@ void SpawnStep() {
     size_t tried = 0;
     for (const Item& it : points) {
         ++tried;
-        if (skipCall) {
+        if (g_stepSkipCall) {
             UE_LOGI("[MANNEQUIN-DRILL] host: red arm -- point %zu of %zu taken without the spawn call, walkers before=%zu",
                     tried, points.size(), g_before);
-            g_spawn.store(kSpawnOk, std::memory_order_release);
+            guard.End(kSpawnOk);
             return;
         }
         void* fn = R::FindFunction(R::ClassOf(it.obj), L"spawn");
         ue_wrap::ParamFrame f(fn);
-        if (!fn || !f.valid()) {
+        if (!fn || !f.valid() || f.ParamOffset(L"return") < 0) {
             UE_LOGW("[MANNEQUIN-DRILL] FAIL: wMannequinSpawn_C.spawn is not callable");
-            g_spawn.store(kSpawnFailed, std::memory_order_release);
+            guard.End(kSpawnFailed);
             return;
         }
-        if (!ue_wrap::Call(it.obj, f)) continue;       // refused by this point
+        // False from Call: the dispatch faulted and was absorbed, which is not a refusal.
+        if (!ue_wrap::Call(it.obj, f)) {
+            UE_LOGW("[MANNEQUIN-DRILL] FAIL: wMannequinSpawn_C.spawn faulted at point %zu", tried);
+            guard.End(kSpawnFailed);
+            return;
+        }
         if (!f.Get<bool>(L"return")) continue;         // refused: on screen in the last 0.2 s
         UE_LOGI("[MANNEQUIN-DRILL] host: spawned at point %zu of %zu, dist=%.0f%s, walkers before=%zu", tried,
                 points.size(), it.dist,
                 it.dist > kChaseRange ? " (beyond the walker's 20000 chase range)" : "", g_before);
-        g_spawn.store(kSpawnOk, std::memory_order_release);
+        guard.End(kSpawnOk);
         return;
     }
     UE_LOGW("[MANNEQUIN-DRILL] FAIL: no spawn point accepted (%zu tried)", tried);
-    g_spawn.store(kSpawnFailed, std::memory_order_release);
+    guard.End(kSpawnFailed);
 }
 
 // One sample, both halves: the live walkers, nearest eight, what this peer reads of each.
@@ -312,7 +322,11 @@ void TickHost(coop::net::Session& s, const std::string& mode) {
         return;
     case HostStep::AwaitSpawn: {
         const int st = g_spawn.load(std::memory_order_acquire);
-        if (st == kSpawnFailed) { g_host = HostStep::Done; return; }
+        if (st == kSpawnFailed) {
+            UE_LOGW("[MANNEQUIN-DRILL] FAIL: the spawn request ended without a walker");
+            g_host = HostStep::Done;
+            return;
+        }
         if (st != kSpawnOk) return;
         // The first sample comes a second later, after the object index has taken the walker's birth.
         g_hostLastMs = GetTickCount64();
