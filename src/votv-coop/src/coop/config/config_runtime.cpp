@@ -12,7 +12,7 @@
 
 // Also unlike the precedents: the ini is written on every accepted set (MTA's server: only when
 // bSavable && bSave, CMainConfig.cpp:1479-1483; its client: every apply, CSettings.cpp:4790); a
-// live set beats the launch pin so a change holds (MTA: command line wins,
+// live set beats the launch pin so a change holds for the run (MTA: command line wins,
 // CMainConfig.cpp:1050-1081); Source clamps and calls back only on a change (convar.cpp:794-798,
 // 843-853), we refuse and notify every accepted set, as MTA (CMainConfig.cpp:1485-1486).
 
