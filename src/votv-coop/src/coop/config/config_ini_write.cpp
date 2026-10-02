@@ -83,8 +83,8 @@ const char* SectionForKey(const char* key) {
     return nullptr;
 }
 
-// The path-parameterised writer core, no lock: the public wrapper holds it, and the selftest
-// drives copies of corpus files, never the live ini.
+// The path-parameterised writer core, no lock: internal::WriteIniKeyAtPath holds it, and the
+// selftest drives copies of corpus files, never the live ini.
 bool WriteIniValueAt(const std::wstring& path, const char* key, const char* value) {
     const std::string safe = internal::NormalizeValue(value);
     // What this function may LOG. The value still goes to the file -- that is the whole job -- but

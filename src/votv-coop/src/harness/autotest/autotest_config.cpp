@@ -8,8 +8,9 @@
 //
 // It also drives the runtime layer (coop/config SetValue and its subscribers) on a scratch ini.
 //
-// SOLO, role-agnostic, no session and no settle needed (file ops, plus one game-thread task for
-// the runtime layer's subscriber check).
+// SOLO, role-agnostic, no session and no settle needed (file ops, plus the runtime layer's
+// checks 6 and 8, which each drain the game thread; check 6b, the refusal inside a subscriber,
+// rides check 6's drain).
 // Gated by env VOTVCOOP_RUN_CONFIG_SELFTEST="1"; corpus dir from
 // VOTVCOOP_CONFIG_CORPUS_DIR (skipped with a log line when unset).
 
