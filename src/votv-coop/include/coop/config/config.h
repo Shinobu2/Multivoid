@@ -60,10 +60,23 @@ SetResult SetValue(const config_registry::FloatRow& row, const char* value);
 SetResult SetValue(const config_registry::EnumRow& row, const char* value);
 SetResult SetValue(const config_registry::StringRow& row, const char* value);
 
-// Call `onChange` after each SetValue of `row` that was not Refused; it re-resolves what it
-// needs. It runs through the notifier (below): on the game thread in the game. Registering the
-// same (row, function) pair again is a no-op. Any thread. Subscribe before the first read of the
-// row; a set in between is then delivered. A subscriber never sets a row: a SetValue made
+// Return a row to its default while the game runs: the runtime layer forgets it, its line leaves
+// multivoid.ini (an environment twin, if set, answers again), the reset is logged, and the row's
+// subscribers are called -- what SetValue is to a chosen value, this is to the default. Refused
+// from inside a subscriber. HeldNotSaved: the runtime layer forgot it, but the ini could not be
+// rewritten, so the FILE's stored value answers again until it can (a reader sees the old value,
+// not the default -- the drill's probe then prints `did not follow back`). Saved: forgotten and
+// the line removed (or there was none). Any thread; serialised with SetValue.
+SetResult ResetValue(const config_registry::FlagRow& row);
+SetResult ResetValue(const config_registry::IntRow& row);
+SetResult ResetValue(const config_registry::FloatRow& row);
+SetResult ResetValue(const config_registry::EnumRow& row);
+SetResult ResetValue(const config_registry::StringRow& row);
+
+// Call `onChange` after each SetValue or ResetValue of `row` that was not Refused; it re-resolves
+// what it needs. It runs through the notifier (below): on the game thread in the game. Registering
+// the same (row, function) pair again is a no-op. Any thread. Subscribe before the first read of
+// the row; a set in between is then delivered. A subscriber never sets a row: a SetValue made
 // synchronously on its own stack is refused, but a set it defers (game_thread::Post) or hands to
 // another thread is not, and loops inside one drain, so a subscriber never posts or hands off a
 // set either.

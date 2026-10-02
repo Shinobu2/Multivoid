@@ -284,6 +284,44 @@ bool WriteIniValue(const config_registry::IdentityRow& row, const char* value) {
     return internal::WriteIniKeyAtPath(internal::LiveIniPath(), row.row->key, value);
 }
 
+// Drops every line whose key is `key` (case-insensitive): the keep-line's scan-and-rewrite
+// without a kept line, because a reset returns the row to whatever answers below the file. No
+// file means no line (true, nothing written); a file that cannot be read whole is left untouched
+// (false).
+static bool RemoveKeyLinesAt(const std::wstring& path, const char* key, int& removed) {
+    removed = 0;
+    std::vector<std::string> lines;
+    IniFault fault = IniFault::None;
+    const IniScan scan =
+        internal::ScanIniFile(path, [&](const std::string& l) { lines.push_back(l); }, &fault);
+    if (scan == IniScan::Absent) return true;
+    if (scan != IniScan::Ok) {
+        UE_LOGW("config: reset of '%s' SKIPPED -- multivoid.ini %s; nothing deleted", key,
+                fault == IniFault::None ? "is missing" : IniFaultWords(fault));
+        return false;
+    }
+    std::vector<std::string> out;
+    out.reserve(lines.size());
+    for (const auto& l : lines) {
+        std::string k, v;
+        if (internal::ParseIniKeyValue(l, k, v) && _stricmp(k.c_str(), key) == 0) {
+            ++removed;
+            continue;
+        }
+        out.push_back(l);
+    }
+    if (removed == 0) return true;
+    return AtomicWriteLines(path, out, "reset");
+}
+
+namespace internal {
+// The locked form of RemoveKeyLinesAt, the shape of WriteIniKeyAtPath.
+bool RemoveIniKeyAtPath(const std::wstring& path, const char* key, int& removed) {
+    std::lock_guard<std::mutex> lk(IniMutex());
+    return RemoveKeyLinesAt(path, key, removed);
+}
+}  // namespace internal
+
 // Correlates by value, never by line number: the panel's snapshot ages while it sits on
 // screen, and an unrelated write elsewhere shifts every line index, so a stale index could
 // delete both copies of a duplicate identity key. The kept line is the first case-insensitive

@@ -91,6 +91,10 @@ std::string FormatFloat(float v);
 std::string NormalizeValue(const char* value);
 // The one locked ini write: takes IniMutex, writes `key=value` into the ini at `path`.
 bool WriteIniKeyAtPath(const std::wstring& path, const char* key, const char* value);
+// The one locked line removal: takes IniMutex, drops every `key` line from the ini at `path`.
+// `removed` is their count; false when the file could not be read or rewritten (nothing lost),
+// true when it is absent or had no such line.
+bool RemoveIniKeyAtPath(const std::wstring& path, const char* key, int& removed);
 
 // The runtime layer (config_runtime.cpp): a row set while the game runs. Any thread.
 bool RuntimeLayerGet(const config_registry::Row* row, std::string& raw);
@@ -102,8 +106,9 @@ void NotifySubscribers(const config_registry::Row* row);
 // Deliver a change of `row` to its subscribers: through the notifier when one is set, else on the
 // calling thread; nothing when the row has none.
 void PostNotify(const config_registry::Row* row);
-// The lock that makes a change of the runtime layer and its ini write one step: SetValueAt and the
-// keep-line hold it. Taken before IniMutex, never after; never held across a notification.
+// The lock that makes a change of the runtime layer and its ini write one step: SetValueAt,
+// ResetValueAt and the keep-line hold it. Taken before IniMutex, never after; never held across a
+// notification.
 std::mutex& SetMutex();
 // The keep-line whole: the dedup of `key` in the ini at `path`, then, on success, the row dropped
 // from the runtime layer and its subscribers told. The public RemoveDuplicateKeyLines passes
@@ -114,6 +119,9 @@ bool RemoveDuplicateKeyLinesLayered(const std::wstring& path, const char* key,
 // selftest a scratch file.
 SetResult SetValueAt(const std::wstring& iniPath, const config_registry::Row* row,
                      const char* value);
+// ResetValue's whole body, the same way: the row dropped from the runtime layer, its line removed
+// from the ini at `iniPath`, logged, announced.
+SetResult ResetValueAt(const std::wstring& iniPath, const config_registry::Row* row);
 
 // The ONE atomic-swap file writer (.new + checked writes + MoveFileExW),
 // shared with the T8 catalog generator (config_example.cpp; arc 4) -- never a

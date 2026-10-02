@@ -155,6 +155,25 @@ SetResult SetValueAt(const std::wstring& iniPath, const Row* row, const char* va
     return saved ? SetResult::Saved : SetResult::HeldNotSaved;
 }
 
+SetResult ResetValueAt(const std::wstring& iniPath, const Row* row) {
+    if (t_notifying) {
+        UE_LOGE("config: RESET %s REFUSED -- called from inside a change notification; a "
+                "subscriber never sets a row", row->key);
+        return SetResult::Refused;
+    }
+    int removed = 0;
+    bool wrote = false;
+    {
+        std::lock_guard<std::mutex> setLock(g_setMutex);
+        RuntimeLayerDrop(row);
+        wrote = RemoveIniKeyAtPath(iniPath, row->key, removed);
+    }
+    if (wrote) UE_LOGI("config: RESET %s (runtime, ini lines removed: %d)", row->key, removed);
+    else UE_LOGI("config: RESET %s (runtime, ini not rewritten)", row->key);
+    PostNotify(row);
+    return wrote ? SetResult::Saved : SetResult::HeldNotSaved;
+}
+
 }  // namespace internal
 
 SetResult SetValue(const config_registry::FlagRow& row, const char* value) {
@@ -171,6 +190,22 @@ SetResult SetValue(const config_registry::EnumRow& row, const char* value) {
 }
 SetResult SetValue(const config_registry::StringRow& row, const char* value) {
     return internal::SetValueAt(internal::LiveIniPath(), row.row, value);
+}
+
+SetResult ResetValue(const config_registry::FlagRow& row) {
+    return internal::ResetValueAt(internal::LiveIniPath(), row.row);
+}
+SetResult ResetValue(const config_registry::IntRow& row) {
+    return internal::ResetValueAt(internal::LiveIniPath(), row.row);
+}
+SetResult ResetValue(const config_registry::FloatRow& row) {
+    return internal::ResetValueAt(internal::LiveIniPath(), row.row);
+}
+SetResult ResetValue(const config_registry::EnumRow& row) {
+    return internal::ResetValueAt(internal::LiveIniPath(), row.row);
+}
+SetResult ResetValue(const config_registry::StringRow& row) {
+    return internal::ResetValueAt(internal::LiveIniPath(), row.row);
 }
 
 void Subscribe(const config_registry::FlagRow& row, void (*onChange)()) {

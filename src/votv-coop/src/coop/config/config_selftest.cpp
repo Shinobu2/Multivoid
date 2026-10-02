@@ -167,7 +167,7 @@ int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)()) {
     };
 
     // The environment twin is cleared so check 0 sees the row's default whatever the launch pinned,
-    // and restored after check 8.
+    // and restored after check 9.
     char old[256] = {};
     const DWORD oldLen = ::GetEnvironmentVariableA(kEnv, old, sizeof(old));
     ::SetEnvironmentVariableA(kEnv, nullptr);
@@ -245,6 +245,19 @@ int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)()) {
         drain();
         expect("keep-line drops the layer",
                kept && !stillHeld && g_subscriberCalls.load() == 2);
+    }
+    // 9: a reset forgets the layer entry and removes the key's line, so the environment twin
+    // answers again, and tells the subscribers. The counter: check 6's function stays subscribed
+    // (the layer has no unsubscribe), so it ran at 6, 8, this set and this reset.
+    {
+        internal::SetValueAt(scratch, P.row, "8");
+        drain();
+        const SetResult r = internal::ResetValueAt(scratch, P.row);
+        drain();
+        expect("reset -> default, line gone, told",
+               r == SetResult::Saved && ResolveInt(P) == 3 &&
+                   !SelftestReadValue(scratch, P.row->key).found &&
+                   g_subscriberCalls.load() == 4);
     }
 
     ::SetEnvironmentVariableA(kEnv, (oldLen > 0 && oldLen < sizeof(old)) ? old : nullptr);
