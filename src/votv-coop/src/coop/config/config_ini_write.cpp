@@ -86,13 +86,7 @@ const char* SectionForKey(const char* key) {
 // The path-parameterised writer core, no lock: the public wrapper holds it, and the selftest
 // drives copies of corpus files, never the live ini.
 bool WriteIniValueAt(const std::wstring& path, const char* key, const char* value) {
-    // Scrub CR and LF from the value (an embedded newline, pasted into a text field, would split
-    // the key line and corrupt the next key on read-back), then edge-trim. Interior spaces are
-    // part of the value (device names) and round-trip unchanged.
-    std::string safe;
-    for (const char* p = value; *p; ++p)
-        if (*p != '\n' && *p != '\r') safe.push_back(*p);
-    safe = internal::TrimEdgesStr(safe);
+    const std::string safe = internal::NormalizeValue(value);
     // What this function may LOG. The value still goes to the file -- that is the whole job -- but
     // both lines below name the key and the outcome, and a lobby password printed beside them
     // outlives the session in every pasted log. Same registry predicate the census asks, so the
@@ -101,7 +95,7 @@ bool WriteIniValueAt(const std::wstring& path, const char* key, const char* valu
         config_registry::IsCredentialKey(key) ? "<set>" : safe.c_str();
     const char* wantSec = SectionForKey(key);
     if (!ValueValidForKey(key, safe, nullptr)) {
-        UE_LOGW("config: WriteIniValue('%s'='%s') REFUSED -- the value would be rejected "
+        UE_LOGW("config: ini write('%s'='%s') REFUSED -- the value would be rejected "
                 "on read (registry kind/range/tokens); not persisting garbage (T3b)",
                 key, shown);
         return false;
@@ -162,7 +156,7 @@ bool WriteIniValueAt(const std::wstring& path, const char* key, const char* valu
     if (st == IniScan::Unreadable) {
         // Locked, failing mid-read, or not text: whichever, the collected line list is not the
         // whole file, and rebuilding from it is the loss shape. Refuse.
-        UE_LOGW("config: WriteIniValue('%s') SKIPPED -- multivoid.ini %s; refusing to rebuild "
+        UE_LOGW("config: ini write('%s') SKIPPED -- multivoid.ini %s; refusing to rebuild "
                 "the file from a partial view", key, IniFaultWords(fault));
         return false;
     }
@@ -190,7 +184,7 @@ bool WriteIniValueAt(const std::wstring& path, const char* key, const char* valu
     } else {
         lines.push_back(newLine);  // headerless/unknown key: today's EOF append
     }
-    if (!AtomicWriteLines(path, lines, "WriteIniValue")) return false;
+    if (!AtomicWriteLines(path, lines, "ini write")) return false;
     UE_LOGI("config: persisted %s=%s", key, shown);
     return true;
 }
@@ -267,30 +261,27 @@ bool AtomicWriteAllLines(const std::wstring& path, const std::vector<std::string
 }
 }  // namespace internal
 
-// The one locked live-ini write behind every typed overload: the handle carries the canonical
-// key; everything below it is the string engine.
-static bool WriteIniValueRow(const config_registry::Row* row, const char* value) {
-    std::lock_guard<std::mutex> lk(internal::IniMutex());
-    return WriteIniValueAt(internal::LiveIniPath(), row->key, value);
+// The one locked ini write: the key and the path are the caller's (SetValue, the identity write
+// door, the retired-value migration); everything below it is the string engine.
+namespace internal {
+// Scrub CR and LF from the value (an embedded newline, pasted into a text field, would split the
+// key line and corrupt the next key on read-back), then edge-trim. Interior spaces are part of
+// the value (device names) and round-trip unchanged.
+std::string NormalizeValue(const char* value) {
+    std::string safe;
+    for (const char* p = value; *p; ++p)
+        if (*p != '\n' && *p != '\r') safe.push_back(*p);
+    return TrimEdgesStr(safe);
 }
 
-bool WriteIniValue(const config_registry::FlagRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
+bool WriteIniKeyAtPath(const std::wstring& path, const char* key, const char* value) {
+    std::lock_guard<std::mutex> lk(IniMutex());
+    return WriteIniValueAt(path, key, value);
 }
-bool WriteIniValue(const config_registry::IntRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
-}
-bool WriteIniValue(const config_registry::FloatRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
-}
-bool WriteIniValue(const config_registry::EnumRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
-}
-bool WriteIniValue(const config_registry::StringRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
-}
+}  // namespace internal
+
 bool WriteIniValue(const config_registry::IdentityRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
+    return internal::WriteIniKeyAtPath(internal::LiveIniPath(), row.row->key, value);
 }
 
 // Correlates by value, never by line number: the panel's snapshot ages while it sits on

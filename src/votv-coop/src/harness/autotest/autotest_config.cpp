@@ -6,19 +6,24 @@
 // injected mid-stream failure gives Unreadable -- never a clean end, which
 // would read as ABSENT downstream.
 //
-// SOLO, role-agnostic, no session and no settle needed (pure file ops).
+// It also drives the runtime layer (coop/config SetValue and its subscribers) on a scratch ini.
+//
+// SOLO, role-agnostic, no session and no settle needed (file ops, plus one game-thread task for
+// the runtime layer's subscriber check).
 // Gated by env VOTVCOOP_RUN_CONFIG_SELFTEST="1"; corpus dir from
 // VOTVCOOP_CONFIG_CORPUS_DIR (skipped with a log line when unset).
 
 #include "harness/autotest.h"
 
 #include "coop/config/config.h"
+#include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/paths.h"
 
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -712,6 +717,11 @@ void RunConfigSelftest() {
             UE_LOGI("config-selftest: fault-injection(after=%d) -> Unreadable ok", n);
         }
     }
+    // The runtime layer: SetValue's own code on a scratch ini. The game thread's queue is FIFO, so
+    // a task that ran means every notification posted before it ran.
+    fail += cfg::SelftestRuntimeLayer(
+        [] { ue_wrap::game_thread::RunAndWait([](std::atomic<int>& a) { a.store(1); }); },
+        [] { return ue_wrap::game_thread::IsGameThread(); });
     UE_LOGI("config-selftest: DONE fail=%d", fail);
 }
 

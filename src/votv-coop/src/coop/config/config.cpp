@@ -367,7 +367,8 @@ std::string ReadIniValue(const char* key, const char* def, IniScan* scanOut, Ini
     return v;
 }
 
-// The P2P transport fields of `c` from env, then ini, then default, for a session configured
+// The P2P transport fields of `c` from a value set while the game runs (the runtime layer), then
+// the environment variable, then the ini value, then the default, for a session configured
 // with no master (ReadNetConfig's p2p topology); a master lobby takes its rendezvous and ICE
 // servers from the master's answer instead. The candidate policy, net.ice, is not a field: every
 // session start reads it (Session::Start, coop/net/ice_policy.h).
@@ -586,6 +587,7 @@ bool PickRawLayered(const config_registry::Row* row, std::string& raw, bool* fro
     if (fromEnvOut) *fromEnvOut = false;
     if (scanOut) *scanOut = IniScan::Ok;
     if (faultOut) *faultOut = IniFault::None;
+    if (RuntimeLayerGet(row, raw)) return true;
     if (row->envVar) {
         const std::string e = ReadEnv(row->envVar);
         if (!e.empty()) {

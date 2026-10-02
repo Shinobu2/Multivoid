@@ -1,5 +1,6 @@
-// coop/config/config_internal.h -- TU-private seams between the config reader core (config.cpp)
-// and the ini mutation engine (config_ini_write.cpp).
+// coop/config/config_internal.h -- TU-private seams between the config reader core (config.cpp),
+// the ini mutation engine (config_ini_write.cpp), the runtime layer (config_runtime.cpp) and the
+// selftest TU.
 //
 // The internal-header pattern: shared primitives are declared here and defined in config.cpp,
 // and never exported to include/ -- product code uses the public coop/config/config.h API only.
@@ -69,10 +70,12 @@ FailClosedRead FailClosedFromPick(const config_registry::Row* row, bool have,
                                   IniFault fault, std::string& out, std::string* refusedOut,
                                   std::string* originOut, IniFault* faultOut);
 
-// The layered raw-value pick: a set env wins, valid or not (garbage env shadows the ini); else
-// the ini's authoritative line; else absent. True with `raw` when a layer supplied a value, and
-// `fromEnvOut` says which layer won. The census reports the layer, so it asks the precedence
-// rule itself rather than re-reading the environment and risking a second, disagreeing answer.
+// The layered raw-value pick: a value set while the game runs (the runtime layer), then the
+// environment variable, then the ini value, then absent. A set env wins over the ini, valid or
+// not (garbage env shadows the ini). True with `raw` when a layer supplied a value, and
+// `fromEnvOut` says which layer won (false when the runtime layer answered). The census reports
+// the layer, so it asks the precedence rule itself rather than re-reading the environment and
+// risking a second, disagreeing answer.
 // `scanOut` gets the ini scan's verdict (Ok when the env layer answered), because an absent
 // result from an Unreadable scan is not an answer, and a fail-closed read must not take it as one;
 // `faultOut` says why it was Unreadable.
@@ -83,6 +86,23 @@ bool PickRawLayered(const config_registry::Row* row, std::string& raw,
 // C-locale numeric emission for a float row's value, so the catalog's default and the census's
 // resolved value are the same string on any machine. Defined in config_example.cpp.
 std::string FormatFloat(float v);
+
+// The writer's normalisation: CR and LF removed, edges trimmed (config_ini_write.cpp).
+std::string NormalizeValue(const char* value);
+// The one locked ini write: takes IniMutex, writes `key=value` into the ini at `path`.
+bool WriteIniKeyAtPath(const std::wstring& path, const char* key, const char* value);
+
+// The runtime layer (config_runtime.cpp): a row set while the game runs. Any thread.
+bool RuntimeLayerGet(const config_registry::Row* row, std::string& raw);
+void RuntimeLayerPut(const config_registry::Row* row, const std::string& raw);
+void RuntimeLayerDrop(const config_registry::Row* row);
+// Whether `row` has a subscriber; and: call each of them, on the calling thread.
+bool HasSubscriber(const config_registry::Row* row);
+void NotifySubscribers(const config_registry::Row* row);
+// SetValue's whole body, with the ini to write as a parameter: SetValue passes LiveIniPath(), the
+// selftest a scratch file.
+SetResult SetValueAt(const std::wstring& iniPath, const config_registry::Row* row,
+                     const char* value);
 
 // The ONE atomic-swap file writer (.new + checked writes + MoveFileExW),
 // shared with the T8 catalog generator (config_example.cpp; arc 4) -- never a

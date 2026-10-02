@@ -374,8 +374,8 @@ void SetRoleFamily(Role r, Family f) {
     if (g_roleFamily[ri] == f) return;
     g_roleFamily[ri] = f;
     g_rolesRead = true;  // the live choice wins over the ini read
-    coop::config::WriteIniValue(coop::config_registry::FontRoleRow(static_cast<size_t>(ri)),
-                                FamilyToken(fi));
+    coop::config::SetValue(coop::config_registry::FontRoleRow(static_cast<size_t>(ri)),
+                           FamilyToken(fi));
     ui::scale::RequestRebuild();  // atlas re-bakes before the next frame
 }
 

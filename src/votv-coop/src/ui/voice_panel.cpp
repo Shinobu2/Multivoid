@@ -58,14 +58,14 @@ void DeviceCombo(const char* label, const coop::config_registry::StringRow& row,
     if (ImGui::BeginCombo(label, shown)) {
         if (ImGui::Selectable("(system default)", !current[0])) {
             current[0] = 0;
-            coop::config::WriteIniValue(row, "");
+            coop::config::SetValue(row, "");
             VC::RequestDevicesRestart();
         }
         for (const std::string& n : names) {
             const bool sel = n == current;
             if (ImGui::Selectable(n.c_str(), sel)) {
                 std::snprintf(current, currentCap, "%s", n.c_str());
-                coop::config::WriteIniValue(row, n.c_str());
+                coop::config::SetValue(row, n.c_str());
                 VC::RequestDevicesRestart();
             }
         }
@@ -156,7 +156,7 @@ void Render() {
         char pttLabel[64];
         std::snprintf(pttLabel, sizeof(pttLabel), "Push-to-talk (key: %s)", g_pttKey);
         if (ImGui::RadioButton(pttLabel, &mode, 0)) {
-            coop::config::WriteIniValue(coop::config_registry::rows::voice_mode, "ptt");
+            coop::config::SetValue(coop::config_registry::rows::voice_mode, "ptt");
             VC::RequestDevicesRestart();
         }
         ImGui::SameLine();
@@ -165,7 +165,7 @@ void Render() {
             ImGui::SetTooltip("Hold the key to talk. Change the key via voice.ptt_key\n"
                               "in multivoid.ini (single letter or a virtual-key number).");
         if (ImGui::RadioButton("Voice activation", &mode, 1)) {
-            coop::config::WriteIniValue(coop::config_registry::rows::voice_mode, "activation");
+            coop::config::SetValue(coop::config_registry::rows::voice_mode, "activation");
             VC::RequestDevicesRestart();
         }
         if (mode == 1) {
@@ -175,7 +175,7 @@ void Render() {
             if (ImGui::IsItemDeactivatedAfterEdit()) {
                 char v[16];
                 std::snprintf(v, sizeof(v), "%.0f", thr);
-                coop::config::WriteIniValue(coop::config_registry::rows::voice_threshold_db, v);
+                coop::config::SetValue(coop::config_registry::rows::voice_threshold_db, v);
             }
             ImGui::SameLine();
             ImGui::TextDisabled("(?)");
@@ -198,7 +198,7 @@ void Render() {
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             char v[16];
             std::snprintf(v, sizeof(v), "%.0f", gain);
-            coop::config::WriteIniValue(coop::config_registry::rows::voice_mic_gain_db, v);
+            coop::config::SetValue(coop::config_registry::rows::voice_mic_gain_db, v);
         }
         float vol = s.masterVolume;
         if (ImGui::SliderFloat("Voice volume", &vol, 0.0f, 3.0f, "%.2fx"))
@@ -206,7 +206,7 @@ void Render() {
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             char v[16];
             std::snprintf(v, sizeof(v), "%.2f", vol);
-            coop::config::WriteIniValue(coop::config_registry::rows::voice_volume, v);
+            coop::config::SetValue(coop::config_registry::rows::voice_volume, v);
         }
 
         ImGui::Spacing();

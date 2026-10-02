@@ -29,15 +29,15 @@ std::array<std::atomic<uint32_t>, coop::players::kMaxPeers> g_bySlot{};
 std::atomic<uint8_t> g_localSlot{0xFF};
 
 void PersistLocal(uint32_t packed) {
-    // WriteIniValue is thread-safe (atomic swap) -- callable from the render
+    // SetValue is thread-safe (atomic swap) -- callable from the render
     // thread, same as the nameplate pref. Empty value = "no custom color".
     if (!IsCustom(packed)) {
-        coop::config::WriteIniValue(coop::config_registry::rows::nick_color, "");
+        coop::config::SetValue(coop::config_registry::rows::nick_color, "");
         return;
     }
     char v[8];
     std::snprintf(v, sizeof(v), "%02X%02X%02X", R(packed), G(packed), B(packed));
-    coop::config::WriteIniValue(coop::config_registry::rows::nick_color, v);
+    coop::config::SetValue(coop::config_registry::rows::nick_color, v);
 }
 
 }  // namespace

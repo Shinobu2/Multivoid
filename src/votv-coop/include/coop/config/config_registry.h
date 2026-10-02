@@ -156,8 +156,8 @@ struct StringRow {
     constexpr StringRow(const Row* r, detail::RegistryCtorKey) : row(r) {}
 };
 // Identity rows have no read handle (the mint machinery reads them internally, in
-// config.cpp); this handle exists for the write door only, so the mint persist and the skin
-// picker go through the same typed write as every other product write.
+// config.cpp); this handle exists for the write door only (WriteIniValue), so the mint persist and
+// the skin picker go through a typed write, while a readable row's write is SetValue.
 struct IdentityRow {
     const Row* row;
     constexpr IdentityRow(const Row* r, detail::RegistryCtorKey) : row(r) {}

@@ -88,7 +88,7 @@ void SpawnEnvGatedTests(coop::net::Role role) {
     // must reflect it through the item-activate path.
     SpawnIf("VOTVCOOP_RUN_FLASHLIGHT_TEST", "flashlight test", &FlashlightTestThread, role);
     // The config-corpus selftest, solo: the real ini lexer over a corpus directory plus the
-    // fault-injection controls.
+    // fault-injection controls and the runtime layer's SetValue checks.
     SpawnIf("VOTVCOOP_RUN_CONFIG_SELFTEST", "config-corpus selftest", &ConfigSelftestThread, role);
     // The join-seed delta-math selftest is pure and engine-free, so it runs inline; the smoke
     // driver greps its PASS/FAIL lines.

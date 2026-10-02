@@ -1,13 +1,15 @@
 // coop/config/config.h -- the env and ini configuration readers. multivoid.ini lives next to the
 // mod DLL; the LAN test framework overrides through environment variables, since one DLL location
-// serves two instances and per-file configs would alias. Precedence: the environment variable (set
-// by the test launcher), then the ini value, then the row default.
+// serves two instances and per-file configs would alias. Precedence: a value set while the game
+// runs (the runtime layer), then the environment variable (set by the test launcher), then the ini
+// value, then the row default.
 
 #pragma once
 
 #include "coop/config/config_registry.h"
 #include "coop/net/session.h"
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -31,23 +33,48 @@ std::string ReadScenario();
 // launch.
 bool EnsureIniSkeleton();
 
-// Create or update one key=value line in multivoid.ini. The authoritative line is the first
-// case-insensitive occurrence of the key, edited in place with the canonical spelling;
-// duplicates are left alone, other bytes stay as they are, and the rewritten line's inline
-// comment is deleted, since it described the old value. Best-effort: a read-only directory
-// means the setting is not remembered, logged and false; true means the atomic swap landed.
-// ASCII values. Keyed by typed handle, so product code cannot persist an unregistered key; the
-// value stays a string, refused by ValueValidForKey exactly as the reader would refuse it. The
+// The identity write door: one key=value line in multivoid.ini, by typed handle, with no reader
+// and no layer. The authoritative line is the first case-insensitive occurrence of the key,
+// edited in place with the canonical spelling; duplicates are left alone, other bytes stay as
+// they are, and the rewritten line's inline comment is deleted. Best-effort: a read-only
+// directory means the value is not remembered, logged and false; true means the atomic swap
+// landed. The value is refused by ValueValidForKey exactly as the reader would refuse it. The
 // string-keyed machinery below (reformat, keep-line, skeleton, selftests) operates on keys
 // discovered in the file.
-bool WriteIniValue(const config_registry::FlagRow& row, const char* value);
-bool WriteIniValue(const config_registry::IntRow& row, const char* value);
-bool WriteIniValue(const config_registry::FloatRow& row, const char* value);
-bool WriteIniValue(const config_registry::EnumRow& row, const char* value);
-bool WriteIniValue(const config_registry::StringRow& row, const char* value);
 bool WriteIniValue(const config_registry::IdentityRow& row, const char* value);
 
-// The typed layered reads: Resolve(row) is env, then ini, then the row's default, validated
+// What SetValue did. Refused: the value is one the reader would refuse, and nothing changed.
+// HeldNotSaved: in force for this run, but the ini could not be written. Saved: in force and
+// written.
+enum class SetResult : unsigned char { Refused, HeldNotSaved, Saved };
+
+// Set a row's value while the game runs. The value is normalised as the ini writer normalises it
+// (line breaks removed, edges trimmed), refused if the reader would refuse it, held in the
+// runtime layer (which every Resolve reads above the environment), written to multivoid.ini,
+// logged, and announced to the row's subscribers. Any thread; two sets are serialised.
+SetResult SetValue(const config_registry::FlagRow& row, const char* value);
+SetResult SetValue(const config_registry::IntRow& row, const char* value);
+SetResult SetValue(const config_registry::FloatRow& row, const char* value);
+SetResult SetValue(const config_registry::EnumRow& row, const char* value);
+SetResult SetValue(const config_registry::StringRow& row, const char* value);
+
+// Call `onChange` after each SetValue of `row` that was not Refused; it re-resolves what it
+// needs. It runs through the notifier (below): on the game thread in the game. Registering the
+// same (row, function) pair again is a no-op. Any thread. A subscriber never calls SetValue.
+void Subscribe(const config_registry::FlagRow& row, void (*onChange)());
+void Subscribe(const config_registry::IntRow& row, void (*onChange)());
+void Subscribe(const config_registry::FloatRow& row, void (*onChange)());
+void Subscribe(const config_registry::EnumRow& row, void (*onChange)());
+void Subscribe(const config_registry::StringRow& row, void (*onChange)());
+
+// How a change notification reaches its thread: `post` is handed a task that calls the row's
+// subscribers. The game wires it to the game thread's queue at boot; a process that sets none
+// has the subscribers called inside SetValue, on the setter's thread. Set once, before the first
+// SetValue.
+void SetNotifier(void (*post)(std::function<void()> task));
+
+// The typed layered reads: Resolve(row) is a value set while the game runs (the runtime layer),
+// then the environment variable, then the ini value, then the row's default, validated
 // against the row's kind and range or tokens. One vocabulary for flags (1, true, yes, on and
 // their negations, case-insensitive); a number must parse whole and land in range; an enum must
 // match a token case-insensitively, and the canonical token is returned. Anything else, an
@@ -80,14 +107,15 @@ FailClosedRead ResolveFailClosed(const config_registry::FailClosedEnumRow& row, 
                                  std::string* refusedOut = nullptr,
                                  std::string* originOut = nullptr,
                                  IniFault* faultOut = nullptr);
-// Free strings: env, ini, row default, no validation.
+// Free strings: runtime layer, env, ini, row default, no validation.
 std::string ResolveString(const config_registry::StringRow& row);
 
 // The net Config from env and ini; `enabled` is true iff a host or client role is configured,
 // otherwise hands-on play stays single-machine.
 coop::net::Config ReadNetConfig(bool& enabled);
 
-// The display nickname: env, then ini, then the registry's my-name default.
+// The display nickname: a value set while the game runs (the runtime layer), then the environment
+// variable, then the ini value, then the registry's my-name default.
 std::wstring ReadNickname();
 
 // The persisted body-skin choice (the ini's player_skin). Absent or invalid, the default is
@@ -220,5 +248,10 @@ int SelftestScanWithFailure(int failAfterLines);
 bool SelftestWriteValue(const std::wstring& path, const char* key, const char* value);
 bool SelftestRemoveDuplicates(const std::wstring& path, const char* key, const char* keepValue);
 bool SelftestReformat(const std::wstring& path, ReformatStats& stats);
+// The runtime layer's selftest: drives SetValue's own code against a scratch ini beside the exe
+// (never the live ini). `drain` returns once every notification posted so far has run;
+// `onNotifyThread` says whether the caller is on the thread notifications run on. Returns the
+// failure count; each check logs one config-selftest line. Not on the game thread.
+int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)());
 
 }  // namespace coop::config

@@ -354,8 +354,9 @@ void MigrateRetiredIniValues() {
     const std::string cur = internal::ReadLiveIniValue(
         config_registry::rows::browser_lastdirect.row->key, kAbsent, nullptr, nullptr);
     if (cur == "127.0.0.1:7777") {
-        if (WriteIniValue(config_registry::rows::browser_lastdirect,
-                          ::coop::net::kDefaultDirectAddr)) {
+        if (internal::WriteIniKeyAtPath(
+                internal::LiveIniPath(), config_registry::rows::browser_lastdirect.row->key,
+                ::coop::net::kDefaultDirectAddr)) {
             UE_LOGI("config: migrated browser.lastdirect off the retired 127.0.0.1:7777 "
                     "(Unreal's default port, never ours) -> %s",
                     ::coop::net::kDefaultDirectAddr);

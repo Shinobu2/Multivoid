@@ -179,7 +179,7 @@ void AdoptCanonicalNickname(const std::wstring& canonical) {
     const std::vector<uint8_t> u8 = ToUtf8(canonical);
     const std::string nickUtf8(reinterpret_cast<const char*>(u8.data()), u8.size());
     coop::session_manager::SetNickname(nickUtf8);  // the browser field shows it too
-    coop::config::WriteIniValue(coop::config_registry::rows::net_nick, nickUtf8.c_str());
+    coop::config::SetValue(coop::config_registry::rows::net_nick, nickUtf8.c_str());
     UE_LOGI("nick: host renamed us '%ls' -> '%ls' (kept: written to multivoid.ini)",
             asked.c_str(), canonical.c_str());
 }

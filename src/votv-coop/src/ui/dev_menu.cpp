@@ -468,7 +468,7 @@ void RenderFontPref() {
         ui::scale::SetUserScale(sPending);
         char v[16];
         std::snprintf(v, sizeof(v), "%.2f", ui::scale::UserScale());
-        coop::config::WriteIniValue(coop::config_registry::rows::ui_scale, v);
+        coop::config::SetValue(coop::config_registry::rows::ui_scale, v);
         sPending = ui::scale::UserScale();  // reflect the clamp
     }
     ImGui::SameLine();

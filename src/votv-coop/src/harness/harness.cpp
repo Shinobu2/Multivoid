@@ -511,6 +511,8 @@ void Start() {
     // And the per-tick pump, for the same reason and in the same place: it is handed the session
     // rather than reaching back into the lifecycle driver that drives it.
     pump::SetSession(&session_runtime::Session());
+    // A config change's subscribers run on the game thread.
+    cfg::SetNotifier([](std::function<void()> task) { GT::Post(std::move(task)); });
     if (!ui::imgui_overlay::Init()) {
         UE_LOGW("harness: imgui_overlay::Init failed -- F1 menu unavailable this run");
     }

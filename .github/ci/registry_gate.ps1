@@ -21,7 +21,7 @@
 #      as a reference; it can only make a dead row look alive, never fail a
 #      live one, and the forbidden-alias job keeps code references canonical.
 #   2. WRITE-ONLY ROWS -- a row whose every reference is the first arg of
-#      WriteIniValue( must be in the committed allowlist below (each entry
+#      WriteIniValue( or SetValue( must be in the committed allowlist below (each entry
 #      carries its review reason). SYMMETRIC REAPING: an allowlist entry with
 #      no matching row FAILS, and one whose row gained a reader FAILS -- the
 #      table can only shrink.
@@ -87,9 +87,10 @@ Write-Host "registry_gate: rows=$($rowIdents.Count) fontRoleRows=$($fontRoleIden
 # controls feed them synthetic corpora through the SAME code path) ------------
 $refRx      = [regex]'rows::(?<n>[A-Za-z0-9_]+)'
 # A reference is a WRITE ref iff the qualified name is the first argument of
-# WriteIniValue( -- i.e. the text immediately before the match is the open
-# paren plus namespace qualification only.
-$writeCtxRx = [regex]'WriteIniValue\(\s*(::)?[A-Za-z0-9_:]*$'
+# WriteIniValue( or SetValue( -- i.e. the text immediately before the match is
+# the open paren plus namespace qualification only. A Subscribe( is not a
+# write and counts as a read like any other reference.
+$writeCtxRx = [regex]'(WriteIniValue|SetValue)\(\s*(::)?[A-Za-z0-9_:]*$'
 
 function Get-RowRefs([string[]]$texts) {
     # -> hashtable ident -> @{ total = n; write = n }
@@ -113,7 +114,7 @@ $aliasRx = @(
     @{ name = 'namespace-alias';   rx = [regex]'namespace\s+[A-Za-z0-9_]+\s*=\s*[A-Za-z0-9_:]*\brows\s*;' }
 )
 
-$ratchetRx = [regex]'(?m)^\s*(bool|int|long|float|std::string)\s+(IsIniKeyTrue|ReadIniValue|WriteIniValue)\s*\(\s*const\s+char\s*\*'
+$ratchetRx = [regex]'(?m)^\s*(bool|int|long|float|std::string|SetResult)\s+(IsIniKeyTrue|ReadIniValue|WriteIniValue|SetValue)\s*\(\s*const\s+char\s*\*'
 
 # ---- fixture MUST-FIRE controls (every run) ---------------------------------
 # 1: dead-row detector fires on an unreferenced fixture ident.
@@ -124,6 +125,10 @@ if (-not $fixRefs.ContainsKey('zz_fix_alive')) { $controlFailures.Add('dead-row 
 $fixWo = Get-RowRefs @('coop::config::WriteIniValue(coop::config_registry::rows::zz_fix_wo, "1");')
 if (-not ($fixWo.ContainsKey('zz_fix_wo') -and $fixWo['zz_fix_wo'].write -eq $fixWo['zz_fix_wo'].total)) {
     $controlFailures.Add('write-only control: fixture write reference not classified as write')
+}
+$fixWoSet = Get-RowRefs @('coop::config::SetValue(coop::config_registry::rows::zz_fix_wo_set, "1");')
+if (-not ($fixWoSet.ContainsKey('zz_fix_wo_set') -and $fixWoSet['zz_fix_wo_set'].write -eq $fixWoSet['zz_fix_wo_set'].total)) {
+    $controlFailures.Add('write-only control: fixture SetValue reference not classified as write')
 }
 # ...and a READ ref must NOT classify as write (the reaper direction).
 $fixRd = Get-RowRefs @('bool v = coop::config::ResolveFlag(coop::config_registry::rows::zz_fix_rd);')
@@ -147,6 +152,9 @@ if (-not ('bool IsIniKeyTrue(const char* key);' -cmatch $ratchetRx)) {
 }
 if (-not ('bool WriteIniValue(const char* key, const char* value);' -cmatch $ratchetRx)) {
     $controlFailures.Add('ratchet control: string-keyed write decl fixture did not fire')
+}
+if (-not ('SetResult SetValue(const char* key, const char* value);' -cmatch $ratchetRx)) {
+    $controlFailures.Add('ratchet control: string-keyed SetValue decl fixture did not fire')
 }
 # 5: allowlist reaping fires on a ghost entry (checked against the REAL rows below).
 

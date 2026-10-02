@@ -295,8 +295,8 @@ bool Select(int index) {
         return true;
     }
     // Outside the lock: the ini write is file I/O under the config layer's own mutex.
-    if (::coop::config::WriteIniValue(::coop::config_registry::rows::net_master,
-                                       label.c_str()))
+    if (::coop::config::SetValue(::coop::config_registry::rows::net_master, label.c_str()) ==
+        ::coop::config::SetResult::Saved)
         UE_LOGI("master_slots: showing %s (remembered in net.master)", label.c_str());
     else
         UE_LOGW("master_slots: showing %s, but multivoid.ini could not remember it -- the next "
