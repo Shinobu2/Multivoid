@@ -4,15 +4,17 @@
 // refuse a bad value, assign, save, call the row's change callback. The divergence: in the game the
 // callback is posted to the game thread through the notifier the boot code wires, because a set
 // comes from the render thread; a process that wires none calls it inside the setter, as MTA does.
-//
+
 // Two rules a later caller must keep. The lock order is g_setMutex, then g_layerMutex or
-// IniMutex(), never the reverse, and g_layerMutex is never held across a call out (a subscriber,
-// the notifier, the logger). And a subscriber never calls SetValue.
+// IniMutex(), never the reverse; g_layerMutex is never held across a call out. A subscriber never
+// sets a row: one made on its own stack is refused (t_notifying); one it defers or hands to
+// another thread loops inside one drain (game_thread.cpp:277-286) and is not guarded.
+
 // Also unlike the precedents: the ini is written on every accepted set (MTA saves only when
-// bSavable && bSave, CMainConfig.cpp:1477-1481); a live set beats the launch pin (MTA's command
-// line wins, CMainConfig.cpp:1050-1081; Source's +cvar is a first set a later set replaces, and we
-// follow Source); Source clamps and calls back only on a change (convar.cpp:794-798, 843-853), we
-// refuse and notify every accepted set, as MTA (CMainConfig.cpp:1485-1486).
+// bSavable && bSave, CMainConfig.cpp:1479-1483); a live set beats the launch pin so a change holds
+// for the run (MTA's command line wins, CMainConfig.cpp:1050-1081); Source clamps and calls back
+// only on a change (convar.cpp:794-798, 843-853), we refuse and notify every accepted set, as MTA
+// (CMainConfig.cpp:1485-1486).
 
 #include "coop/config/config.h"
 
@@ -33,7 +35,8 @@ namespace {
 
 using Row = config_registry::Row;
 
-// Held by SetValueAt across its put and its ini write, so two sets cannot interleave them.
+// Held by SetValueAt across its put and its ini write, so two sets cannot interleave them, and by
+// the keep-line across its rewrite and its drop (SetMutex).
 std::mutex g_setMutex;
 // The layer map, the subscriber list and the notifier pointer.
 std::mutex g_layerMutex;
@@ -55,7 +58,10 @@ struct NotifyScope {
 };
 
 void AddSubscriber(const Row* row, void (*onChange)()) {
-    if (!row) return;
+    if (!row) {
+        UE_LOGE("config: Subscribe REFUSED -- row is null");
+        return;
+    }
     if (!onChange) {
         UE_LOGE("config: Subscribe %s REFUSED -- onChange is null", row->key);
         return;
@@ -69,6 +75,8 @@ void AddSubscriber(const Row* row, void (*onChange)()) {
 }  // namespace
 
 namespace internal {
+
+std::mutex& SetMutex() { return g_setMutex; }
 
 bool RuntimeLayerGet(const Row* row, std::string& raw) {
     std::lock_guard<std::mutex> lk(g_layerMutex);

@@ -102,6 +102,14 @@ void NotifySubscribers(const config_registry::Row* row);
 // Deliver a change of `row` to its subscribers: through the notifier when one is set, else on the
 // calling thread; nothing when the row has none.
 void PostNotify(const config_registry::Row* row);
+// The lock that makes a change of the runtime layer and its ini write one step: SetValueAt and the
+// keep-line hold it. Taken before IniMutex, never after; never held across a notification.
+std::mutex& SetMutex();
+// The keep-line whole: the dedup of `key` in the ini at `path`, then, on success, the row dropped
+// from the runtime layer and its subscribers told. The public RemoveDuplicateKeyLines passes
+// LiveIniPath(); the selftest a scratch file.
+bool RemoveDuplicateKeyLinesLayered(const std::wstring& path, const char* key,
+                                    const char* keepValue);
 // SetValue's whole body, with the ini to write as a parameter: SetValue passes LiveIniPath(), the
 // selftest a scratch file.
 SetResult SetValueAt(const std::wstring& iniPath, const config_registry::Row* row,

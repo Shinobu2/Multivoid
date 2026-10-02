@@ -38,20 +38,22 @@ bool EnsureIniSkeleton();
 // edited in place with the canonical spelling; duplicates are left alone, other bytes stay as
 // they are, and the rewritten line's inline comment is deleted. Best-effort: a read-only
 // directory means the value is not remembered, logged and false; true means the atomic swap
-// landed. The value is refused by ValueValidForKey exactly as the reader would refuse it. The
+// landed. Any value is accepted (ValueValidForKey is true for identity rows). The
 // string-keyed machinery below (reformat, keep-line, skeleton, selftests) operates on keys
 // discovered in the file.
 bool WriteIniValue(const config_registry::IdentityRow& row, const char* value);
 
 // What SetValue did. Refused: the value is one the reader would refuse, or the call came from
-// inside a subscriber; nothing changed. HeldNotSaved: in force for this run, but the ini could not be written. Saved: in force and
-// written.
+// inside a subscriber; nothing changed. HeldNotSaved: held for this run, but the ini could not be
+// written. Saved: held and written.
 enum class SetResult : unsigned char { Refused, HeldNotSaved, Saved };
 
 // Set a row's value while the game runs. The value is normalised as the ini writer normalises it
 // (line breaks removed, edges trimmed), refused if the reader would refuse it, held in the
 // runtime layer (which every Resolve reads above the environment), written to multivoid.ini,
-// logged, and announced to the row's subscribers. Any thread; two sets are serialised.
+// logged, and announced to the row's subscribers. Held means every later Resolve returns it; a
+// reader that latched the row at its first use keeps what it latched until the next launch. Any
+// thread; two sets are serialised.
 SetResult SetValue(const config_registry::FlagRow& row, const char* value);
 SetResult SetValue(const config_registry::IntRow& row, const char* value);
 SetResult SetValue(const config_registry::FloatRow& row, const char* value);
@@ -61,8 +63,10 @@ SetResult SetValue(const config_registry::StringRow& row, const char* value);
 // Call `onChange` after each SetValue of `row` that was not Refused; it re-resolves what it
 // needs. It runs through the notifier (below): on the game thread in the game. Registering the
 // same (row, function) pair again is a no-op. Any thread. Subscribe before the first read of the
-// row; a set in between is then delivered. A subscriber never calls SetValue (such a call is
-// refused).
+// row; a set in between is then delivered. A subscriber never sets a row: a SetValue made
+// synchronously on its own stack is refused, but a set it defers (game_thread::Post) or hands to
+// another thread is not, and loops inside one drain, so a subscriber never posts or hands off a
+// set either.
 void Subscribe(const config_registry::FlagRow& row, void (*onChange)());
 void Subscribe(const config_registry::IntRow& row, void (*onChange)());
 void Subscribe(const config_registry::FloatRow& row, void (*onChange)());
@@ -113,8 +117,8 @@ FailClosedRead ResolveFailClosed(const config_registry::FailClosedEnumRow& row, 
 // then the ini value, then the row default; no validation.
 std::string ResolveString(const config_registry::StringRow& row);
 
-// The net Config from the runtime layer, env and ini; `enabled` is true iff a host or client role is configured,
-// otherwise hands-on play stays single-machine.
+// The net Config from the runtime layer, env and ini; `enabled` is true iff a host or client role
+// is configured, otherwise hands-on play stays single-machine.
 coop::net::Config ReadNetConfig(bool& enabled);
 
 // The display nickname: a value set while the game runs (the runtime layer), then the environment
@@ -234,6 +238,9 @@ struct IniSelftestRead {
     std::string value;
 };
 IniSelftestRead SelftestReadValue(const std::wstring& path, const char* key);
+// The live ini's stored value of `key`, read from the file under the ini lock, never from the
+// runtime layer or the environment: for a drill that asserts what the NEXT launch will read.
+IniSelftestRead SelftestReadLiveValue(const char* key);
 int SelftestFlagTriState(const std::wstring& path, const char* key);
 // The typed-resolver twins: the ini and default halves of the layered resolve over `path`, the
 // same per-kind validate and default cores as the live Resolve functions, with no env layer.

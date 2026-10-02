@@ -43,6 +43,19 @@ IniSelftestRead SelftestReadValue(const std::wstring& path, const char* key) {
     return r;
 }
 
+IniSelftestRead SelftestReadLiveValue(const char* key) {
+    IniScan st = IniScan::Ok;
+    IniFault fault = IniFault::None;
+    IniSelftestRead r;
+    const std::string sentinel = "\x01<absent>";
+    r.value = internal::ReadLiveIniValue(key, sentinel.c_str(), &st, &fault);
+    r.found = (r.value != sentinel);
+    if (!r.found) r.value.clear();
+    r.scan = static_cast<int>(st);
+    r.fault = fault;
+    return r;
+}
+
 int SelftestFlagTriState(const std::wstring& path, const char* key) {
     return internal::LookupTriStateAtPath(path, key);
 }
@@ -117,7 +130,9 @@ FailClosedRead SelftestResolveFailClosedAt(const std::wstring& path,
 namespace {
 
 // The probe row's subscriber: counts its calls and records whether it ran on the thread the
-// notifications are meant for.
+// notifications are meant for. Both subscribers below stay registered on the probe row after the
+// run (the layer has no unsubscribe), so a later keep-line on that key prints a stray REFUSED
+// ERROR from the second one.
 std::atomic<int> g_subscriberCalls{0};
 std::atomic<bool> g_subscriberOnNotifyThread{false};
 bool (*g_onNotifyThread)() = nullptr;
@@ -152,7 +167,7 @@ int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)()) {
     };
 
     // The environment twin is cleared so check 0 sees the row's default whatever the launch pinned,
-    // and restored after check 7.
+    // and restored after check 8.
     char old[256] = {};
     const DWORD oldLen = ::GetEnvironmentVariableA(kEnv, old, sizeof(old));
     ::SetEnvironmentVariableA(kEnv, nullptr);
@@ -214,6 +229,23 @@ int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)()) {
     // 7: with the layer entry dropped, the environment answers again.
     internal::RuntimeLayerDrop(P.row);
     expect("drop -> env answers", ResolveInt(P) == 3);
+    // 8: the keep-line over a scratch file with two copies of the key drops the layer entry and
+    // tells the subscribers again (check 6's function: the counter reaches 2).
+    {
+        FILE* f = nullptr;
+        if (_wfopen_s(&f, scratch.c_str(), L"w") == 0 && f) {
+            std::fputs("selftest_runtime_probe=1\nselftest_runtime_probe=2\n", f);
+            std::fclose(f);
+        }
+        internal::RuntimeLayerPut(P.row, "4");
+        const bool kept = internal::RemoveDuplicateKeyLinesLayered(
+            scratch, P.row->key, "2");
+        std::string raw;
+        const bool stillHeld = internal::RuntimeLayerGet(P.row, raw);
+        drain();
+        expect("keep-line drops the layer",
+               kept && !stillHeld && g_subscriberCalls.load() == 2);
+    }
 
     ::SetEnvironmentVariableA(kEnv, (oldLen > 0 && oldLen < sizeof(old)) ? old : nullptr);
     ::DeleteFileW(scratch.c_str());

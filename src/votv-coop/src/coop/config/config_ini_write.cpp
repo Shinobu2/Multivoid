@@ -343,21 +343,34 @@ static bool RemoveDuplicateKeyLinesAt(const std::wstring& path, const char* key,
     return true;
 }
 
-bool RemoveDuplicateKeyLines(const char* key, const char* keepValue) {
+namespace internal {
+// The player repaired the STORED value, so the disk answers again (the environment above it, as
+// at boot): a value set this run would otherwise shadow the kept line until relaunch. Not a
+// live set, so it does not go through SetValueAt. The rewrite and the drop sit under the set lock,
+// so a set cannot land between them; the notification runs after both locks are released: a
+// subscriber re-resolves.
+bool RemoveDuplicateKeyLinesLayered(const std::wstring& path, const char* key,
+                                    const char* keepValue) {
     bool ok = false;
+    const config_registry::Row* row = nullptr;
     {
-        std::lock_guard<std::mutex> lk(internal::IniMutex());
-        ok = RemoveDuplicateKeyLinesAt(internal::LiveIniPath(), key, keepValue);
+        std::lock_guard<std::mutex> setLock(SetMutex());
+        {
+            std::lock_guard<std::mutex> iniLock(IniMutex());
+            ok = RemoveDuplicateKeyLinesAt(path, key, keepValue);
+        }
+        if (ok) {
+            row = config_registry::FindRow(key);
+            if (row) RuntimeLayerDrop(row);
+        }
     }
-    if (!ok) return false;
-    // The player repaired the STORED value, so the disk answers again (the environment above it, as
-    // at boot): a value set this run would otherwise shadow the kept line until relaunch. Not a
-    // live set, so it does not go through SetValueAt. Outside the ini lock: a subscriber re-resolves.
-    if (const config_registry::Row* row = config_registry::FindRow(key)) {
-        internal::RuntimeLayerDrop(row);
-        internal::PostNotify(row);
-    }
-    return true;
+    if (ok && row) PostNotify(row);
+    return ok;
+}
+}  // namespace internal
+
+bool RemoveDuplicateKeyLines(const char* key, const char* keepValue) {
+    return internal::RemoveDuplicateKeyLinesLayered(internal::LiveIniPath(), key, keepValue);
 }
 
 bool SelftestRemoveDuplicates(const std::wstring& path, const char* key, const char* keepValue) {
