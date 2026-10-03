@@ -298,7 +298,7 @@ void OnReply(const coop::net::CommandReplyPayload& p) {
     bool readable = p.len <= sizeof(p.text) && coop::text::FromUtf8Strict(p.text, p.len, &wide);
     // MTA's client strips control codes from every echo it shows
     // (reference/mtasa-blue/Client/mods/deathmatch/logic/CPacketHandler.cpp:1443), as our chat receiver
-    // does (coop/comms/chat_sync.cpp:318).
+    // does (coop/comms/chat_sync.cpp:338).
     std::string line;
     if (readable) {
         line = coop::text::SanitizeUtf8(p.text, p.len);

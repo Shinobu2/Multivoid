@@ -142,10 +142,31 @@ void SendLine(coop::net::Session& s, int toSlot, uint32_t lineSeq, uint16_t spea
     s.SendReliableToSlot(toSlot, coop::net::ReliableKind::ChatLine, &lp, sizeof(lp));
 }
 
-// Host: commit `text` as spoken by `slot`, broadcast it, and render it locally.
-void AuthorAndBroadcast(uint8_t slot, const std::string& text) {
+// Host: commit `raw` as spoken by `slot`, broadcast it, and render it locally.
+//
+// THE ONE GATE for the lobby's record: the host's own line (QueueSend) and a client's (OnReliable)
+// both arrive here raw, and nothing is committed that did not pass the same steps, in this order.
+// Decode strictly (SanitizeUtf8 requires well-formed input: dropping a byte from an ill-formed run
+// can splice its neighbours into a separator), SANITIZE, then TRIM and cap. Trim comes after
+// sanitize so a space between two dropped separators is edge whitespace and not text; trimmed
+// first, it would survive as a one-space row every peer and later joiner renders. A line empty
+// after both is refused here: no row, no lineSeq, no broadcast.
+void AuthorAndBroadcast(uint8_t slot, const std::string& raw) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->running()) return;
+
+    std::wstring decoded;
+    if (!coop::text::FromUtf8Strict(raw.data(), raw.size(), &decoded)) {
+        UE_LOGW("chat: refused a line from slot %u (%zu byte(s)) -- ill-formed UTF-8",
+                static_cast<unsigned>(slot), raw.size());
+        return;
+    }
+    const std::string text = TrimAndCap(coop::text::SanitizeUtf8(raw.data(), raw.size()));
+    if (text.empty()) {
+        UE_LOGI("chat: refused a line from slot %u (%zu byte(s)) -- nothing left after "
+                "sanitising and trimming", static_cast<unsigned>(slot), raw.size());
+        return;
+    }
 
     // The nick is resolved once, here, and travels with the row forever: resolving at render time
     // on each peer answers who is in that slot now, and slots recycle, so a resident and a joiner
@@ -186,20 +207,22 @@ bool SessionActive() {
 }
 
 void QueueSend(const std::string& utf8Text) {
-    const std::string text = TrimAndCap(utf8Text);
-    if (text.empty()) return;
     // Hop to the game thread: the send, the record and the feed are all game-thread paths, and
     // the input bar submits on the render thread.
-    GT::Post([text] {
+    GT::Post([utf8Text] {
         auto* s = g_session.load(std::memory_order_acquire);
         if (!s || !s->running()) return;  // session died between type + send
         if (s->role() == coop::net::Role::Host) {
             // The host is the authority and commits its own line immediately: a host alone in its
             // lobby has nobody to send to, and the line still belongs in the record so the next
-            // joiner is seeded with it.
-            AuthorAndBroadcast(0, text);
+            // joiner is seeded with it. The line goes in raw; the commit point shapes it.
+            AuthorAndBroadcast(0, utf8Text);
             return;
         }
+        // The client shapes only what it puts on the wire: an empty intent is not sent and the
+        // payload holds a bounded number of bytes. What the lobby records is the host's gate's.
+        const std::string text = TrimAndCap(utf8Text);
+        if (text.empty()) return;
         // A client sends an intent and waits for the host's authored row. No local echo: the row it
         // will receive is the one with a position in the order, and a second copy now would need
         // reconciling later.
@@ -249,10 +272,7 @@ void OnReliable(const coop::net::ChatMessagePayload& payload, uint8_t senderPeer
                 static_cast<unsigned>(n));
         return;
     }
-    // A line of only dropped characters has no text, as an empty line is not sent.
-    const std::string clean = coop::text::SanitizeUtf8(payload.text, n);
-    if (clean.empty()) return;
-    AuthorAndBroadcast(senderPeerSlot, clean);
+    AuthorAndBroadcast(senderPeerSlot, std::string(payload.text, n));
 }
 
 void OnChatSpeaker(const coop::net::ChatSpeakerPayload& payload) {
