@@ -659,6 +659,9 @@ set(VOTVCOOP_SOURCES
     src/coop/commands/command_registry.cpp
     src/coop/commands/command_dispatcher.cpp
     src/coop/commands/commands_selftest.cpp
+    src/coop/permissions/context_set.cpp
+    src/coop/permissions/permissions_selftest.cpp
+    src/coop/permissions/permissions_cases_context.cpp
     src/harness/harness.cpp
     src/harness/session_runtime.cpp
     src/harness/join_leave.cpp

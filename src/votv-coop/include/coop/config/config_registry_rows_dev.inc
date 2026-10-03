@@ -670,3 +670,5 @@ CFG_FLAG(init_seam_probe, "init_seam_probe", "dev", false, "VOTVCOOP_INIT_SEAM_P
     "Probe: a script-gate watch on every Init body of a keyed prop, counted by the body's owning "
     "class, its caller, whether it runs inside another Init of the same object and whether the key "
     "is still unset; logged every 30 s and at each world change. Holds the gate; read-only.")
+CFG_FLAG(selftest_break_permissions, "selftest_break_permissions", "dev", false, "VOTVCOOP_SELFTEST_BREAK_PERMISSIONS",
+    "Red arm of the permissions selftest: its first case expects the opposite answer, so it must fail.")

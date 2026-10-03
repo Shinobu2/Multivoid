@@ -31,6 +31,7 @@
 #include "coop/net/peer_admission.h"
 #include "coop/net/peer_identity.h"
 #include "coop/net/stream_slot.h"
+#include "coop/permissions/permissions_selftest.h"
 #include "coop/player/movement_ledger.h"
 #include "coop/player/players_registry.h"
 #include "coop/player/puppet_drive.h"
@@ -207,6 +208,9 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // the test: one password under two host keys must not collide, an empty password must refuse to
     // derive, a tag must not verify against another nonce.
     coop::net::lobby_password::RunSelftest();
+    // And the permission model: a resolution that answers wrong reads as working until a player is
+    // refused or let in.
+    coop::permissions::RunSelftest();
     // And the container arbitration's own arithmetic: the base that is refused, the host change in
     // flight, and the sequence a third peer walks into -- which no two-peer run can reach, because
     // the peer that is judged against a stale baseline is the one that learned the world from a

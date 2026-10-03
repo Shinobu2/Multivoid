@@ -1019,7 +1019,7 @@ SOFTWARE.
 
 ## LuckPerms (ported algorithms)
 
-No LuckPerms code is linked; the command tokenizer's algorithm (a quote opens a word only at its start, runs to the next quote, and an unclosed one runs to the end) was PORTED from LuckPerms into `src/votv-coop/src/coop/commands/command_line.cpp` with per-site attribution comments, and that portion carries the upstream MIT notice. Upstream: https://github.com/LuckPerms/LuckPerms. Source of this text: that repository's `LICENSE.txt` at commit `25f223317a9ec2b6e73369126b630eca07d79506`, read from a local clone at `reference/LuckPerms/` (`reference/README.md` has the clone command; the tree itself is not carried by this repository).
+No LuckPerms code is linked; the permission model's algorithms (contexts, the node store, inheritance, the resolution chain) and the command tokenizer's algorithm (a quote opens a word only at its start, runs to the next quote, and an unclosed one runs to the end) were PORTED from LuckPerms into `src/votv-coop/src/coop/permissions/` and `src/votv-coop/src/coop/commands/command_line.cpp` with per-site attribution comments, and those portions carry the upstream MIT notice. Upstream: https://github.com/LuckPerms/LuckPerms. Source of this text: that repository's `LICENSE.txt` at commit `25f223317a9ec2b6e73369126b630eca07d79506`, read from a local clone at `reference/LuckPerms/` (`reference/README.md` has the clone command; the tree itself is not carried by this repository).
 
 ```text
 MIT License
