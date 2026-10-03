@@ -46,8 +46,8 @@ bool WriteIniValue(const config_registry::IdentityRow& row, const char* value);
 
 // What SetValue did. Refused: the value is one the reader would refuse, the call came from
 // inside a subscriber, or a replicated row's value is longer than the wire carries
-// (kServerSettingTextMax bytes); nothing changed. HeldNotSaved: held for this run, but the ini could not be
-// written. Saved: held and written.
+// (kServerSettingTextMax bytes); nothing changed. HeldNotSaved: held for this run, but the ini
+// could not be written. Saved: held and written.
 enum class SetResult : unsigned char { Refused, HeldNotSaved, Saved };
 
 // Set a row's value while the game runs. The value is normalised as the ini writer normalises it
@@ -55,8 +55,9 @@ enum class SetResult : unsigned char { Refused, HeldNotSaved, Saved };
 // if the reader would refuse it, held in the runtime layer (which every Resolve reads above the
 // environment), written to multivoid.ini, logged, and announced to the row's subscribers. Held
 // means every later Resolve returns it (a server-scope row on a client in a session excepted: the
-// session's value answers); a reader that latched the row at its first use keeps what it latched
-// until the next launch. Any thread; two sets are serialised.
+// session's value answers once the host's value has arrived); a reader that latched the row at
+// its first use keeps what it latched until the next launch. Any thread; two sets are
+// serialised.
 // A server-scope row (config_registry::IsServerScope): on the host in a session the value also
 // goes into the session layer, inside the setter and before its one notification, so the session
 // sees it; on a client in a session the set changes the install's own hosting default and nothing
@@ -115,7 +116,9 @@ void SetNotifier(void (*post)(std::function<void()> task));
 // row's value is read from the layers below the session (the runtime layer, the environment twin,
 // the ini, the default), sanitised (a value the reader would refuse, or too long for a replicated
 // row, becomes the row's default), held, logged `config: SESSION <key>=<v> (host start)` and
-// announced. On a client the layer stays empty until the host's rows arrive. Any thread.
+// announced; a stale row the new layer does not hold again is announced too, so its subscribers
+// resolve the layer below. On a client the layer stays empty until the host's rows arrive. Any
+// thread.
 void SessionLayerBegin(bool host);
 // A server-scope row's session value from the wire (a length-carried value: the wire's bytes are
 // not NUL-terminated): validated as the reader validates, held, logged `(from the host)` and
