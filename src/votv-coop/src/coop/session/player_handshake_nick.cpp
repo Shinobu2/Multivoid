@@ -100,18 +100,23 @@ bool RunNicknameSanitizerSelftest() {
         UE_LOGE("nick_sanitizer selftest FAIL: %s", what);
     };
 
-    struct Case { const wchar_t* in; const wchar_t* want; const char* what; };
+    struct Case { const wchar_t* in; const wchar_t* want; const char* what; const char* idem; };
     const Case cases[] = {
-        {L"- a", L"a", "a dash then a space leaves no leading space"},
-        {L"-\u0301a", L"a", "a dash then a mark leaves no leading mark"},
-        {L"- - a", L"a", "repeated dash-space prefixes all go"},
-        {L"-\u0301-\u0301a", L"a", "repeated dash-mark prefixes all go"},
-        {L"--", L"Player", "a name of dashes is the default"},
+        {L"- a", L"a", "a dash then a space leaves no leading space",
+         "idempotent after a dash then a space"},
+        {L"-\u0301a", L"a", "a dash then a mark leaves no leading mark",
+         "idempotent after a dash then a mark"},
+        {L"- - a", L"a", "repeated dash-space prefixes all go",
+         "idempotent after repeated dash-space prefixes"},
+        {L"-\u0301-\u0301a", L"a", "repeated dash-mark prefixes all go",
+         "idempotent after repeated dash-mark prefixes"},
+        {L"--", L"Player", "a name of dashes is the default",
+         "idempotent on the default name"},
     };
     for (const Case& c : cases) {
         const std::wstring once = SanitizeNickname(c.in);
         check(once == c.want, c.what);
-        check(SanitizeNickname(once) == once, "the sanitizer is idempotent");
+        check(SanitizeNickname(once) == once, c.idem);
     }
 
     if (pass == total) {

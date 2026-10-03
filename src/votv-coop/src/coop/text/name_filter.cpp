@@ -14,9 +14,6 @@ bool IsDeniedInName(uint32_t cp) {
 }
 
 std::wstring FilterNameChars(const std::wstring& raw) {
-    // No hand-written mark range here: five scripts' marks draw now, and a range beside the
-    // generated table would be a second owner of one fact, silently policing Latin diacritics
-    // alone.
     std::wstring out;
     out.reserve(raw.size());
     bool lastWasSpace = true;  // primes the leading-space trim
@@ -34,6 +31,9 @@ std::wstring FilterNameChars(const std::wstring& raw) {
         }
         // A combining mark with nothing to combine with stacks onto whatever the UI drew before the
         // name. Only at position 0: a mark in the middle is legitimate text in five scripts.
+        // No hand-written mark range here: five scripts' marks draw now, and a range beside the
+        // generated table would be a second owner of one fact, silently policing Latin diacritics
+        // alone.
         if (out.empty() && IsCombiningMark(c)) continue;
         out.append(at, units);
         lastWasSpace = false;
@@ -68,9 +68,6 @@ bool RunNameFilterSelftest() {
     check(FilterNameChars(L"a\U0001F600b") == L"a\U0001F600b",
           "an astral character is kept whole");
 
-    // Nothing the atlas bakes may also be denied in a name: if a codepoint were in both, a name
-    // could contain a character that renders -- or one that does not -- depending on which check
-    // ran first.
     check(!AnyRepertoireCodepoint(&IsDeniedInName),
           "the repertoire and the name denylist do not overlap");
 
