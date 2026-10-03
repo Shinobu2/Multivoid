@@ -135,8 +135,9 @@ void BanOffline(const char* guid, const char* reason, bool byAddress) {
         if (!coop::ban_list::Add(guid.c_str(), e.nick, address.c_str(), reason.c_str())) return;
         UE_LOGI("moderation: offline-banned '%s' (id %.8s..., address %s)", e.nick, guid.c_str(),
                 address.empty() ? "not enforced" : address.c_str());
-        // A matching player still seated goes too, as MTA's AddBan disconnects a matching player
-        // (CStaticFunctionDefinitions.cpp:12063).
+        // A matching player still seated goes too. MTA's AddBan also kicks every seated player
+        // matching the ban's IP (CStaticFunctionDefinitions.cpp:12157-12170); ours kicks the banned
+        // id only and refuses others at that address at their next proof.
         for (int k = 1; k < static_cast<int>(coop::players::kMaxPeers); ++k) {
             const uint32_t gen = s->peerGenerationForSlot(k);
             if (gen != 0 && s->ProvedGuidForSlotWithToken(k, gen) == guid)

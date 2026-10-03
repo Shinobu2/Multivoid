@@ -2,17 +2,17 @@
 //
 // The host's interactive scoreboard (ui::scoreboard) calls these when the host clicks a player
 // row, and this module is the single entry point for the three actions: KICK and BAN are always
-// available to the host, TELEPORT-TO-ME is the dev-gated one -- the scoreboard shows it only
-// when [dev] devkeys is on, and this module does not re-check the flag, it performs the
-// teleport.
+// available to the host, TELEPORT-TO-ME is dev-gated: the scoreboard shows it only when [dev]
+// devkeys is on, and this module does not re-check the flag, it performs the teleport.
 //
 // All three are HOST-only and self-gate on Session::Role::Host: defence in depth, because a
 // destructive kick or ban must never run off a client even if a future caller misuses it. Each
 // action marshals onto the game thread, so the scoreboard's render-thread click does no net or
 // disk work inline and the game-thread-asserted nick lookup is legal.
 //
-// Principle 7: policy orchestration over a policy-free net layer, which learns about bans only
-// through the injected Session::SetBanCheck predicate (asked at the proof), never by calling us.
+// Ban keys: the PROVED player id and an enforceable address (when one was stored: a direct path,
+// never loopback or a relay), both checked at the identity proof through the injected
+// Session::SetBanCheck. Principle 7: policy over a policy-free net layer, which never calls us.
 
 #pragma once
 
@@ -76,10 +76,13 @@ void KickPlayer(const PlayerToken& token);
 // Permanently ban the captured player by the id their identity proof established and, when
 // `byAddress` is set and the host saw their own address on a direct path, that address too; then
 // kick them -- MTA's order in CStaticFunctionDefinitions::BanPlayer, whose KickPlayer/BanPlayer
-// pair this module mirrors. Host-only. The ban survives host restarts (coop::ban_list persists to
-// disk) and is checked at the identity proof of every future join; `reason` is stored on the
-// record and rides the banned player's close (null/empty is fine). Safe to call from the render
-// thread. The id and the address are read BEFORE the kick because the kick clears the slot.
+// pair this module mirrors. Divergence: MTA's BanPlayer/AddBan also kick every seated player
+// matching the ban's IP (reference/mtasa-blue/Server/mods/deathmatch/logic/
+// CStaticFunctionDefinitions.cpp:11998-12001, :12157-12170); ours kicks the banned id only and
+// refuses others at that address at their next proof. Host-only. The ban survives host restarts
+// and is checked at the identity proof of every future join; `reason` is stored on the record and
+// rides the banned player's close (null/empty is fine). Safe to call from the render thread. The
+// id and the address are read BEFORE the kick because the kick clears the slot.
 //
 // ABORTS -- writing no ban and kicking nobody -- if the slot no longer holds the captured player,
 // or their identity proof has not landed. This is the whole point of the token: a permanent ban
@@ -90,7 +93,8 @@ void BanPlayer(const PlayerToken& token, const char* reason, bool byAddress);
 // Permanently ban an OFFLINE player by its seen-players GUID (the F1 Administration panel's
 // Offline-section ban). Resolves the player's nick and last enforceable address from
 // coop::seen_players (the address only when `byAddress`); warns and does nothing for an unknown
-// GUID. A matching player still seated is kicked, as MTA's AddBan disconnects a matching player.
+// GUID. A matching player still seated is kicked (by id only; see the BanPlayer note on MTA's
+// wider IP kick).
 // Host-only. Safe to call from the render thread.
 void BanOffline(const char* guid, const char* reason, bool byAddress);
 

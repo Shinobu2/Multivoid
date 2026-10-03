@@ -263,8 +263,8 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
         // Snapshot the canonical save before coop injects state (host only; clients are
         // save-blocked); synchronous, so it completes before Start.
         coop::save_guard::BackupSaveOnSessionStart();
-        // The seen-players registry, host bookkeeping on any topology (on P2P the address stays
-        // empty).
+        // The seen-players registry, host bookkeeping on any topology (on a relayed or unknown
+        // path the address stays empty).
         coop::seen_players::Load();
         // The ban list, on every topology: read from the hosted server's folder, and asked at the
         // identity proof, which both transports pass.

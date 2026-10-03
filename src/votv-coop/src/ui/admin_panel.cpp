@@ -14,6 +14,8 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <string_view>
+#include <unordered_set>
 #include <vector>
 
 namespace ui::admin_panel {
@@ -27,6 +29,9 @@ using ui::scale::S;
 double                                    g_lastRefresh = -1.0;
 std::vector<coop::seen_players::Entry>    g_seen;
 std::vector<coop::ban_list::Entry>        g_bans;
+// The ids in g_bans, rebuilt with it so a row asks "already banned?" with one lookup. The views
+// point into g_bans and live exactly as long as that snapshot.
+std::unordered_set<std::string_view>      g_banIds;
 
 // Pending ban confirmation (render-thread only). Exactly one of slot / guid is
 // set: slot >= 1 = an ONLINE peer ban, guid[0] != 0 = an OFFLINE record ban.
@@ -50,6 +55,8 @@ void RefreshSnapshots() {
     g_lastRefresh = now;
     coop::seen_players::GetSnapshot(g_seen);
     coop::ban_list::GetSnapshot(g_bans);
+    g_banIds.clear();
+    for (const auto& b : g_bans) g_banIds.insert(std::string_view(b.id));
 }
 
 void FormatUnix(long long unixTime, char* out, size_t outLen) {
@@ -151,11 +158,7 @@ void RenderOfflineSection() {
             FormatUnix(e.lastSeenUnix, when, sizeof(when));
             ImGui::TextDisabled("%s", when);
             ImGui::TableSetColumnIndex(2);
-            const bool alreadyBanned = [&] {
-                for (const auto& b : g_bans)
-                    if (std::strcmp(b.id, e.guid) == 0) return true;
-                return false;
-            }();
+            const bool alreadyBanned = g_banIds.count(std::string_view(e.guid)) != 0;
             if (alreadyBanned) {
                 ImGui::TextDisabled("banned");
             } else {

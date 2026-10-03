@@ -145,7 +145,7 @@ void EndSession() {
     coop::dev::desk_crossing_drill::OnDisconnect();  // [dev] the legs start over, a held host step let go
     coop::dev::desk_ping_drill::OnDisconnect();  // [dev] the legs start over
     coop::dev::command_drill::OnDisconnect();  // [dev] the phases start over, the reply observer cleared
-    coop::dev::ban_drill::OnSessionEnd();  // [dev] only the wait for its client resets; a ban made stands
+    coop::dev::ban_drill::OnSessionEnd();  // [dev] empty by design: its one state, the step, stands
     coop::dev::order_selftest::OnDisconnect();  // [dev] a rejoin's peers run their legs again
     coop::dev::meadow_selftest::OnDisconnect();  // [dev] a rejoin's peers run their legs again
     coop::dev::lid_drill::OnDisconnect();  // [dev] the PC and the legs belong to one world
