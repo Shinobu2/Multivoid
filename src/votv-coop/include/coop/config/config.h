@@ -49,11 +49,11 @@ bool WriteIniValue(const config_registry::IdentityRow& row, const char* value);
 enum class SetResult : unsigned char { Refused, HeldNotSaved, Saved };
 
 // Set a row's value while the game runs. The value is normalised as the ini writer normalises it
-// (line breaks removed, edges trimmed), refused if the reader would refuse it, held in the
-// runtime layer (which every Resolve reads above the environment), written to multivoid.ini,
-// logged, and announced to the row's subscribers. Held means every later Resolve returns it; a
-// reader that latched the row at its first use keeps what it latched until the next launch. Any
-// thread; two sets are serialised.
+// (line breaks removed, edges trimmed unless the row is a String row, which keeps them), refused
+// if the reader would refuse it, held in the runtime layer (which every Resolve reads above the
+// environment), written to multivoid.ini, logged, and announced to the row's subscribers. Held
+// means every later Resolve returns it; a reader that latched the row at its first use keeps what
+// it latched until the next launch. Any thread; two sets are serialised.
 SetResult SetValue(const config_registry::FlagRow& row, const char* value);
 SetResult SetValue(const config_registry::IntRow& row, const char* value);
 SetResult SetValue(const config_registry::FloatRow& row, const char* value);
@@ -277,5 +277,8 @@ bool SelftestReformat(const std::wstring& path, ReformatStats& stats);
 // `onNotifyThread` says whether the caller is on the thread notifications run on. Returns the
 // failure count; each check logs one config-selftest line. Not on the game thread.
 int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)());
+// The quoted-value grammar's selftest on a scratch ini beside the exe: what the writer quotes, the
+// reader returns whole. Returns the failure count; each check logs one config-selftest line.
+int SelftestQuotedValues();
 
 }  // namespace coop::config

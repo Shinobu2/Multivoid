@@ -4,7 +4,8 @@
 // resolver twins, so the env-gated autotest (harness/autotest/autotest_config.cpp) can
 // run the REAL lexer over corpus ini files and prove the tri-state branches
 // and the arc-3 default/sentinel semantics. The runtime layer's selftest also lives here:
-// SelftestRuntimeLayer drives SetValue's own code against a scratch ini. Not for product use:
+// SelftestRuntimeLayer drives SetValue's own code against a scratch ini, and SelftestQuotedValues
+// the writer's quoting against the reader's. Not for product use:
 // product code reads only the module-dir ini via the public config.h API.
 //
 // Extracted from config.cpp (arc 3, soft-cap discipline -- the C5a twins
@@ -261,6 +262,101 @@ int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)()) {
     }
 
     ::SetEnvironmentVariableA(kEnv, (oldLen > 0 && oldLen < sizeof(old)) ? old : nullptr);
+    ::DeleteFileW(scratch.c_str());
+    ::DeleteFileW((scratch + L".new").c_str());
+    return fail;
+}
+
+int SelftestQuotedValues() {
+    namespace reg = config_registry;
+    const std::wstring scratch =
+        ue_wrap::paths::ExeDir() + L"\\multivoid.selftest-quoting.ini";
+    const char* const kNick = "net.nick";
+    // Read here and never in the product path: a read inside the writer would take the ini lock
+    // the writer already holds.
+    const bool breakQuoting = ResolveFlag(reg::rows::selftest_break_quoting);
+    int fail = 0;
+    auto expect = [&](const char* what, bool ok) {
+        if (ok) UE_LOGI("config-selftest: quoting %s ok", what);
+        else { UE_LOGW("config-selftest: FAIL quoting %s", what); ++fail; }
+    };
+    auto truncate = [&] {
+        FILE* f = nullptr;
+        if (_wfopen_s(&f, scratch.c_str(), L"w") == 0 && f) std::fclose(f);
+    };
+    auto putRaw = [&](const char* text) {
+        FILE* f = nullptr;
+        if (_wfopen_s(&f, scratch.c_str(), L"w") == 0 && f) {
+            std::fputs(text, f);
+            std::fclose(f);
+        }
+    };
+    // Whether the file holds `want` as a whole line, its newline (LF or CR LF) stripped.
+    auto holdsLine = [&](const char* want) {
+        std::vector<std::string> lines;
+        SelftestListLines(scratch, lines);
+        for (std::string& l : lines) {
+            while (!l.empty() && (l.back() == '\n' || l.back() == '\r')) l.pop_back();
+            if (l == want) return true;
+        }
+        return false;
+    };
+    // Writes `value` to `key` on a fresh file and says whether the writer took it.
+    auto writeFresh = [&](const char* key, const char* value) {
+        truncate();
+        return SelftestWriteValue(scratch, key, value);
+    };
+    truncate();
+
+    // 1 and 2: one write, read back whole and held quoted. The red knob puts the line there
+    // unquoted by hand, skipping the step under test, so the value reads back cut.
+    {
+        bool wrote = true;
+        if (breakQuoting) putRaw("net.nick=Bob ;)\n");
+        else wrote = SelftestWriteValue(scratch, kNick, "Bob ;)");
+        expect("round-trips a ;-value",
+               wrote && SelftestReadValue(scratch, kNick).value == "Bob ;)");
+        expect("the line is quoted", holdsLine("net.nick=\"Bob ;)\""));
+    }
+    // 3: a quote inside a quoted value is escaped.
+    {
+        const bool wrote = writeFresh(kNick, "say \"hi\" ; now");
+        expect("escapes a quote",
+               wrote && SelftestReadValue(scratch, kNick).value == "say \"hi\" ; now" &&
+                   holdsLine("net.nick=\"say \\\"hi\\\" ; now\""));
+    }
+    // 4: so is a backslash, which a closing quote must not be taken for.
+    {
+        const bool wrote = writeFresh(kNick, "a ;b\\");
+        expect("escapes a backslash",
+               wrote && SelftestReadValue(scratch, kNick).value == "a ;b\\" &&
+                   holdsLine("net.nick=\"a ;b\\\\\""));
+    }
+    // 5: a String row keeps its edge spaces, quoted.
+    {
+        const bool wrote = writeFresh(kNick, " pw ");
+        expect("keeps edge spaces",
+               wrote && SelftestReadValue(scratch, kNick).value == " pw " &&
+                   holdsLine("net.nick=\" pw \""));
+    }
+    // 6: a value the reader returns whole is written as it is.
+    {
+        const bool wrote = writeFresh(kNick, "Bob");
+        expect("a plain value stays plain", wrote && holdsLine("net.nick=Bob"));
+    }
+    // 7: a line written by hand with an inline comment still reads cut at it.
+    {
+        putRaw("net.nick=Legacy ; comment\n");
+        expect("a legacy comment still cuts", SelftestReadValue(scratch, kNick).value == "Legacy");
+    }
+    // 8: a typed row is trimmed and never quoted.
+    {
+        const bool wrote = writeFresh("selftest_runtime_probe", " 7 ");
+        expect("a typed row stays plain",
+               wrote && holdsLine("selftest_runtime_probe=7") &&
+                   SelftestReadValue(scratch, "selftest_runtime_probe").value == "7");
+    }
+
     ::DeleteFileW(scratch.c_str());
     ::DeleteFileW((scratch + L".new").c_str());
     return fail;

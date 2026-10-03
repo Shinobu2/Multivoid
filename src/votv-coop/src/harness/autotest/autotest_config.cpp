@@ -723,6 +723,7 @@ void RunConfigSelftest() {
     fail += cfg::SelftestRuntimeLayer(
         [] { ue_wrap::game_thread::RunAndWait([](std::atomic<int>& a) { a.store(1); }); },
         [] { return ue_wrap::game_thread::IsGameThread(); });
+    fail += cfg::SelftestQuotedValues();
     UE_LOGI("config-selftest: DONE fail=%d", fail);
 }
 
