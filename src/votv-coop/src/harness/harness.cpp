@@ -49,6 +49,7 @@
 #include "ui/console.h"
 #include "ui/server_browser.h"
 #include "ui/multiplayer_menu.h"
+#include "ui/net_stats_panel.h"
 #include "coop/dev/menu_proceed.h"
 #include "coop/dev/save_probe.h"
 #include "coop/dev/native_ui_probe.h"
@@ -519,6 +520,7 @@ void Start() {
     coop::nameplate::SubscribeRow();
     coop::nick_color::SubscribeRow();
     coop::peer_action_feed::SubscribeRow();
+    ui::net_stats_panel::SubscribeRow();
     if (!ui::imgui_overlay::Init()) {
         UE_LOGW("harness: imgui_overlay::Init failed -- F1 menu unavailable this run");
     }
