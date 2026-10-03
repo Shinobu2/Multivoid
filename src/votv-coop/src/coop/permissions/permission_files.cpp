@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iterator>
 #include <limits>
+#include <string>
 #include <system_error>
 #include <utility>
 
@@ -185,21 +186,38 @@ void ReadList(const Json& root, const char* field, const char* what, std::string
     }
 }
 
-// Every `.json` file of `dir`, as (lower-cased stem, path), sorted by stem. A missing directory
-// gives none; a listing that fails part-way adds a problem.
-std::vector<std::pair<std::string, fs::path>> ListHolders(const fs::path& dir, LoadReport& report) {
+bool IsNotFound(const std::error_code& ec) {
+    return ec == std::errc::no_such_file_or_directory || ec == std::errc::not_a_directory;
+}
+
+// Every `.json` file of `dir` (the folder named `label`), as (lower-cased stem, path), sorted by
+// stem. A missing directory gives none; a directory that cannot be read, a listing that fails
+// part-way, and a file whose name is not ASCII each add a problem.
+std::vector<std::pair<std::string, fs::path>> ListHolders(const fs::path& dir, const char* label,
+                                                          LoadReport& report) {
     std::vector<std::pair<std::string, fs::path>> out;
     std::error_code ec;
-    if (!fs::is_directory(dir, ec) || ec) return out;
+    const bool isDir = fs::is_directory(dir, ec);
+    if (ec) {
+        if (!IsNotFound(ec)) report.problems.push_back(std::string(label) + ": could not read the folder");
+        return out;
+    }
+    if (!isDir) return out;
     fs::directory_iterator it(dir, ec);
     for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
         std::error_code fileEc;
         if (!it->is_regular_file(fileEc) || fileEc) continue;
         const fs::path& p = it->path();
-        if (Lowered(p.extension().string()) != ".json") continue;
-        out.emplace_back(Lowered(p.stem().string()), p);
+        std::string ext;
+        if (!NarrowAscii(p.extension().wstring(), &ext) || Lowered(ext) != ".json") continue;
+        std::string stem;
+        if (!NarrowAscii(p.stem().wstring(), &stem)) {
+            report.problems.push_back(std::string(label) + ": a file whose name is not ASCII, skipped");
+            continue;
+        }
+        out.emplace_back(Lowered(stem), p);
     }
-    if (ec) report.problems.push_back(dir.filename().string() + ": could not list the folder");
+    if (ec) report.problems.push_back(std::string(label) + ": could not list the folder");
     std::sort(out.begin(), out.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
     return out;
 }
@@ -214,12 +232,23 @@ bool ReadFile(const fs::path& path, std::string* text) {
 void ReportRefusedNodes(const std::vector<size_t>& refused, const std::vector<Node>& nodes,
                         const std::string& stem, LoadReport& report) {
     for (size_t i : refused) {
-        report.problems.push_back(stem + ": permission entry " + std::to_string(i) + " refused (" +
-                                  nodes[i].key + ")");
+        report.problems.push_back(stem + ": key " + nodes[i].key + " refused");
     }
 }
 
 }  // namespace
+
+bool NarrowAscii(const std::wstring& name, std::string* out) {
+    out->clear();
+    for (const wchar_t c : name) {
+        if (c > 0x7F) {
+            out->clear();
+            return false;
+        }
+        out->push_back(static_cast<char>(c));
+    }
+    return true;
+}
 
 bool ParseHolderText(std::string_view text, std::string_view stem, std::string* primaryGroup,
                      std::vector<Node>* nodes, std::vector<std::string>* problems) {
@@ -246,10 +275,15 @@ bool ParseHolderText(std::string_view text, std::string_view stem, std::string* 
 LoadReport LoadStore(const fs::path& dir, Model& m) {
     LoadReport report;
     std::error_code ec;
-    if (!fs::exists(dir, ec) || ec) return report;
+    const bool exists = fs::exists(dir, ec);
+    if (ec) {
+        if (!IsNotFound(ec)) report.problems.push_back("permissions: could not read the folder");
+        return report;
+    }
+    if (!exists) return report;
 
     for (const bool groups : {true, false}) {
-        for (const auto& [stem, path] : ListHolders(dir / (groups ? "groups" : "users"), report)) {
+        for (const auto& [stem, path] : ListHolders(dir / (groups ? "groups" : "users"), groups ? "groups" : "users", report)) {
             if (groups ? !IsValidGroupName(stem) : !IsPlayerIdStem(stem)) {
                 report.problems.push_back(stem + (groups ? ": not a valid group name, file skipped"
                                                          : ": not a 32 hex player id, file skipped"));

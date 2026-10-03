@@ -173,6 +173,14 @@ void LoadCases(CheckSink& sink) {
                "load: the nodes around a refused one load");
 }
 
+void NameCases(CheckSink& sink) {
+    std::string out;
+    sink.Check(NarrowAscii(L"Mods.JSON", &out) && out == "Mods.JSON" && NarrowAscii(L"", &out) && out.empty(),
+               "name: an ASCII name narrows unchanged");
+    sink.Check(!NarrowAscii(L"мод", &out) && out.empty() && !NarrowAscii(L"a\u0080", &out),
+               "name: a name holding a unit above 0x7F is refused, never narrowed through the code page");
+}
+
 }  // namespace
 
 void RunFilesCases(CheckSink& sink) {
@@ -181,6 +189,7 @@ void RunFilesCases(CheckSink& sink) {
     RefusalCases(sink);
     ExplicitCases(sink);
     LoadCases(sink);
+    NameCases(sink);
 }
 
 }  // namespace coop::permissions

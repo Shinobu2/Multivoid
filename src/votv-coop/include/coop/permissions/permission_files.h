@@ -24,6 +24,11 @@ struct LoadReport {
     std::vector<std::string> problems;
 };
 
+// Narrows a file-name part to `*out` by a per-unit cast, never through the ANSI code page (a name
+// the code page cannot hold throws). False, `*out` cleared, when any unit is above 0x7F: the file
+// is then skipped with a problem. PURE.
+bool NarrowAscii(const std::wstring& name, std::string* out);
+
 // Parses one holder file's text. PURE. False when the text is not a JSON object (the problem is
 // appended), and an invalid UTF-8 byte anywhere refuses the file whole. On true, `primaryGroup` is
 // the stored `primaryGroup` (`default` when absent or not a string, the latter with a problem) and

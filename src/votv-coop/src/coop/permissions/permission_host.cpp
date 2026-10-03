@@ -5,6 +5,7 @@
 #include "coop/permissions/permission_files.h"
 #include "coop/permissions/resolution.h"
 
+#include "ue_wrap/core/hot_path_guard.h"
 #include "ue_wrap/core/log.h"
 
 #include <atomic>
@@ -58,9 +59,8 @@ int64_t NowSeconds() { return static_cast<int64_t>(::time(nullptr)); }
 
 void OnHostStart(const std::wstring& serverDir, std::string serverId) {
     auto fresh = std::make_unique<Published>();
-    if (!fresh->subject.Add("server", serverId) || !fresh->subject.Add("mode", "listen"))
-        UE_LOGW("permissions: the server id '%s' is not a context value; nodes scoped to a server will not apply",
-                serverId.c_str());
+    fresh->subject.Add("server", serverId);
+    fresh->subject.Add("mode", "listen");
     if (serverDir.empty()) {
         UE_LOGI("permissions: no server folder this session; only the defaults apply");
     } else {
@@ -77,6 +77,7 @@ void OnHostStart(const std::wstring& serverDir, std::string serverId) {
 }
 
 bool Allows(std::string_view playerId, std::string_view node, bool defaultGranted, bool owner) {
+    UE_ASSERT_GAME_THREAD("permission_host::Allows");
     Checker& checker = LiveChecker();
     const std::shared_ptr<const Resolved> r = checker.Get(playerId, g_subject, NowSeconds());
     switch (Evaluate(*r, node, owner).value) {
@@ -88,6 +89,7 @@ bool Allows(std::string_view playerId, std::string_view node, bool defaultGrante
 }
 
 bool HoldsExplicitly(std::string_view playerId, std::string_view node) {
+    UE_ASSERT_GAME_THREAD("permission_host::HoldsExplicitly");
     Checker& checker = LiveChecker();
     const std::shared_ptr<const Resolved> r = checker.Get(playerId, g_subject, NowSeconds());
     return IsSetExplicitly(*r, node);
