@@ -425,7 +425,8 @@ namespace internal {
 // at boot): a value set this run would otherwise shadow the kept line until relaunch. Not a
 // live set, so it does not go through SetValueAt. The rewrite and the drop sit under the set lock,
 // so a set cannot land between them; the notification runs after both locks are released: a
-// subscriber re-resolves.
+// subscriber re-resolves. On the host in a session the session layer keeps its value; the kept
+// line answers again once the session ends.
 bool RemoveDuplicateKeyLinesLayered(const std::wstring& path, const char* key,
                                     const char* keepValue) {
     bool ok = false;
