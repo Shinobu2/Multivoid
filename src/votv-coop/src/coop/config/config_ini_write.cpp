@@ -283,9 +283,10 @@ std::string NormalizeValue(const char* value, bool trimEdges) {
 
 // The writer's half of the quoted-value grammar (CookIniValue, config.cpp): quote exactly when
 // the reader could not return `safe` whole. Deliberate divergence: MTA's XML settings
-// (reference/mtasa-blue/Shared/XML/XML.cpp:22) and Source's KeyValues
-// (reference/source-sdk-2013/src/tier1/KeyValues.cpp:776) encode or quote every value; quoting
-// only when needed leaves a player's existing file unchanged.
+// (reference/mtasa-blue/vendor/tinyxml/tinyxml.cpp:1278-1283, EncodeString on every attribute
+// value) and Source's KeyValues (reference/source-sdk-2013/src/tier1/KeyValues.cpp:874-878,
+// quotes written around every value) encode or quote every value; quoting only when needed
+// leaves a player's existing file unchanged.
 std::string QuoteIniValueIfNeeded(const std::string& safe, bool stringRow) {
     if (!stringRow || safe.empty()) return safe;
     const auto isBlank = [](char c) { return c == ' ' || c == '\t'; };

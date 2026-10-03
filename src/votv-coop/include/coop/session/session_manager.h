@@ -109,9 +109,10 @@ struct SaveChoice {
 // on net.port on every interface, reached as-is on the same network or through a forwarded
 // port, and when unlisted nothing leaves the machine (IsMasterFree). There is no LAN-only
 // choice: an accept filter refusing non-private remotes did the router's job, and the password
-// and the admission challenge are the controls on every lane. `password` and `masterUrl` are what
-// the window showed, passed rather than re-read: the password row is written only while the lobby
-// is locked, and the announce, whose master is then the lobby's relay, must go where it said.
+// and the admission challenge are the controls on every lane. `password` is the secret the caller
+// holds (the native window its field, the fallback picker the stored row), dropped unless `locked`
+// and passed because a re-read is ini file I/O the net thread must not do. `masterUrl` is what the
+// window showed: the announce, whose master is then the lobby's relay, must go where it said.
 bool HostWithSave(const SaveChoice& choice, const std::string& name, bool locked,
                   const std::string& password, int playersMax, const std::string& masterUrl,
                   coop::session::HostMode mode = {});
