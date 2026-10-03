@@ -133,12 +133,13 @@ CFG_FLAG(event_drill, "event_drill", "dev", false, "VOTVCOOP_EVENT_DRILL",
     "snapshot carries it) and then through the scheduler itself (the clock set to day 2 00:18), then "
     "solar, arirGraff_0 and enasus by the dev fire; the client's DONE line counts the showers and the "
     "fires it replayed. MUTATES the world (the clock, the events), so it is armed per run.")
-CFG_ENUM(settings_drill, "settings_drill", "dev", "off", "off|nameplate|nickcolor|flags|scale|font|red", "VOTVCOOP_SETTINGS_DRILL",
+CFG_ENUM(settings_drill, "settings_drill", "dev", "off", "off|nameplate|nickcolor|flags|scale|font|voicemode|voicevolume|red", "VOTVCOOP_SETTINGS_DRILL",
     "Drill (host): once the client's world is up, the host sets the named row through SetValue, probes "
     "that its module followed, resets the row through ResetValue and probes again. nameplate: the "
     "nameplate row to hidden (the client logs both announces). nickcolor: the nick colour to the "
     "per-surface default. flags: the chat peer-actions flag off and the netstats flag on. "
     "scale: ui.scale to 1.50. font: the first font role's family. "
+    "voicemode: voice.mode to activation. voicevolume: voice.volume to 0.50. "
     "red: the nameplate step with its set skipped, so the probe's FAIL line prints.")
 CFG_ENUM(mannequin_drill, "mannequin_drill", "dev", "off", "off|spawn|red", "VOTVCOOP_MANNEQUIN_DRILL",
     "Drill (BOTH peers), the walking mannequin's baseline. spawn: once the client's join is over the host spawns one native walker (it opens doors, is saved with the world and returns angry after a load; it crosses to a client as a prop mirror with a brain of its own) and both peers log what they see of it once a second, the host for 20 samples. red: the same without the spawn call, so the sampler must report that no walker appeared: the drill's control.")

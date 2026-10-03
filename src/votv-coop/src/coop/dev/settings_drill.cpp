@@ -8,6 +8,7 @@
 #include "coop/net/session.h"
 #include "coop/player/nameplate.h"
 #include "coop/player/nick_color.h"
+#include "coop/voice/voice_chat.h"
 
 #include "ui/fonts.h"
 #include "ui/hud.h"
@@ -17,6 +18,7 @@
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 
+#include <cmath>
 #include <cstdint>
 #include <string>
 
@@ -26,7 +28,8 @@ namespace {
 constexpr int kSlot = 1;  // the pair's client
 
 // The step the row names, parsed once at the first Tick. Only Off, Nameplate, NickColor, Flags,
-// Scale, Font and Red are parsed from the row; the other enumerators are not produced yet.
+// Scale, Font, VoiceMode, VoiceVolume and Red are parsed from the row; the other enumerators are
+// not produced yet.
 enum class Token {
     Off, Nameplate, NickColor, Flags, Scale, Font, VoiceMode, VoiceVolume, Server, ServerJoin,
     ServerRed, Red
@@ -45,24 +48,35 @@ Token ParseToken(const std::string& mode) {
     if (mode == "flags")     return Token::Flags;
     if (mode == "scale")     return Token::Scale;
     if (mode == "font")      return Token::Font;
+    if (mode == "voicemode") return Token::VoiceMode;
+    if (mode == "voicevolume") return Token::VoiceVolume;
     if (mode == "red")       return Token::Red;
     return Token::Off;
 }
 
-// The render thread applies a scale or a font row at a later drawn frame, so these two tokens
-// wait on the module's own counter instead of a posted probe.
-bool IsCounterToken() { return g_token == Token::Scale || g_token == Token::Font; }
+// The render thread applies a scale or a font row at a later drawn frame, and the voice tick
+// reopens the devices for a mode row at a later game tick, so these three tokens wait on the
+// module's own counter instead of a posted probe.
+bool IsCounterToken() {
+    return g_token == Token::Scale || g_token == Token::Font || g_token == Token::VoiceMode;
+}
 
 uint32_t Counter() {
-    return g_token == Token::Scale ? ui::scale::RowApplies() : ui::fonts::RowsApplies();
+    if (g_token == Token::Scale) return ui::scale::RowApplies();
+    if (g_token == Token::Font) return ui::fonts::RowsApplies();
+    return coop::voice_chat::Reopens();
 }
+
+// The counter's name in the step's lines: a scale or font row is applied, a mode row reopens.
+const char* CounterName() { return g_token == Token::VoiceMode ? "reopens" : "applies"; }
 
 // The role's row: the first font role is ui.font.menu.
 const coop::config_registry::EnumRow& FontRow() { return coop::config_registry::FontRoleRow(0); }
 
 const char* CounterKey() {
-    return g_token == Token::Scale ? ::coop::config_registry::rows::ui_scale.row->key
-                                   : FontRow().row->key;
+    if (g_token == Token::Scale) return ::coop::config_registry::rows::ui_scale.row->key;
+    if (g_token == Token::Font) return FontRow().row->key;
+    return ::coop::config_registry::rows::voice_mode.row->key;
 }
 
 const char* SetResultName(coop::config::SetResult r) {
@@ -95,6 +109,13 @@ void ProbeAfterReset() {
             UE_LOGI("[SETTINGS-DRILL] host: nick_color followed back (packed=%08X)", packed);
         else
             UE_LOGW("[SETTINGS-DRILL] FAIL: nick_color did not follow back (packed=%08X)", packed);
+    } else if (g_token == Token::VoiceVolume) {
+        const float def = ::coop::config_registry::rows::voice_volume.row->defF;
+        const float vol = coop::voice_chat::MasterVolume();
+        if (std::fabs(vol - def) < 0.001f)
+            UE_LOGI("[SETTINGS-DRILL] host: voice.volume followed back (volume=%.2f)", vol);
+        else
+            UE_LOGW("[SETTINGS-DRILL] FAIL: voice.volume did not follow back (volume=%.2f)", vol);
     } else {
         const bool v = coop::nameplate::LocalVisible();
         if (v) UE_LOGI("[SETTINGS-DRILL] host: nameplate followed back (visible=1)");
@@ -108,9 +129,13 @@ void ResetCounterRow() {
     const char* key = CounterKey();
     g_baseline = Counter();
     UE_LOGI("[SETTINGS-DRILL] host: ResetValue %s", key);
-    const coop::config::SetResult r =
-        g_token == Token::Scale ? coop::config::ResetValue(::coop::config_registry::rows::ui_scale)
-                                : coop::config::ResetValue(FontRow());
+    coop::config::SetResult r;
+    if (g_token == Token::Scale)
+        r = coop::config::ResetValue(::coop::config_registry::rows::ui_scale);
+    else if (g_token == Token::Font)
+        r = coop::config::ResetValue(FontRow());
+    else
+        r = coop::config::ResetValue(::coop::config_registry::rows::voice_mode);
     UE_LOGI("[SETTINGS-DRILL] host: ResetValue %s returned %s", key, SetResultName(r));
     g_phase = 2;
 }
@@ -135,6 +160,11 @@ void Reset() {
         const coop::config::SetResult r =
             coop::config::ResetValue(::coop::config_registry::rows::nick_color);
         UE_LOGI("[SETTINGS-DRILL] host: ResetValue nick_color returned %s", SetResultName(r));
+    } else if (g_token == Token::VoiceVolume) {
+        UE_LOGI("[SETTINGS-DRILL] host: ResetValue voice.volume");
+        const coop::config::SetResult r =
+            coop::config::ResetValue(::coop::config_registry::rows::voice_volume);
+        UE_LOGI("[SETTINGS-DRILL] host: ResetValue voice.volume returned %s", SetResultName(r));
     } else {
         UE_LOGI("[SETTINGS-DRILL] host: ResetValue nameplate");
         const coop::config::SetResult r =
@@ -160,6 +190,11 @@ void ProbeAfterSet() {
         followed = (packed == 0);
         if (followed) UE_LOGI("[SETTINGS-DRILL] host: nick_color followed (packed=%08X)", packed);
         else UE_LOGW("[SETTINGS-DRILL] FAIL: nick_color did not follow (packed=%08X)", packed);
+    } else if (g_token == Token::VoiceVolume) {
+        const float vol = coop::voice_chat::MasterVolume();
+        followed = std::fabs(vol - 0.5f) < 0.001f;
+        if (followed) UE_LOGI("[SETTINGS-DRILL] host: voice.volume followed (volume=%.2f)", vol);
+        else UE_LOGW("[SETTINGS-DRILL] FAIL: voice.volume did not follow (volume=%.2f)", vol);
     } else {
         const bool v = coop::nameplate::LocalVisible();
         followed = !v;
@@ -185,22 +220,29 @@ std::string OtherFontToken() {
     return std::string();
 }
 
-// A counter token's SET. The baseline is read before the set; the drawn-frame line says whether
-// the HUD keeps the overlay drawing, because the render thread applies only on a drawn frame.
+// A counter token's SET. The baseline is read before the set; the drawn-frame line (the scale and
+// font tokens) says whether the HUD keeps the overlay drawing, because the render thread applies
+// only on a drawn frame.
 void SetCounterRow() {
     const char* key = CounterKey();
-    const std::string value =
-        g_token == Token::Scale ? std::string("1.50") : OtherFontToken();
+    std::string value;
+    if (g_token == Token::Scale) value = "1.50";
+    else if (g_token == Token::Font) value = OtherFontToken();
+    else value = "activation";
     g_baseline = Counter();
     UE_LOGI("[SETTINGS-DRILL] host: SetValue %s=%s", key, value.c_str());
-    const coop::config::SetResult r =
-        g_token == Token::Scale
-            ? coop::config::SetValue(::coop::config_registry::rows::ui_scale, value.c_str())
-            : coop::config::SetValue(FontRow(), value.c_str());
+    coop::config::SetResult r;
+    if (g_token == Token::Scale)
+        r = coop::config::SetValue(::coop::config_registry::rows::ui_scale, value.c_str());
+    else if (g_token == Token::Font)
+        r = coop::config::SetValue(FontRow(), value.c_str());
+    else
+        r = coop::config::SetValue(::coop::config_registry::rows::voice_mode, value.c_str());
     UE_LOGI("[SETTINGS-DRILL] host: SetValue %s=%s returned %s", key, value.c_str(),
             SetResultName(r));
-    UE_LOGI("[SETTINGS-DRILL] host: waiting for a drawn frame (hud=%d)",
-            ui::hud::IsActive() ? 1 : 0);
+    if (g_token != Token::VoiceMode)
+        UE_LOGI("[SETTINGS-DRILL] host: waiting for a drawn frame (hud=%d)",
+                ui::hud::IsActive() ? 1 : 0);
     g_phase = 1;
 }
 
@@ -209,10 +251,11 @@ void PollCounter() {
     const uint32_t now = Counter();
     if (now == g_baseline) return;
     if (g_phase == 1) {
-        UE_LOGI("[SETTINGS-DRILL] host: %s followed (applies=%u)", CounterKey(), now);
+        UE_LOGI("[SETTINGS-DRILL] host: %s followed (%s=%u)", CounterKey(), CounterName(), now);
         Reset();
     } else {
-        UE_LOGI("[SETTINGS-DRILL] host: %s followed back (applies=%u)", CounterKey(), now);
+        UE_LOGI("[SETTINGS-DRILL] host: %s followed back (%s=%u)", CounterKey(), CounterName(),
+                now);
         Done();
     }
 }
@@ -240,6 +283,11 @@ void Set() {
             ::coop::config_registry::rows::nick_color, coop::nick_color::IniTextFor(0).c_str());
         UE_LOGI("[SETTINGS-DRILL] host: SetValue nick_color= (per-surface default) returned %s",
                 SetResultName(r));
+    } else if (g_token == Token::VoiceVolume) {
+        UE_LOGI("[SETTINGS-DRILL] host: SetValue voice.volume=0.50");
+        const coop::config::SetResult r =
+            coop::config::SetValue(::coop::config_registry::rows::voice_volume, "0.50");
+        UE_LOGI("[SETTINGS-DRILL] host: SetValue voice.volume=0.50 returned %s", SetResultName(r));
     } else {
         UE_LOGI("[SETTINGS-DRILL] host: SetValue nameplate=0");
         if (!skipSet) {
