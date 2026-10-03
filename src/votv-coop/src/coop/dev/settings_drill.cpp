@@ -27,9 +27,7 @@ namespace {
 
 constexpr int kSlot = 1;  // the pair's client
 
-// The step the row names, parsed once at the first Tick. Only Off, Nameplate, NickColor, Flags,
-// Scale, Font, VoiceMode, VoiceVolume and Red are parsed from the row; the other enumerators are
-// not produced yet.
+// The step the row names, parsed once at the first Tick.
 enum class Token {
     Off, Nameplate, NickColor, Flags, Scale, Font, VoiceMode, VoiceVolume, Server, ServerJoin,
     ServerRed, Red
@@ -39,6 +37,10 @@ enum class Token {
 // 2 RESET done, waiting likewise; 3 DONE.
 int      g_phase = 0;
 Token    g_token = Token::Off;
+// The steps this process has completed, counted in Done() and never reset: a rejoin re-arms the
+// drill through OnDisconnect while the host's session lives on, so the second step is told apart
+// by its number. A fresh process starts at 1.
+int      g_cycle = 0;
 // A counter token's counter, read immediately before the SET and again before the RESET.
 uint32_t g_baseline = 0;
 
@@ -50,8 +52,17 @@ Token ParseToken(const std::string& mode) {
     if (mode == "font")      return Token::Font;
     if (mode == "voicemode") return Token::VoiceMode;
     if (mode == "voicevolume") return Token::VoiceVolume;
+    if (mode == "server")    return Token::Server;
+    if (mode == "serverjoin") return Token::ServerJoin;
+    if (mode == "serverred") return Token::ServerRed;
     if (mode == "red")       return Token::Red;
     return Token::Off;
+}
+
+// The three server tokens set the session's voice range, which every later read on the host
+// answers at once, and which the client's log shows arriving.
+bool IsServerToken() {
+    return g_token == Token::Server || g_token == Token::ServerJoin || g_token == Token::ServerRed;
 }
 
 // The render thread applies a scale or a font row at a later drawn frame, and the voice tick
@@ -90,7 +101,7 @@ const char* SetResultName(coop::config::SetResult r) {
 
 void Done() {
     g_phase = 3;
-    UE_LOGI("[SETTINGS-DRILL] host DONE");
+    UE_LOGI("[SETTINGS-DRILL] host DONE (cycle %d)", ++g_cycle);
 }
 
 // Game thread, after the subscriber of the reset (FIFO).
@@ -116,6 +127,12 @@ void ProbeAfterReset() {
             UE_LOGI("[SETTINGS-DRILL] host: voice.volume followed back (volume=%.2f)", vol);
         else
             UE_LOGW("[SETTINGS-DRILL] FAIL: voice.volume did not follow back (volume=%.2f)", vol);
+    } else if (IsServerToken()) {
+        const float range = coop::config::ResolveFloat(::coop::config_registry::rows::voice_distance_cm);
+        if (range == 4800.f)
+            UE_LOGI("[SETTINGS-DRILL] host: voice.distance_cm followed back (host resolves %.0f)", range);
+        else
+            UE_LOGW("[SETTINGS-DRILL] FAIL: voice.distance_cm did not follow back (host resolves %.0f)", range);
     } else {
         const bool v = coop::nameplate::LocalVisible();
         if (v) UE_LOGI("[SETTINGS-DRILL] host: nameplate followed back (visible=1)");
@@ -165,6 +182,11 @@ void Reset() {
         const coop::config::SetResult r =
             coop::config::ResetValue(::coop::config_registry::rows::voice_volume);
         UE_LOGI("[SETTINGS-DRILL] host: ResetValue voice.volume returned %s", SetResultName(r));
+    } else if (IsServerToken()) {
+        UE_LOGI("[SETTINGS-DRILL] host: ResetValue voice.distance_cm");
+        const coop::config::SetResult r =
+            coop::config::ResetValue(::coop::config_registry::rows::voice_distance_cm);
+        UE_LOGI("[SETTINGS-DRILL] host: ResetValue voice.distance_cm returned %s", SetResultName(r));
     } else {
         UE_LOGI("[SETTINGS-DRILL] host: ResetValue nameplate");
         const coop::config::SetResult r =
@@ -195,12 +217,21 @@ void ProbeAfterSet() {
         followed = std::fabs(vol - 0.5f) < 0.001f;
         if (followed) UE_LOGI("[SETTINGS-DRILL] host: voice.volume followed (volume=%.2f)", vol);
         else UE_LOGW("[SETTINGS-DRILL] FAIL: voice.volume did not follow (volume=%.2f)", vol);
+    } else if (IsServerToken()) {
+        const float range = coop::config::ResolveFloat(::coop::config_registry::rows::voice_distance_cm);
+        followed = (range == 6000.f);
+        if (followed)
+            UE_LOGI("[SETTINGS-DRILL] host: voice.distance_cm followed (host resolves %.0f)", range);
+        else
+            UE_LOGW("[SETTINGS-DRILL] FAIL: voice.distance_cm did not follow (host resolves %.0f)", range);
     } else {
         const bool v = coop::nameplate::LocalVisible();
         followed = !v;
         if (followed) UE_LOGI("[SETTINGS-DRILL] host: nameplate followed (visible=0)");
         else UE_LOGW("[SETTINGS-DRILL] FAIL: nameplate did not follow (visible=1)");
     }
+    // The serverjoin step waits for the joiner's world before it resets: Tick calls Reset then.
+    if (followed && g_token == Token::ServerJoin) return;
     if (followed) Reset();
     else Done();
 }
@@ -260,13 +291,13 @@ void PollCounter() {
     }
 }
 
-// The red arm is the nameplate step with its one call skipped.
+// The red arms are the nameplate step and the server step with their one call skipped.
 void Set() {
     if (IsCounterToken()) {
         SetCounterRow();
         return;
     }
-    const bool skipSet = (g_token == Token::Red);
+    const bool skipSet = (g_token == Token::Red || g_token == Token::ServerRed);
     if (g_token == Token::Flags) {
         UE_LOGI("[SETTINGS-DRILL] host: SetValue ui.chat.peer_actions=0");
         const coop::config::SetResult r1 =
@@ -288,6 +319,14 @@ void Set() {
         const coop::config::SetResult r =
             coop::config::SetValue(::coop::config_registry::rows::voice_volume, "0.50");
         UE_LOGI("[SETTINGS-DRILL] host: SetValue voice.volume=0.50 returned %s", SetResultName(r));
+    } else if (IsServerToken()) {
+        UE_LOGI("[SETTINGS-DRILL] host: SetValue voice.distance_cm=6000");
+        if (!skipSet) {
+            const coop::config::SetResult r =
+                coop::config::SetValue(::coop::config_registry::rows::voice_distance_cm, "6000");
+            UE_LOGI("[SETTINGS-DRILL] host: SetValue voice.distance_cm=6000 returned %s",
+                    SetResultName(r));
+        }
     } else {
         UE_LOGI("[SETTINGS-DRILL] host: SetValue nameplate=0");
         if (!skipSet) {
@@ -298,6 +337,23 @@ void Set() {
     }
     ue_wrap::game_thread::Post(&ProbeAfterSet);
     g_phase = 1;
+}
+
+// The serverjoin step sets before any client connects, so the joiner's snapshot carries the value,
+// and resets once the joiner's world is up: it waits on that readiness, not on a probe. A client
+// already connected at the set is an order the rig cannot recover, said and ended, never a hang.
+void TickServerJoin(coop::net::Session& session) {
+    if (g_phase == 0) {
+        for (int slot = kSlot; slot < coop::net::kMaxPeers; ++slot) {
+            if (!session.IsSlotConnected(slot)) continue;
+            UE_LOGW("[SETTINGS-DRILL] FAIL: a client connected before the serverjoin set");
+            Done();
+            return;
+        }
+        Set();
+    } else if (g_phase == 1 && session.IsSlotWorldReady(kSlot)) {
+        Reset();
+    }
 }
 
 }  // namespace
@@ -311,6 +367,10 @@ void Tick(coop::net::Session* session) {
     (void)s_parsed;
     if (g_token == Token::Off) return;
     if (!session || !session->running() || session->role() != coop::net::Role::Host) return;
+    if (g_token == Token::ServerJoin) {
+        TickServerJoin(*session);
+        return;
+    }
     if (IsCounterToken() && (g_phase == 1 || g_phase == 2)) {
         PollCounter();
         return;

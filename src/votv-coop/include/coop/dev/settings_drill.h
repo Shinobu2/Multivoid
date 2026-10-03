@@ -6,6 +6,10 @@
 // The scale and font tokens follow their rows on the render thread instead, and the voicemode token
 // follows its row at the voice tick: each reads its module's counter before the set and the reset,
 // and waits each Tick until the counter moved.
+// The server tokens set voice.distance_cm, a server-scope row: the host's own reads answer it at
+// once and the client's log shows it arrive. serverjoin is the one step that sets BEFORE any
+// client connects, so the joiner's snapshot carries the value, and resets once the joiner's world
+// is up. Each completed step prints its DONE line with a cycle number, counted per process.
 // Tagged [SETTINGS-DRILL]; the [dev] settings_drill row.
 
 #pragma once
