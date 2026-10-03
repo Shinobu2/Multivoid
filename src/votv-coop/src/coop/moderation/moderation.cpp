@@ -110,7 +110,9 @@ void BanPlayer(const PlayerToken& token, const char* reason, bool byAddress) {
         const char* why = reason.empty() ? "banned by host" : reason.c_str();
         // Accepted window: the banned player's re-proof over a second connection, whose ban check
         // ran on the net thread just before the Add above, is seated for this session. MTA has
-        // none: its join runs on the thread its bans do (CGame.cpp:1956).
+        // none: its join packets are queued by the sync thread and handled on the main thread
+        // that also runs its bans (CNetBuffer.cpp:1289-1294, :932-952). Ours proves on the net
+        // thread and runs the verbs on the game thread.
         if (!s->KickWithToken(token.slot, token.generation, coop::net::EndReason::BannedByHost, why))
             UE_LOGW("moderation: ban #%u -- kick did nothing (already gone?)",
                     static_cast<unsigned>(token.playerNo));
@@ -142,9 +144,11 @@ void BanOffline(const char* guid, const char* reason, bool byAddress) {
         // matching the ban's IP (CStaticFunctionDefinitions.cpp:12157-12170); ours kicks the banned
         // id only, so bystanders at a shared address keep their session and meet the refusal at
         // their next proof (the named cost of an address key, undone by Unban).
-        // Accepted window: a joiner whose ban check ran on the net thread just before the Add
-        // above is seated for this session. MTA has none: its join runs on the thread its bans
-        // do (CGame.cpp:1956).
+        // Accepted window, both conditions at once: a joiner whose ban check ran on the net
+        // thread just before the Add above AND whose id is published just after this scan is
+        // seated for this session. MTA has none: its join packets are queued by the sync thread
+        // and handled on the main thread that also runs its bans (CNetBuffer.cpp:1289-1294,
+        // :932-952). Ours proves on the net thread and runs the verbs on the game thread.
         for (int k = 1; k < static_cast<int>(coop::players::kMaxPeers); ++k) {
             const uint32_t gen = s->peerGenerationForSlot(k);
             if (gen != 0 && s->ProvedGuidForSlotWithToken(k, gen) == guid)

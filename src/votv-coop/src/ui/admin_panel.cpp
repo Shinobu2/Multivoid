@@ -205,7 +205,7 @@ void RenderBannedSection() {
             ImGui::TableSetColumnIndex(4);
             if (ImGui::SmallButton("Unban")) {
                 coop::moderation::Unban(b.id);
-                g_lastRefresh = -1.0;  // reflect immediately
+                g_lastRefresh = -1.0;  // the row drops at the next refresh after the posted unban ran
             }
             ImGui::PopID();
         }

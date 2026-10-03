@@ -24,9 +24,9 @@
 #include <vector>
 
 // Divergences from MTA's CBanManager.cpp (reference/mtasa-blue/Server/mods/deathmatch/logic/):
-//  - MTA matches an IP against wildcard ranges (GetBanFromIP, :209-242); ours matches an exact
-//    address: a range widens the shared-address cost and no range rule is decided (an IPv6
-//    address may rotate, a named cost).
+//  - MTA's player ban stores the exact IP (AddBan, :90-96); its wildcard matching (GetBanFromIP,
+//    :218-238) applies only to patterns an admin writes into an IPv4 entry. Ours has no
+//    admin-written range patterns: no range rule is decided, so an address matches exactly.
 //  - MTA allows saving from the start of its load (m_bAllowSave, :290), so an unparseable
 //    banlist.xml is overwritten at the next save; ours never rewrites a file it could not read
 //    whole, because the rewrite would drop the records it could not read.

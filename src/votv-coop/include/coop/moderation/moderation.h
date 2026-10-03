@@ -76,8 +76,8 @@ void KickPlayer(const PlayerToken& token);
 // Permanently ban the captured player by the id their identity proof established and, when
 // `byAddress` is set and the host saw their own address on a direct path, that address too; then
 // kick them -- MTA's order in CStaticFunctionDefinitions::BanPlayer. Divergence: MTA's BanPlayer/
-// AddBan also kick every seated player matching the ban's IP (reference/mtasa-blue/Server/mods/
-// deathmatch/logic/ CStaticFunctionDefinitions.cpp:11998-12001, :12157-12170); ours kicks the
+// AddBan also kick every seated player matching the ban's IP (CStaticFunctionDefinitions.cpp:
+// 11998-12001, :12157-12170, under mtasa-blue's Server/mods/deathmatch/logic); ours kicks the
 // banned id only, because bystanders at a shared address (a household router, a carrier address) keep their
 // session and meet the refusal at their next proof -- the named cost, undone by Unban.
 // Host-only. The ban survives host restarts and is checked at the identity proof of every future

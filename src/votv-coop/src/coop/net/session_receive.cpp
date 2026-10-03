@@ -81,10 +81,11 @@ void Session::HandlePendingMessage(int pendIdx, uint32_t hConn, const void* data
     const std::string guid = peer_identity::GuidForPublicKey(res.provedKey);
 
     // The ban check, MTA's shape (CGame::Packet_PlayerJoinData: the serial at CGame.cpp:1956, then
-    // the IP at :1973), asked here because the proof is the first place every transport holds an
-    // id and a route: the proved id, and the connection's own address (empty on a relayed path or
-    // when GNS has none). Before the supersession kick and the seat: a banned joiner costs no
-    // seat and kicks nobody.
+    // the IP at :1973; MTA supplants the old player first, CGame.cpp:1892-1907, ours refuses
+    // first so a banned joiner kicks nobody), asked here because the proof is the first place
+    // every transport holds an id and a route: the proved id, and the connection's own address
+    // (empty on a relayed path or when GNS has none). Before the supersession kick and the seat:
+    // a banned joiner costs no seat and kicks nobody.
     if (banCheck_) {
         char addr[SteamNetworkingIPAddr::k_cchMaxString] = {};
         SteamNetConnectionInfo_t ci{};
