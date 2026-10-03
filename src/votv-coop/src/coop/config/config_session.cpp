@@ -4,7 +4,7 @@
 //
 // Two divergences from Source, whose replicated cvars this layer answers to. (1) A client may still
 // set its own hosting default: Source takes a change of a replicated cvar only from the server's
-// console (iconvar.h:58); here a client's SetValue of a server-scope row writes the install's own
+// console (iconvar.h:60); here a client's SetValue of a server-scope row writes the install's own
 // value and never the session's. (2) Leaving restores the install's own value, not the default:
 // the SDK sets a client's saved replicated cvars back to their DEFAULT at a level's end
 // (gamerules.cpp:659-663, 914-927; tf_training_ui.cpp:2032), while this layer is emptied and the

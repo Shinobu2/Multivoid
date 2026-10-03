@@ -928,8 +928,9 @@ enum class ReliableKind : uint8_t {
     // presser alone with the state row (ServerState). Never relayed. ServerRepairPayload.
     ServerRepair = 164,
 
-    // Host to client: one server-scope setting of the session, a row named by its KEY (the way Source's
-    // NET_SetConVar names a cvar) and its value as text. The join carries every replicated row when the
+    // Host to client: one server-scope setting of the session, a row named by its KEY (as Source names a
+    // replicated cvar on the wire by its name -- the SDK's SavedConvar message, gamerules.cpp:906-907;
+    // NET_SetConVar's format is the engine's) and its value as text. The join carries every replicated row when the
     // slot is ready, a change carries each again. A client never sends it. Never relayed. Pre-world.
     // ServerSettingPayload.
     ServerSetting = 165,

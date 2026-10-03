@@ -72,8 +72,9 @@ bool SendRow(Session& s, int slot, const reg::Row* row, const char* why) {
 // begin no slot holds a snapshot, at end the session no longer runs.
 //
 // One row per message is ours: a payload is capped at 228 bytes. Source's rules say what is sent and
-// when (iconvar.h:55-59), not how many to a message (the engine's NET_SetConVar format is outside
-// the SDK); MTA's CSyncSettingsPacket sends the whole set as one fixed packet
+// when (reference/source-sdk-2013/src/public/tier1/iconvar.h:57-62), not how many to a message (the
+// engine's NET_SetConVar format is outside the SDK); MTA's CSyncSettingsPacket sends the whole
+// set as one fixed packet
 // (reference/mtasa-blue/Server/mods/deathmatch/logic/packets/CSyncSettingsPacket.cpp).
 void OnReplicatedRowChanged() {
     Session* s = g_session;
@@ -109,6 +110,14 @@ void OnSessionStart(bool host) {
     cfg::SessionLayerBegin(host);
 }
 
+// The session-end seam, a divergence from both precedents. MTA ends a client's copy of the
+// server's settings by OWNERSHIP: they are members of the session object CClientGame
+// (reference/mtasa-blue/Client/mods/deathmatch/logic/CClientGame.h:908-909) and go with it when
+// the mod unloads on disconnect (CPacketHandler.cpp:685). Source ends them by a level-end revert
+// (CGameRules::LevelShutdownPostEntity -> RevertSavedConvars,
+// reference/source-sdk-2013/src/game/shared/gamerules.cpp:659-663).
+// Ours is a process-wide layer, because config's Resolve is process-wide and our one Session
+// outlives each session, so the transport's one stop listener ends it.
 void OnSessionEnd() { cfg::SessionLayerEnd(); }
 
 void HostTick(Session& session) {

@@ -33,8 +33,8 @@ enum class Token {
     ServerRed, Red
 };
 
-// 0 idle; 1 SET done, waiting (the probe posted, or for a counter token the counter to move);
-// 2 RESET done, waiting likewise; 3 DONE.
+// 0 idle; 1 SET done, waiting (the probe posted, or for a counter token the counter to move;
+// serverjoin: until the joiner's world is up); 2 RESET done, waiting likewise; 3 DONE.
 int      g_phase = 0;
 Token    g_token = Token::Off;
 // The steps this process has completed, counted in Done() and never reset: a rejoin re-arms the
