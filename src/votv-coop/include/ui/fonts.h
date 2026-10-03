@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 struct ImFont;
 
 namespace ui::fonts {
@@ -59,10 +61,23 @@ float   PxFor(Role r);
 const char* FamilyLabel(Family f);   // "JetBrains Mono", ...
 const char* RoleLabel(Role r);       // "Menu / panels", "Chat", "Net stats", "Nameplates"
 
-// Per-role family get/set. SetRoleFamily persists ui.font.<role> and requests the
-// atlas rebuild (applies next frame). Render thread (F1 menu).
+// The role's family. Render thread (F1 menu). A pane changes it by setting the ui.font.<role> row;
+// ApplyRowsIfChanged applies it.
 Family RoleFamily(Role r);
-void   SetRoleFamily(Role r, Family f);
+
+// The registry token of a family -- what a pane passes to SetValue.
+const char* FamilyToken(Family f);
+
+// Follow the five `ui.font` rows: once, at boot.
+void SubscribeRows();
+
+// Render thread, once per frame: when a row changed since the last frame (one atomic exchange),
+// re-resolve the five and apply; the atlas rebuild is requested once when any family differed.
+void ApplyRowsIfChanged();
+
+// How many times a font row change was applied since boot; any thread. The settings drill's
+// readiness.
+uint32_t RowsApplies();
 
 // The ImGui context that owned the atlas is being destroyed -- the failed bring-up retry path. Drop
 // the cached ImFont* so the NEXT context re-loads instead of handing out a dangling pointer.

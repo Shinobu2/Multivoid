@@ -436,8 +436,8 @@ void RenderNameplatePref() {
 }
 
 // Overlay fonts -- GRANULAR per surface: chat, the net-stats widget, the nameplates
-// and the menu/panels each pick their OWN family. SetRoleFamily
-// persists multivoid.ini ui.font.<role> + requests the atlas rebuild (next frame).
+// and the menu/panels each pick their OWN family. A combo sets the ui.font.<role> row; the
+// render thread applies it and rebuilds the atlas on its next frame.
 void RenderFontPref() {
     namespace F = ui::fonts;
     const char* famItems[F::kFamilyCount];
@@ -450,10 +450,11 @@ void RenderFontPref() {
         ImGui::PushID(r);
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
         if (ImGui::Combo(F::RoleLabel(role), &cur, famItems, F::kFamilyCount))
-            F::SetRoleFamily(role, static_cast<F::Family>(cur));
+            coop::config::SetValue(coop::config_registry::FontRoleRow(static_cast<size_t>(r)),
+                                   F::FamilyToken(static_cast<F::Family>(cur)));
         ImGui::PopID();
     }
-    ImGui::TextDisabled("Each surface picks its own family; applies instantly.");
+    ImGui::TextDisabled("Each surface picks its own family; applies on the next frame.");
     ImGui::TextDisabled("Saved to multivoid.ini (ui.font.menu/chat/net/nameplate/toast,");
     ImGui::TextDisabled("each with its own default). Fixedsys (VOTV) = game terminal pixel");
     ImGui::TextDisabled("font; JetBrains/Cascadia monospace; Roboto proportional.");

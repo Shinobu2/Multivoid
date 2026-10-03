@@ -61,6 +61,7 @@ void MaybeRescale(HWND hwnd) {
         ui::scale::NoteViewport(static_cast<float>(rc.right - rc.left),
                                 static_cast<float>(rc.bottom - rc.top));
     ui::scale::ApplyRowIfChanged();
+    ui::fonts::ApplyRowsIfChanged();
     if (!ui::scale::ConsumeRebuild()) return;
     ui::fonts::Load();  // clears + re-bakes the atlas at the new px/family
     overlay_backend::InvalidateDeviceObjects();
