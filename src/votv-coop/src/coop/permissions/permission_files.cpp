@@ -317,4 +317,6 @@ LoadReport LoadStore(const fs::path& dir, Model& m) {
     return report;
 }
 
+bool ShouldLoad(const LoadReport& report) { return report.problems.empty(); }
+
 }  // namespace coop::permissions

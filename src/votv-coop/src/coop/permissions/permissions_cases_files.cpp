@@ -173,6 +173,21 @@ void LoadCases(CheckSink& sink) {
                "load: the nodes around a refused one load");
 }
 
+void WholeStoreCases(CheckSink& sink) {
+    // A store with one bad entry among good holders: the entry's problem is in the report, and the
+    // report says do not load. A clean report loads.
+    const Parsed good = Parse(R"({"permissions":["ok.node"]})");
+    const Parsed bad = Parse(R"({"permissions":[{"permission":"deny.me","value":"no"},"b"]})");
+    LoadReport clean;
+    clean.groups = 1;
+    clean.users = 2;
+    sink.Check(good.problems.empty() && ShouldLoad(clean), "whole: a report without a problem loads");
+    LoadReport dirty = clean;
+    dirty.problems = bad.problems;
+    sink.Check(HasProblem(bad, "permission entry 0 refused (value)") && !ShouldLoad(dirty),
+               "whole: one refused entry among good holders loads nothing");
+}
+
 void NameCases(CheckSink& sink) {
     std::string out;
     sink.Check(NarrowAscii(L"Mods.JSON", &out) && out == "Mods.JSON" && NarrowAscii(L"", &out) && out.empty(),
@@ -189,6 +204,7 @@ void RunFilesCases(CheckSink& sink) {
     RefusalCases(sink);
     ExplicitCases(sink);
     LoadCases(sink);
+    WholeStoreCases(sink);
     NameCases(sink);
 }
 

@@ -42,7 +42,13 @@ bool ParseHolderText(std::string_view text, std::string_view stem, std::string* 
 // Reads `dir` (`<server folder>\permissions`) into `m`: every groups\*.json first, sorted by name so
 // a user's parents exist, then every users\*.json. A missing `dir` gives an empty report. A group
 // stem (lower-cased) must pass IsValidGroupName and a user stem be 32 hex; a file that fails is
-// skipped with a problem. Expired nodes load as written (Applies filters them).
+// skipped with a problem. Expired nodes load as written (Applies filters them). `m` holds what
+// loaded, even beside problems; whether to USE it is ShouldLoad's answer, never the caller's guess.
 LoadReport LoadStore(const std::filesystem::path& dir, Model& m);
+
+// The store loads whole or not at all: true only for a report with no problem. A dropped deny, or a
+// refused group whose members inherited its denies, could only widen a holder; an empty store can
+// only narrow, since grants come only from the store. PURE.
+bool ShouldLoad(const LoadReport& report);
 
 }  // namespace coop::permissions

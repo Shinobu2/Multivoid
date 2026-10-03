@@ -19,7 +19,9 @@ namespace coop::permissions::host {
 
 // Builds a fresh Model from `<serverDir>\permissions` (an empty `serverDir` gives the empty store,
 // logged), logs the load and each problem, and publishes the model with its subject
-// (`server=<serverId>`, `mode=listen`). `serverId` is the hosted server's id. TimelineThread.
+// (`server=<serverId>`, `mode=listen`). The store loads whole or not at all (ShouldLoad): with any
+// problem the published model is EMPTY and only the defaults apply until the store is fixed.
+// `serverId` is the hosted server's id. TimelineThread.
 void OnHostStart(const std::wstring& serverDir, std::string serverId);
 
 // The decision for `playerId` (32 hex) on `node`: the resolved chain's True / False, else

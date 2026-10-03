@@ -66,8 +66,16 @@ void OnHostStart(const std::wstring& serverDir, std::string serverId) {
     } else {
         const std::filesystem::path dir = std::filesystem::path(serverDir) / L"permissions";
         const LoadReport report = LoadStore(dir, fresh->model);
-        UE_LOGI("permissions: loaded %d group(s), %d user(s) from %ls", report.groups, report.users, dir.c_str());
         for (const std::string& problem : report.problems) UE_LOGW("permissions: %s", problem.c_str());
+        if (ShouldLoad(report)) {
+            UE_LOGI("permissions: loaded %d group(s), %d user(s) from %ls", report.groups, report.users,
+                    dir.c_str());
+        } else {
+            fresh->model = Model();
+            UE_LOGW("permissions: the store has %d problem(s); none of it is loaded -- only the defaults apply "
+                    "until it is fixed",
+                    static_cast<int>(report.problems.size()));
+        }
     }
     {
         std::lock_guard<std::mutex> lock(g_handoffMutex);
