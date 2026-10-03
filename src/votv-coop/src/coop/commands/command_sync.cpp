@@ -293,18 +293,25 @@ void ReplyTo(const Caller& to, std::string_view line) {
 void OnReply(const coop::net::CommandReplyPayload& p) {
     UE_ASSERT_GAME_THREAD("command_sync::OnReply");
     std::wstring wide;
-    if (p.len > sizeof(p.text) || !coop::text::FromUtf8Strict(p.text, p.len, &wide)) {
+    // The strict decode of the RAW bytes is the gate: stripping a control byte out of an ill-formed
+    // sequence could splice its neighbours into a valid one, a repair nobody sent.
+    bool readable = p.len <= sizeof(p.text) && coop::text::FromUtf8Strict(p.text, p.len, &wide);
+    // MTA's client strips control codes from every echo it shows
+    // (reference/mtasa-blue/Client/mods/deathmatch/logic/CPacketHandler.cpp:1443), as our chat receiver
+    // does (coop/comms/chat_sync.cpp:316).
+    std::string line;
+    if (readable) {
+        line = coop::text::SanitizeUtf8(p.text, p.len);
+        readable = coop::text::FromUtf8Strict(line.data(), line.size(), &wide);
+    }
+    if (!readable) {
         if (!g_warnedUnreadableReply) {
             g_warnedUnreadableReply = true;
             UE_LOGW("command_sync: an unreadable reply from the host");
         }
         return;
     }
-    // MTA's client strips control codes from every echo it shows
-    // (reference/mtasa-blue/Client/mods/deathmatch/logic/CPacketHandler.cpp:1443), as our chat receiver
-    // does (coop/comms/chat_sync.cpp:316).
-    const std::string line = coop::text::SanitizeUtf8(p.text, p.len);
-    Deliver(line, coop::text::FromUtf8Lossy(line.data(), line.size()));
+    Deliver(line, wide);
 }
 
 void SetReplyObserver(void (*fn)(std::string_view line)) { g_observer = fn; }

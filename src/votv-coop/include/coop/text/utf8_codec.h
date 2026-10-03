@@ -39,9 +39,10 @@ bool FromUtf8Strict(const char* p, size_t n, std::wstring* out);
 // only because the source is ours; never use it on a peer's bytes.
 std::wstring FromUtf8Lossy(const char* p, size_t n);
 
-// Strip C0 control bytes (keeping TAB) from a UTF-8 string. A DENYLIST: it
-// removes what is dangerous at the render surface instead of enumerating what is
-// allowed, which is the only form that can survive a widening alphabet.
+// Strip C0 control bytes (keeping TAB), DEL, and the three line separators U+0085, U+2028 and
+// U+2029 (each whole sequence) from a UTF-8 string. A DENYLIST: it removes what is dangerous at
+// the render surface instead of enumerating what is allowed, which is the only form that can
+// survive a widening alphabet.
 std::string SanitizeUtf8(const char* p, size_t n);
 
 // Cap a UTF-8 string to `maxBytes` without splitting a multi-byte sequence: it backs off past

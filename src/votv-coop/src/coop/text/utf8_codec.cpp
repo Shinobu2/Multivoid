@@ -22,7 +22,8 @@ std::string ToUtf8(const std::wstring& w) {
         uint32_t cp = 0;
         i += DecodeCodepoint(w, i, &cp);
         if (cp >= 0xD800 && cp <= 0xDFFF) continue;  // unpaired surrogate -- not a character
-        // C0 goes, TAB stays -- the same line SanitizeUtf8 draws. Absorbing
+        // C0 goes, TAB stays -- SanitizeUtf8 draws the same C0 line and also drops
+        // DEL and the line separators. Absorbing
         // chat_feed's encoder made this the difference between the two, and
         // the feed's behaviour is the right one: a nickname cannot contain a
         // TAB (SanitizeNickname denies everything below 0x20), so keeping it
@@ -83,7 +84,21 @@ std::string SanitizeUtf8(const char* p, size_t n) {
     out.reserve(n);
     for (size_t i = 0; i < n; ++i) {
         const unsigned char u = static_cast<unsigned char>(p[i]);
-        if (u >= 0x20 || u == 0x09) out.push_back(static_cast<char>(u));
+        if (u < 0x20 && u != 0x09) continue;  // C0, TAB stays
+        if (u == 0x7F) continue;              // DEL
+        // U+0085 (C2 85), U+2028 (E2 80 A8), U+2029 (E2 80 A9): whole sequences, so the
+        // text around them is left as it came.
+        if (u == 0xC2 && i + 1 < n && static_cast<unsigned char>(p[i + 1]) == 0x85) {
+            i += 1;
+            continue;
+        }
+        if (u == 0xE2 && i + 2 < n && static_cast<unsigned char>(p[i + 1]) == 0x80 &&
+            (static_cast<unsigned char>(p[i + 2]) == 0xA8 ||
+             static_cast<unsigned char>(p[i + 2]) == 0xA9)) {
+            i += 2;
+            continue;
+        }
+        out.push_back(static_cast<char>(u));
     }
     return out;
 }
@@ -206,6 +221,16 @@ bool RunUtf8CodecSelftest() {
         const char raw[] = "a\x01\x1F" "b\tc";
         const std::string s = SanitizeUtf8(raw, sizeof(raw) - 1);
         ok(s == "ab\tc", "denylist strips C0, keeps TAB");
+        const char tab[] = "a\tb";
+        ok(SanitizeUtf8(tab, sizeof(tab) - 1) == "a\tb", "denylist keeps a TAB");
+        const char del[] = "a\x7F" "b";
+        ok(SanitizeUtf8(del, sizeof(del) - 1) == "ab", "denylist drops DEL");
+        const char nel[] = "a\xC2\x85" "b";
+        ok(SanitizeUtf8(nel, sizeof(nel) - 1) == "ab", "denylist drops U+0085");
+        const char ls[] = "a\xE2\x80\xA8" "b";
+        ok(SanitizeUtf8(ls, sizeof(ls) - 1) == "ab", "denylist drops U+2028");
+        const char ps[] = "a\xE2\x80\xA9" "b";
+        ok(SanitizeUtf8(ps, sizeof(ps) - 1) == "ab", "denylist drops U+2029");
         const std::string cyr = ToUtf8(L"П");
         ok(SanitizeUtf8(cyr.data(), cyr.size()) == cyr, "denylist keeps non-ASCII");
     }
