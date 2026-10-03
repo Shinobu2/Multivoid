@@ -654,6 +654,9 @@ set(VOTVCOOP_SOURCES
     src/coop/moderation/seen_players.cpp
     src/coop/server_profile/server_profile.cpp
     src/coop/server_profile/server_profile_selftest.cpp
+    src/coop/commands/command_line.cpp
+    src/coop/commands/command_targets.cpp
+    src/coop/commands/commands_selftest.cpp
     src/harness/harness.cpp
     src/harness/session_runtime.cpp
     src/harness/join_leave.cpp

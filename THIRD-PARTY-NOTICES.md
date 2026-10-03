@@ -31,7 +31,7 @@ Portions of this software are copyright (c) 2006-2024 The FreeType Project
 
 Statically linked libraries: MinHook, Dear ImGui, GameNetworkingSockets
 (bundling Abseil, WebRTC, curve25519-donna, ed25519-donna), Opus, FreeType,
-miniaudio, Protocol Buffers, OpenSSL, nlohmann/json. Ported code: RE-UE4SS.
+miniaudio, Protocol Buffers, OpenSSL, nlohmann/json. Ported code: RE-UE4SS, LuckPerms.
 Embedded fonts: Roboto, JetBrains Mono, Cascadia Code, Fixedsys Excelsior,
 Twemoji Mozilla.
 
@@ -1015,6 +1015,35 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+```
+
+## LuckPerms (ported algorithms)
+
+No LuckPerms code is linked; the command tokenizer's algorithm (a quote opens a word only at its start, runs to the next quote, and an unclosed one runs to the end) was PORTED from LuckPerms into `src/votv-coop/src/coop/commands/command_line.cpp` with per-site attribution comments, and that portion carries the upstream MIT notice. Upstream: https://github.com/LuckPerms/LuckPerms. Source of this text: that repository's `LICENSE.txt` at commit `25f223317a9ec2b6e73369126b630eca07d79506`, read from a local clone at `reference/LuckPerms/` (`reference/README.md` has the clone command; the tree itself is not carried by this repository).
+
+```text
+MIT License
+
+Copyright (c) lucko (Luck) <luck@lucko.me>
+Copyright (c) contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 ```
 
 ---

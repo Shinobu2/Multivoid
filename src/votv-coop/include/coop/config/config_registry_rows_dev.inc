@@ -79,6 +79,8 @@ CFG_FLAG(selftest_break_server_id, "selftest_break_server_id", "dev", false, "VO
     "Red arm of the server_profile selftest: its first id case expects the wrong answer, so it must fail.")
 CFG_INT(selftest_runtime_probe, "selftest_runtime_probe", "dev", 0, 0, 9, "VOTVCOOP_SELFTEST_RUNTIME_PROBE",
     "The row the runtime-layer selftest sets and reads; nothing else reads it.")
+CFG_FLAG(selftest_break_commands, "selftest_break_commands", "dev", false, "VOTVCOOP_SELFTEST_BREAK_COMMANDS",
+    "Red arm of the commands selftest: its first line case expects the wrong word count, so it must fail.")
 CFG_ENUM(subject_drill, "subject_drill", "dev", "off", "off|insert|own|carry|carryred", "VOTVCOOP_SUBJECT_DRILL",
     "Drill (BOTH peers), a remote action never takes the local player as its subject. insert: before any "
     "client's world is ready the host spawns two drives; the joined client walks to the nearer, grabs it "
