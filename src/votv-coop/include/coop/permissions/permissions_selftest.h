@@ -28,6 +28,7 @@ struct CheckSink {
 
 void RunContextCases(CheckSink& sink);
 void RunStoreCases(CheckSink& sink);
+void RunInheritanceCases(CheckSink& sink);
 
 // Runs every cases function and logs the result line. True when every check passed.
 bool RunSelftest();
