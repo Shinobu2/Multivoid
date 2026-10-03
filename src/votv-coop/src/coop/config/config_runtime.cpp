@@ -1,7 +1,7 @@
 // coop/config/config_runtime.cpp -- a config row's value while the game runs: the runtime layer
-// every Resolve reads first (config.cpp, PickRawLayered), SetValue (normalise, refuse, hold, write
-// the ini, log, notify) and the per-row subscribers. MTA's CMainConfig::SetSetting is the shape:
-// refuse a bad value, assign, save, call the row's change callback. The divergence: in the game the
+// every Resolve reads first (config.cpp, PickRawLayered), SetValue and ResetValue (hold or drop,
+// write or remove its ini line, notify) and the per-row subscribers. MTA's CMainConfig::SetSetting
+// is the shape: refuse, assign, save, call the row's callback. The divergence: in the game the
 // callback is posted to the game thread through the notifier the boot code wires, because a set
 // comes from the render thread; a process that wires none calls it inside the setter, as MTA does.
 
@@ -14,7 +14,7 @@
 // bSavable && bSave, CMainConfig.cpp:1479-1483; its client: every apply, CSettings.cpp:4790); a
 // live set beats the launch pin so a change holds for the run (MTA: command line wins,
 // CMainConfig.cpp:1050-1081); Source clamps and calls back only on a change (convar.cpp:794-798,
-// 843-853), we refuse and notify every accepted set, as MTA (CMainConfig.cpp:1485-1486).
+// 843-853), we refuse and notify every accepted set and reset, as MTA (CMainConfig.cpp:1485-1486).
 
 #include "coop/config/config.h"
 
@@ -45,7 +45,8 @@ std::unordered_map<const Row*, std::string> g_layer;
 std::vector<std::pair<const Row*, void (*)()>> g_subscribers;
 void (*g_post)(std::function<void()> task) = nullptr;
 
-// True on a thread while it runs a row's subscribers: SetValueAt refuses a set from there.
+// True on a thread while it runs a row's subscribers: SetValueAt refuses a set from there, and
+// ResetValueAt a reset.
 thread_local bool t_notifying = false;
 
 // Sets t_notifying for its scope and restores the previous value, so an early return or a throw
@@ -156,6 +157,12 @@ SetResult SetValueAt(const std::wstring& iniPath, const Row* row, const char* va
     return saved ? SetResult::Saved : SetResult::HeldNotSaved;
 }
 
+// ResetValue's precedents: MTA's client "Load defaults" re-applies a copy of the default literals
+// (CSettings.cpp:2835-2861); Source's ConVar::Revert is a set to the default
+// (convar.cpp:1076-1081). Ours removes the stored line instead, so a later change of the default,
+// or an environment twin, answers rather than a frozen copy. It notifies even when no line was
+// stored (MTA fires every time; Source's Revert skips the callbacks when the value is unchanged,
+// convar.cpp:843-853).
 SetResult ResetValueAt(const std::wstring& iniPath, const Row* row) {
     if (t_notifying) {
         UE_LOGW("config: RESET %s REFUSED -- called from inside a change notification; a "

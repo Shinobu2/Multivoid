@@ -131,8 +131,8 @@ namespace {
 
 // The probe row's subscriber: counts its calls and records whether it ran on the thread the
 // notifications are meant for. Both subscribers below stay registered on the probe row after the
-// run (the layer has no unsubscribe), so a later keep-line on that key prints a stray REFUSED
-// ERROR from the second one.
+// run (the layer has no unsubscribe), so a later keep-line, set or reset on that key prints a
+// stray REFUSED warning from the second one.
 std::atomic<int> g_subscriberCalls{0};
 std::atomic<bool> g_subscriberOnNotifyThread{false};
 bool (*g_onNotifyThread)() = nullptr;
