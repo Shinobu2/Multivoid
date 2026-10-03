@@ -139,10 +139,12 @@ CFG_FLAG(event_drill, "event_drill", "dev", false, "VOTVCOOP_EVENT_DRILL",
     "snapshot carries it) and then through the scheduler itself (the clock set to day 2 00:18), then "
     "solar, arirGraff_0 and enasus by the dev fire; the client's DONE line counts the showers and the "
     "fires it replayed. MUTATES the world (the clock, the events), so it is armed per run.")
-CFG_ENUM(command_drill, "command_drill", "dev", "off", "off|on|red", "VOTVCOOP_COMMAND_DRILL",
+CFG_ENUM(command_drill, "command_drill", "dev", "off", "off|on|red|grant|grantred|hostdeny", "VOTVCOOP_COMMAND_DRILL",
     "Commands drill: once its world is ready, this peer submits /help and an unknown command, then (a "
     "client) six unknown commands at once, and checks the replies in order. red expects a wrong first "
-    "line, so it must fail.")
+    "line, so it must fail. grant / grantred: a client runs a command and reports whether the host's "
+    "permissions allowed it (grant: one the rig's fixture grants; grantred: one it does not); hostdeny: "
+    "the host runs a command its own permission file denies it and reports the refusal.")
 CFG_FLAG(ban_drill, "ban_drill", "dev", false, "VOTVCOOP_BAN_DRILL",
     "Ban drill (host only): when a client has finished joining, ban slot 1 once through the "
     "moderation verb and report whether the ban was stored and the seat closed. It writes the "

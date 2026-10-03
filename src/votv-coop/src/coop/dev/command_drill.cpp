@@ -12,6 +12,7 @@
 #include "ue_wrap/core/log.h"
 
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <string_view>
 
@@ -20,17 +21,24 @@ namespace {
 
 namespace CS = coop::command_sync;
 
-enum class Mode : uint8_t { Off, On, Red };
+enum class Mode : uint8_t { Off, On, Red, Grant, GrantRed, HostDeny };
 
 Mode ModeNow() {
     static const Mode mode = [] {
         const std::string v = coop::config::ResolveEnum(::coop::config_registry::rows::command_drill);
-        return v == "on" ? Mode::On : v == "red" ? Mode::Red : Mode::Off;
+        return v == "on"         ? Mode::On
+               : v == "red"      ? Mode::Red
+               : v == "grant"    ? Mode::Grant
+               : v == "grantred" ? Mode::GrantRed
+               : v == "hostdeny" ? Mode::HostDeny
+                                 : Mode::Off;
     }();
     return mode;
 }
 
-enum class Phase : uint8_t { Ready, WaitA, SendB, WaitB, Done };
+bool IsGrantMode() { return ModeNow() == Mode::Grant || ModeNow() == Mode::GrantRed; }
+
+enum class Phase : uint8_t { Ready, WaitA, SendB, WaitB, WaitFirst, Done };
 
 Phase g_phase = Phase::Ready;
 bool g_isHost = false;
@@ -45,6 +53,21 @@ constexpr const char* kUnknownLine = "Unknown command '/nosuchcommand'. Type /he
 constexpr const char* kRateNotice = "Too many commands -- wait a moment.";
 constexpr int kBurstLines = 6;
 
+// Phase A's lines after the header, by role: what `/help` and an unknown command answer.
+constexpr const char* kHostLines[] = {kHelpLine, kUnknownLine};
+constexpr const char* kClientLines[] = {kHelpLine, kUnknownLine};
+
+// grant / grantred / hostdeny send one line and read its first reply.
+constexpr const char* kUnbanLine = "unban 00000000";
+constexpr const char* kBanidLine = "banid 00000000000000000000000000000000";
+constexpr const char* kNoBanReply = "No ban matches 00000000.";
+constexpr const char* kRefusedPrefix = "You do not have permission for /";
+constexpr const char* kUnbanRefusedPrefix = "You do not have permission for /unban";
+
+bool StartsWith(std::string_view s, std::string_view prefix) {
+    return s.substr(0, prefix.size()) == prefix;
+}
+
 void Finish() {
     g_phase = Phase::Done;
     CS::SetReplyObserver(nullptr);
@@ -56,10 +79,12 @@ void Fail(int n, std::string_view got, const char* want) {
 }
 
 void OnPhaseA(std::string_view line) {
-    const char* want[3] = {ModeNow() == Mode::Red ? kHelpHeaderRed : kHelpHeader, kHelpLine, kUnknownLine};
+    const char* const* lines = g_isHost ? kHostLines : kClientLines;
+    const int count = 1 + static_cast<int>(g_isHost ? std::size(kHostLines) : std::size(kClientLines));
     const int i = g_replies;
-    if (line != want[i]) { Fail(i + 1, line, want[i]); return; }
-    if (++g_replies < 3) return;
+    const char* want = i == 0 ? (ModeNow() == Mode::Red ? kHelpHeaderRed : kHelpHeader) : lines[i - 1];
+    if (line != want) { Fail(i + 1, line, want); return; }
+    if (++g_replies < count) return;
     if (g_isHost) {
         UE_LOGI("[CMD-DRILL] host DONE");
         Finish();
@@ -86,10 +111,28 @@ void OnPhaseB(std::string_view line) {
     Finish();
 }
 
+// The client's one line of grant / grantred: the first reply says whether the host's permissions
+// let it through (`unban` with nothing banned answers kNoBanReply).
+void OnGrantReply(std::string_view line) {
+    if (line == kNoBanReply) UE_LOGI("[CMD-DRILL] grant PASS");
+    else if (StartsWith(line, kRefusedPrefix)) UE_LOGE("[CMD-DRILL] FAIL: refused");
+    else UE_LOGE("[CMD-DRILL] FAIL: reply '%s'", std::string(line).c_str());
+    Finish();
+}
+
+// The host's one line of hostdeny: its own permission file denies it /unban.
+void OnHostDenyReply(std::string_view line) {
+    if (StartsWith(line, kUnbanRefusedPrefix)) UE_LOGI("[CMD-DRILL] hostdeny PASS");
+    else UE_LOGE("[CMD-DRILL] FAIL: hostdeny reply '%s'", std::string(line).c_str());
+    Finish();
+}
+
 // Every delivered reply line of this peer, in order.
 void Observe(std::string_view line) {
     if (g_phase == Phase::WaitA) OnPhaseA(line);
     else if (g_phase == Phase::WaitB) OnPhaseB(line);
+    else if (g_phase == Phase::WaitFirst && ModeNow() == Mode::HostDeny) OnHostDenyReply(line);
+    else if (g_phase == Phase::WaitFirst) OnGrantReply(line);
 }
 
 bool ClientReady(coop::net::Session* s) {
@@ -104,10 +147,21 @@ void Tick(coop::net::Session* session) {
     switch (g_phase) {
     case Phase::Ready:
         g_isHost = session->role() == coop::net::Role::Host;
+        // grant and grantred are a client's, hostdeny the host's: the other role has nothing to do.
+        if ((ModeNow() == Mode::HostDeny && !g_isHost) || (IsGrantMode() && g_isHost)) {
+            g_phase = Phase::Done;
+            return;
+        }
         if (!g_isHost && !ClientReady(session)) return;
         g_replies = 0;
         g_accepted = 0;
         CS::SetReplyObserver(&Observe);
+        if (ModeNow() == Mode::HostDeny || IsGrantMode()) {
+            g_phase = Phase::WaitFirst;
+            CS::Submit(ModeNow() == Mode::GrantRed ? kBanidLine : kUnbanLine);
+            UE_LOGI("[CMD-DRILL] %s sent its line", g_isHost ? "host" : "client");
+            return;
+        }
         g_phase = Phase::WaitA;
         CS::Submit("help");
         CS::Submit("nosuchcommand");
@@ -120,6 +174,7 @@ void Tick(coop::net::Session* session) {
         return;
     case Phase::WaitA:
     case Phase::WaitB:
+    case Phase::WaitFirst:
     case Phase::Done:
         return;
     }
