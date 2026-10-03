@@ -30,15 +30,6 @@ const char kRQuote[] = "\xE2\x80\x9D";                  // U+201D
 const char kIvanUpper[] = "\xD0\x98\xD0\xB2\xD0\xB0\xD0\xBD";  // U+0418 U+0432 U+0430 U+043D
 const char kIvanLower[] = "\xD0\xB8\xD0\xB2\xD0\xB0\xD0\xBD";  // U+0438 U+0432 U+0430 U+043D
 
-struct Checker {
-    int pass = 0, total = 0;
-    void operator()(bool ok, const char* what) {
-        ++total;
-        if (ok) { ++pass; return; }
-        UE_LOGE("commands selftest FAIL: %s", what);
-    }
-};
-
 bool SameWords(const ParsedLine& p, std::initializer_list<const char*> want) {
     if (p.words.size() != want.size() || p.begins.size() != want.size()) return false;
     size_t i = 0;
@@ -755,6 +746,12 @@ void QualifierCases(Checker& check) {
 
 }  // namespace
 
+void Checker::operator()(bool ok, const char* what) {
+    ++total;
+    if (ok) { ++pass; return; }
+    UE_LOGE("commands selftest FAIL: %s", what);
+}
+
 bool RunSelftest() {
     Checker check;
     const bool breakIt = coop::config::ResolveFlag(coop::config_registry::rows::selftest_break_commands);
@@ -762,6 +759,7 @@ bool RunSelftest() {
     TargetCases(check);
     RegistryCases(check);
     QualifierCases(check);
+    ModerationCases(check);
 
     if (check.pass == check.total) {
         UE_LOGI("commands selftest: ALL PASS (%d checks)", check.total);

@@ -53,8 +53,17 @@ constexpr const char* kUnknownLine = "Unknown command '/nosuchcommand'. Type /he
 constexpr const char* kRateNotice = "Too many commands -- wait a moment.";
 constexpr int kBurstLines = 6;
 
-// Phase A's lines after the header, by role: what `/help` and an unknown command answer.
-constexpr const char* kHostLines[] = {kHelpLine, kUnknownLine};
+// Phase A's lines after the header, by role: what `/help` and an unknown command answer. The host
+// is the console and may use every command, listed in registry order (roots by name); a client
+// holds only /help.
+constexpr const char* kHostLines[] = {
+    "/ban <who> [reason...] -- Bans a player by id and, on a direct link, by address.",
+    "/banid <who> [reason...] -- Bans a player by id only.",
+    kHelpLine,
+    "/kick <who> [reason...] -- Disconnects a player.",
+    "/tphere <who> -- Brings a player to you (the host).",
+    "/unban <id> -- Lifts a ban.",
+    kUnknownLine};
 constexpr const char* kClientLines[] = {kHelpLine, kUnknownLine};
 
 // grant / grantred / hostdeny send one line and read its first reply.

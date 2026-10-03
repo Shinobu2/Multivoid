@@ -2,6 +2,7 @@
 
 #include "coop/player/roster.h"
 
+#include "coop/net/peer_identity.h"
 #include "coop/net/session.h"
 #include "coop/session/player_handshake.h"
 #include "coop/player/players_registry.h"
@@ -13,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <string>
 
 namespace coop::roster {
 namespace {
@@ -81,6 +83,7 @@ void Refresh() {
     // the local row is simply omitted until the slot resolves.)
     const int localSlot = isHost ? 0 : static_cast<int>(coop::players::Registry::Get().LocalPeerId());
 
+    const std::string localId = isHost ? coop::net::peer_identity::LocalGuid() : std::string();
     int idx = 0;
     for (int slot = 0; slot < coop::players::kMaxPeers; ++slot) {
         // ONE DERIVATION. Presence comes from the LEDGER, which both peers agree on, instead of
@@ -92,7 +95,10 @@ void Refresh() {
         Row& r = snap.rows[idx];
         r.slot = slot;
         r.playerNo = led.playerNo;
-        r.generation = led.bornGeneration;
+        if (isHost) {
+            const std::string& id = slot == 0 ? localId : led.guid;
+            std::snprintf(r.playerId, sizeof(r.playerId), "%s", id.c_str());
+        }
         r.isLocal = rowIsLocal;
         r.isHost = (slot == 0);
         r.connected = true;  // an occupied row IS the presence fact now

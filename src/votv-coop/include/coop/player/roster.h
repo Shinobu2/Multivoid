@@ -37,11 +37,11 @@ struct Row {
     // never reused within a session. 0 only out of session (see kNoPlayerNo).
     // Deliberately NOT the slot: slots recycle, IDs do not.
     unsigned short playerNo = 0;
-    // The occupancy generation this row was born from (HOST-side; 0 on a client
-    // and out of session). Never displayed and never sent -- it exists so a
-    // destructive action captured off this snapshot can be validated against the
-    // live net-layer authority at execution time. See coop::moderation::PlayerToken.
-    unsigned int   generation = 0;
+    // The occupant's proved player id (32 lower-case hex), the name a moderation command line
+    // addresses a person by and the name a permission file is stored under. Filled by the HOST's
+    // publisher from the ledger (slot 0: the local id); empty when the proof has not landed, on a
+    // client (it never learns other players' ids) and out of session.
+    char playerId[33] = {};
     bool isLocal = false;    // this row is YOU
     bool isHost  = false;    // this row's peer is the host (slot 0)
     bool connected = false;

@@ -2,9 +2,9 @@
 
 #include "ui/admin_panel.h"
 
+#include "coop/commands/command_sync.h"
 #include "coop/player/roster.h"
 #include "coop/moderation/ban_list.h"
-#include "coop/moderation/moderation.h"
 #include "coop/moderation/seen_players.h"
 #include "ui/link_format.h"
 #include "ui/scale.h"
@@ -14,8 +14,10 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <string>
 #include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace ui::admin_panel {
@@ -33,18 +35,15 @@ std::vector<coop::ban_list::Entry>        g_bans;
 // point into g_bans and live exactly as long as that snapshot.
 std::unordered_set<std::string_view>      g_banIds;
 
-// Pending ban confirmation (render-thread only). Exactly one of slot / guid is
-// set: slot >= 1 = an ONLINE peer ban, guid[0] != 0 = an OFFLINE record ban.
+// Pending ban confirmation (render-thread only): g_banId[0] != 0 means one awaits its confirm.
 //
-// g_banToken is the load-bearing capture for the ONLINE case. The modal takes a
-// typed reason, so it stays open for as long as the admin types, and peer slots
-// recycle -- targeting the slot alone let a permanent ban land on the
-// successor. The token names the PERSON and is validated against the live
-// net-layer authority when the action finally runs.
-coop::moderation::PlayerToken g_banToken{};
-int  g_banSlot = -1;
-char g_banGuid[33] = {};
-char g_banNick[24] = {};
+// The proved player id is the load-bearing capture. The modal takes a typed reason, so it stays
+// open for as long as the admin types, and peer slots recycle -- targeting the slot alone let a
+// permanent ban land on the successor. The id names the PERSON, seated or not; the ban command
+// resolves it when the line runs, and bans nobody if no one holds it.
+char g_banId[33] = {};
+bool g_banOnline = false;  // the person was seated when the modal opened (for its wording)
+char g_banNick[coop::text::kNickBufBytes] = {};
 char g_banReason[96] = {};
 // The modal's "Also refuse their address" box; set again each time the modal opens.
 bool g_banByAddress = true;
@@ -77,14 +76,28 @@ void SectionHeader(const char* label) {
     ImGui::Separator();
 }
 
-void OpenBanFor(int slot, const char* guid, const char* nick,
-                coop::moderation::PlayerToken token = {}) {
-    g_banToken = token;
-    g_banSlot = slot;
-    std::snprintf(g_banGuid, sizeof(g_banGuid), "%s", guid ? guid : "");
+void OpenBanFor(bool online, const char* id, const char* nick) {
+    g_banOnline = online;
+    std::snprintf(g_banId, sizeof(g_banId), "%s", id);
     std::snprintf(g_banNick, sizeof(g_banNick), "%s", nick ? nick : "");
     g_banReason[0] = '\0';
     g_banByAddress = true;
+}
+
+// A player's id on hover over its nick: how the host finds the name a permission file is stored
+// under.
+void IdTooltip(const char* id) {
+    if (id[0] != '\0' && ImGui::IsItemHovered()) ImGui::SetTooltip("Player id %s", id);
+}
+
+// A small button that is off, with the reason on hover, while the person has no proved id yet.
+bool IdButton(const char* label, bool hasId) {
+    if (!hasId) ImGui::BeginDisabled();
+    const bool clicked = ImGui::SmallButton(label);
+    if (!hasId) ImGui::EndDisabled();
+    if (!hasId && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Their identity is not proved yet.");
+    return clicked;
 }
 
 void RenderOnlineSection(const coop::roster::Snapshot& rs) {
@@ -106,6 +119,7 @@ void RenderOnlineSection(const coop::roster::Snapshot& rs) {
             ImGui::TableSetColumnIndex(0);
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(r.nick[0] ? r.nick : "Remote player");
+            IdTooltip(r.playerId);
             // Same renderer as the scoreboard (ui::link_format) -- this panel
             // used to carry its own copy of the cascade, so the vocabulary could
             // drift one surface at a time.
@@ -118,16 +132,17 @@ void RenderOnlineSection(const coop::roster::Snapshot& rs) {
                 ImGui::TextDisabled("%s", pb);
             }
             ImGui::TableSetColumnIndex(3);
-            // Token, not slot -- see g_banToken. Cheap and uniform: every
-            // slot-addressed action captures the person, so no call site has to
-            // remember which ones are destructive.
-            const auto token = coop::moderation::TokenFor(r.slot, r.playerNo, r.generation);
-            if (ImGui::SmallButton("Teleport")) coop::moderation::TeleportPlayerToMe(token);
+            // Each button submits a command line for the person's proved id, not their slot --
+            // see g_banId. Without a proved id the buttons are off.
+            const bool hasId = r.playerId[0] != '\0';
+            if (IdButton("Teleport", hasId))
+                coop::command_sync::Submit(std::string("tphere ") + r.playerId);
             ImGui::SameLine();
-            if (ImGui::SmallButton("Kick")) coop::moderation::KickPlayer(token);
+            if (IdButton("Kick", hasId))
+                coop::command_sync::Submit(std::string("kick ") + r.playerId);
             ImGui::SameLine();
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00f, 0.45f, 0.42f, 1.0f));
-            if (ImGui::SmallButton("Ban...")) OpenBanFor(r.slot, nullptr, r.nick, token);
+            if (IdButton("Ban...", hasId)) OpenBanFor(true, r.playerId, r.nick);
             ImGui::PopStyleColor();
             ImGui::PopID();
         }
@@ -153,6 +168,7 @@ void RenderOfflineSection() {
             ImGui::TableSetColumnIndex(0);
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(e.nick[0] ? e.nick : "(no nick)");
+            IdTooltip(e.guid);
             ImGui::TableSetColumnIndex(1);
             char when[24];
             FormatUnix(e.lastSeenUnix, when, sizeof(when));
@@ -163,7 +179,7 @@ void RenderOfflineSection() {
                 ImGui::TextDisabled("banned");
             } else {
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00f, 0.45f, 0.42f, 1.0f));
-                if (ImGui::SmallButton("Ban...")) OpenBanFor(-1, e.guid, e.nick);
+                if (ImGui::SmallButton("Ban...")) OpenBanFor(false, e.guid, e.nick);
                 ImGui::PopStyleColor();
             }
             ImGui::PopID();
@@ -204,8 +220,8 @@ void RenderBannedSection() {
             ImGui::TextDisabled("%s", b.reason[0] ? b.reason : "--");
             ImGui::TableSetColumnIndex(4);
             if (ImGui::SmallButton("Unban")) {
-                coop::moderation::Unban(b.id);
-                g_lastRefresh = -1.0;  // the row drops at the next refresh after the posted unban ran
+                coop::command_sync::Submit(std::string("unban ") + b.id);
+                g_lastRefresh = -1.0;  // the row drops at the next refresh after the posted command ran
             }
             ImGui::PopID();
         }
@@ -215,7 +231,7 @@ void RenderBannedSection() {
 }
 
 void RenderBanModal() {
-    const bool pending = (g_banSlot >= 1) || g_banGuid[0];
+    const bool pending = g_banId[0] != '\0';
     if (pending && !ImGui::IsPopupOpen("Ban player##admin"))
         ImGui::OpenPopup("Ban player##admin");
     const ImGuiIO& io = ImGui::GetIO();
@@ -224,7 +240,7 @@ void RenderBanModal() {
     if (ImGui::BeginPopupModal("Ban player##admin", nullptr,
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Text("Permanently ban %s?", g_banNick[0] ? g_banNick : "this player");
-        ImGui::TextDisabled(g_banSlot >= 1
+        ImGui::TextDisabled(g_banOnline
                                 ? "Disconnected now and refused whenever they rejoin."
                                 : "Refused whenever they rejoin.");
         ImGui::Spacing();
@@ -239,18 +255,18 @@ void RenderBanModal() {
                               "identity alone.");
         ImGui::Spacing();
         if (ImGui::Button("Ban", ImVec2(S(110.f), 0))) {
-            const char* reason = g_banReason[0] ? g_banReason : "banned by host";
-            if (g_banSlot >= 1) coop::moderation::BanPlayer(g_banToken, reason, g_banByAddress);
-            else                coop::moderation::BanOffline(g_banGuid, reason, g_banByAddress);
-            g_banSlot = -1;
-            g_banGuid[0] = '\0';
+            // The reason is the raw remainder of the line, never quoted; none typed, the ban
+            // command stores "banned by host".
+            std::string line = std::string(g_banByAddress ? "ban " : "banid ") + g_banId;
+            if (g_banReason[0]) line += std::string(" ") + g_banReason;
+            coop::command_sync::Submit(std::move(line));
+            g_banId[0] = '\0';
             g_lastRefresh = -1.0;  // pull the new ban row promptly
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(S(110.f), 0))) {
-            g_banSlot = -1;
-            g_banGuid[0] = '\0';
+            g_banId[0] = '\0';
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

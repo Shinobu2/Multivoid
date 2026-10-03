@@ -87,8 +87,13 @@ bool IsBanned(std::string_view playerId, std::string_view address, char* reasonO
 // memory).
 bool Add(const char* playerId, const char* nick, const char* address, const char* reason);
 
-// Unban a player id (removes from the set AND rewrites the file). Any thread (internal mutexes).
-void Remove(const char* playerId);
+// Unban a player id (removes from the set AND rewrites the file). True when it removed one; false
+// for an id that was not banned, changing nothing. Any thread (internal mutexes).
+bool Remove(const char* playerId);
+
+// The ids that start with `hexPrefix` (compared lower-case), in no particular order; an empty
+// prefix matches every id. Any thread (the set mutex).
+std::vector<std::string> IdsWithPrefix(std::string_view hexPrefix);
 
 // Copy all ban records, most recent first. Any thread.
 void GetSnapshot(std::vector<Entry>& out);

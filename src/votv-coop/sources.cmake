@@ -663,6 +663,8 @@ set(VOTVCOOP_SOURCES
     src/coop/commands/command_registry.cpp
     src/coop/commands/command_dispatcher.cpp
     src/coop/commands/commands_selftest.cpp
+    src/coop/commands/commands_cases_moderation.cpp
+    src/coop/commands/moderation_commands.cpp
     src/coop/permissions/context_set.cpp
     src/coop/permissions/node.cpp
     src/coop/permissions/node_map.cpp

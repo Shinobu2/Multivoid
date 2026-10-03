@@ -28,8 +28,8 @@ namespace coop::dev::roster_token_selftest {
 // accepted before the game thread has reconciled is already rejected. POSITIVE: the same call with
 // the successor's LIVE generation must be ACCEPTED, without which the negative proves nothing,
 // since a check that refuses everything would pass a negative-only drill. REAL PATH:
-// moderation::BanPlayer(stale) must log its ABORT and write no ban row -- asserting the two
-// primitives alone would test this file's copy of the rule rather than the rule.
+// moderation::BanPlayer(stale) must return Gone, log its ABORT and write no ban row -- asserting
+// the two primitives alone would test this file's copy of the rule rather than the rule.
 void Install(coop::net::Session* session);
 
 }  // namespace coop::dev::roster_token_selftest

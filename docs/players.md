@@ -203,7 +203,7 @@ nickname, skin, colour, and how they are connected, which the
 host measures from the connection and publishes so every board shows the same value. A departure
 is a row transition, which is how a lost disconnect and a fast replacement heal the same way.
 
-Kick and ban are host-only actions on the player list (`coop/moderation/`). A ban records the
+Kick and ban act only inside a running hosted session (`coop/moderation/`). A ban records the
 player's id, and their address when the host saw their own (not a relay's), with the nickname
 and the reason, in the hosted server's folder. Both are checked right after the identity proof,
 before a seat is spent, on every transport, and the ban survives host restarts; the host also
@@ -213,6 +213,16 @@ The kicked or banned player lands at the menu with a modal saying which, under a
 ([join.md](join.md) lists them). Beside the ban check, the accept edge caps how many
 connections one address may open in a window (four per thirty seconds by default, a host
 setting), the shape of MTA's join-flood protection (`coop/net/connect_history`).
+
+The host's moderation is a set of commands -- `/kick`, `/ban`, `/banid`, `/unban`, `/tphere` --
+which the player list and the Administration panel now run for the host. A friend can be given
+`/kick`, `/ban`, `/banid` or `/unban` by a line in the server's permission files
+(`multivoid_servers\<server>\permissions\users\<their player id>.json`, LuckPerms' format, e.g.
+`{"permissions": ["multivoid.kick"]}`; a player's id shows when you hover their name in the player
+list or the Administration panel); `/tphere` stays the host's until a command can name where to
+teleport. The host can deny itself a command the same way, in a file named by its own id (hover
+your own row in the player list). A player whose permission file sets `multivoid.kick.exempt` (or
+`.ban.exempt`) cannot be kicked or banned by a friend, only by the host.
 
 ## Who owns what
 

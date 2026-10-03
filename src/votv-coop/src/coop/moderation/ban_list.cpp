@@ -312,8 +312,8 @@ bool Add(const char* playerId, const char* nick, const char* address, const char
     return true;
 }
 
-void Remove(const char* playerId) {
-    if (!playerId || !playerId[0]) return;
+bool Remove(const char* playerId) {
+    if (!playerId || !playerId[0]) return false;
     std::lock_guard<std::mutex> w(g_writeMutex);
     std::vector<Entry> copy;
     bool removed = false;
@@ -330,12 +330,21 @@ void Remove(const char* playerId) {
             remaining = g_set.size();
         }
     }
-    if (!removed) {
-        UE_LOGW("ban_list: unban %.8s... -- was not banned", playerId);
-        return;
-    }
+    if (!removed) return false;
     UE_LOGI("ban_list: unbanned %.8s... -- %zu remain", playerId, remaining);
     WriteFile(copy);
+    return true;
+}
+
+std::vector<std::string> IdsWithPrefix(std::string_view hexPrefix) {
+    std::string prefix(hexPrefix);
+    for (char& c : prefix)
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + ('a' - 'A'));
+    std::vector<std::string> out;
+    std::lock_guard<std::mutex> s(g_setMutex);
+    for (const Entry& e : g_set)
+        if (std::string_view(e.id).substr(0, prefix.size()) == prefix) out.emplace_back(e.id);
+    return out;
 }
 
 void GetSnapshot(std::vector<Entry>& out) {

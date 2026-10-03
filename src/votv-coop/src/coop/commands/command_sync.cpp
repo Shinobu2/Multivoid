@@ -12,9 +12,12 @@
 
 #include "coop/commands/command_dispatcher.h"
 #include "coop/commands/command_line.h"
+#include "coop/commands/moderation_commands.h"
 
 #include "coop/comms/chat_feed.h"
+#include "coop/moderation/ban_list.h"
 #include "coop/moderation/moderation.h"
+#include "coop/moderation/seen_players.h"
 #include "coop/net/intent_bucket.h"
 #include "coop/net/peer_identity.h"
 #include "coop/net/protocol.h"
@@ -95,11 +98,35 @@ int Pick(int count) {
 const coop::commands::Policy g_policy{&PermissionCheck, &Pick, &HoldsNode,
                                       &coop::permissions::host::HoldsExplicitly};
 
+// The nick a seen-players record holds for an id; empty when there is none.
+std::string RecordNick(std::string_view id) {
+    coop::seen_players::Entry e;
+    if (!coop::seen_players::FindByGuid(std::string(id).c_str(), e)) return std::string();
+    return e.nick;
+}
+
+// The moderation commands' ports: the verbs of coop/moderation and this transport's ReplyTo.
+coop::commands::moderation::Ports RealModerationPorts() {
+    coop::commands::moderation::Ports p;
+    p.kick = &coop::moderation::KickPlayer;
+    p.ban = &coop::moderation::BanPlayer;
+    p.banOffline = &coop::moderation::BanOffline;
+    p.unban = &coop::moderation::Unban;
+    p.teleport = &coop::moderation::TeleportPlayerToMe;
+    p.hosted = &coop::moderation::HostedSessionRunning;
+    p.idsWithPrefix = &coop::ban_list::IdsWithPrefix;
+    p.recordNick = &RecordNick;
+    p.notify = &ReplyTo;
+    return p;
+}
+
 struct RegistryHolder {
     coop::commands::Registry registry;
     RegistryHolder() {
         if (!coop::commands::RegisterBuiltins(registry))
             UE_LOGE("command_sync: builtin registration refused");
+        if (!coop::commands::moderation::Register(registry, RealModerationPorts()))
+            UE_LOGE("commands: the moderation commands did not register");
     }
 };
 

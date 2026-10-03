@@ -55,8 +55,8 @@ void Tick(coop::net::Session* s) {
         coop::moderation::TokenFor(kSlot, row.playerNo, s_stale ? gen + 1 : gen), "ban drill", true);
     g_step = Step::Posted;
 
-    // FIFO: this runs after the ban's own task, in the same drain. The kick's teardown is
-    // synchronous (KickClaimed), so the generation is already cleared when the ban took.
+    // The ban above is already done (the verb is synchronous), and the kick's teardown is
+    // synchronous too (KickClaimed), so the generation is already cleared when the ban took.
     GT::Post([s, id, gen] {
         // The store is read as a list, not asked "is this banned?": that question logs a refusal.
         std::vector<coop::ban_list::Entry> bans;

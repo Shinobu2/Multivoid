@@ -53,7 +53,7 @@ void OnSessionStart();
 // Copy all records, most-recently-seen first. Any thread.
 void GetSnapshot(std::vector<Entry>& out);
 
-// Look up one record by GUID (for moderation::BanOffline). Any thread.
+// Look up one record by GUID (for moderation::BanOffline and the offline ban's reply). Any thread.
 // Returns false if unknown.
 bool FindByGuid(const char* guid, Entry& out);
 

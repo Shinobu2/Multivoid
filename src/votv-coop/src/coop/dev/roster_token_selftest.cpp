@@ -70,9 +70,17 @@ void RunSuccessorChecks(int slot, const Capture& stale,
     UE_LOGI("roster_token_selftest: firing the REAL BanPlayer with the stale token for #%u "
             "-- it must ABORT and ban nobody",
             static_cast<unsigned>(stale.playerNo));
-    coop::moderation::BanPlayer(
+    // The verb is synchronous and this runs inside the ledger's hand-over listener, re-entrantly:
+    // the stale token is Gone at the generation check, before any side effect.
+    const coop::moderation::ModResult real = coop::moderation::BanPlayer(
         coop::moderation::TokenFor(slot, stale.playerNo, stale.generation),
         "roster_token_selftest (must ABORT)", true);
+    if (real == coop::moderation::ModResult::Gone)
+        UE_LOGI("roster_token_selftest: REAL PATH refused the stale token (Gone)");
+    else
+        UE_LOGW("roster_token_selftest: FAIL -- the real BanPlayer answered %d for the stale token, "
+                "expected Gone",
+                static_cast<int>(real));
 }
 
 void OnSlotReplaced(int slot, const coop::roster_ledger::Row& outgoing,
