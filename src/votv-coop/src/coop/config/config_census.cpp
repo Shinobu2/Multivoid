@@ -61,7 +61,11 @@ std::string Resolved(const Row& r, const std::string& raw) {
     return raw;  // free strings are unvalidated, and an identity never reaches here
 }
 
-// A refused value printed as itself, which is whatever a file or an environment held: printable
+}  // namespace
+
+namespace internal {
+
+// A value printed as itself, which is whatever a file, an environment or the host held: printable
 // ASCII only and capped, so the line stays one line a rig's pattern can read.
 std::string Printable(const std::string& raw) {
     constexpr size_t kMax = 64;
@@ -73,7 +77,7 @@ std::string Printable(const std::string& raw) {
     return s;
 }
 
-}  // namespace
+}  // namespace internal
 
 void ReportEffectiveConfig() {
     size_t count = 0;
@@ -107,7 +111,7 @@ void ReportEffectiveConfig() {
         const bool valid = !unread && ValueValidForKey(r.key, raw, &why);
         if (unread) why = std::string("multivoid.ini ") + IniFaultWords(fault);
         const bool refused = !valid && r.failClosed;
-        const std::string value = Redacted(r) ? "<set>" : refused ? Printable(raw) : Resolved(r, raw);
+        const std::string value = Redacted(r) ? "<set>" : refused ? internal::Printable(raw) : Resolved(r, raw);
         // The env/ini label holds only before the first SetValue: fromEnv is false when the
         // runtime layer answered, so a row set this run reads "ini" here whatever its source.
         if (valid)

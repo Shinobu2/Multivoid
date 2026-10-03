@@ -84,6 +84,11 @@ bool PickRawLayered(const config_registry::Row* row, std::string& raw,
                     bool* fromEnvOut = nullptr, IniScan* scanOut = nullptr,
                     IniFault* faultOut = nullptr);
 
+// A value for a log line: printable ASCII only (anything else becomes '?') and capped at 64
+// characters, so a stored or wire-supplied value can never break the line. Defined in
+// config_census.cpp; the census and the session layer both print through it.
+std::string Printable(const std::string& raw);
+
 // C-locale numeric emission for a float row's value, so the catalog's default and the census's
 // resolved value are the same string on any machine. Defined in config_example.cpp.
 std::string FormatFloat(float v);

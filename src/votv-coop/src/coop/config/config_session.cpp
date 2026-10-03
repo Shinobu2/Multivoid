@@ -40,9 +40,11 @@ std::unordered_map<const Row*, std::string> g_sessionLayer;
 // answer.
 std::atomic<int> g_sessionRole{0};
 
-// A value as the logs show it: a credential is never printed.
-const char* Shown(const Row* row, const std::string& v) {
-    return config_registry::IsCredentialKey(row->key) ? "<set>" : v.c_str();
+// A value as the logs show it: a credential is never printed, and any other value goes through
+// internal::Printable, since the host chose its bytes.
+std::string Shown(const Row* row, const std::string& v) {
+    if (config_registry::IsCredentialKey(row->key)) return "<set>";
+    return internal::Printable(v);
 }
 
 }  // namespace
@@ -74,7 +76,7 @@ std::string SessionSafe(const Row* row, const std::string& raw, const char* why)
     // The stored value itself is not printed: it may be a credential's.
     const std::string def = DefaultText(*row);
     UE_LOGW("config: SESSION %s=%s (%s; the stored value was not valid or too long)", row->key,
-            Shown(row, def), why);
+            Shown(row, def).c_str(), why);
     return def;
 }
 
@@ -109,7 +111,8 @@ void SessionLayerBegin(bool host) {
     if (!stale.empty())
         UE_LOGW("config: SESSION dropped %u stale rows", static_cast<unsigned>(stale.size()));
     for (const auto& f : fresh)
-        UE_LOGI("config: SESSION %s=%s (host start)", f.first->key, Shown(f.first, f.second));
+        UE_LOGI("config: SESSION %s=%s (host start)", f.first->key,
+                Shown(f.first, f.second).c_str());
     for (const auto& f : fresh) internal::PostNotify(f.first);
     // A dropped row the new layer does not hold again changed too; a fresh row is told above.
     for (const Row* row : stale) {
@@ -122,7 +125,7 @@ void SessionLayerBegin(bool host) {
 void SessionLayerPut(const Row* row, const std::string& text) {
     if (!ValueValidForKey(row->key, text, nullptr)) {
         UE_LOGW("config: SESSION %s REFUSED -- '%s' is not a valid value", row->key,
-                Shown(row, text));
+                Shown(row, text).c_str());
         return;
     }
     bool held = false;
@@ -137,7 +140,7 @@ void SessionLayerPut(const Row* row, const std::string& text) {
         UE_LOGW("config: SESSION %s ignored -- no client session is running", row->key);
         return;
     }
-    UE_LOGI("config: SESSION %s=%s (from the host)", row->key, Shown(row, text));
+    UE_LOGI("config: SESSION %s=%s (from the host)", row->key, Shown(row, text).c_str());
     internal::PostNotify(row);
 }
 
