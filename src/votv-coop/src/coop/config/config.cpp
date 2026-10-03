@@ -240,12 +240,12 @@ namespace internal {
 // is '"' is QUOTED, read left to right from the character after it: '\' followed by '"' or '\'
 // yields that character, '\' followed by anything else is kept with the character after it, the
 // first '"' not consumed by an escape closes the value and whatever follows it (an inline
-// comment) is ignored, and a value with no closing quote is the rest of the line. Any other
-// value is edge-trimmed, cut at the first ';' (the string layer: only one that begins the value
-// or follows a space or tab, so device names with an interior ';' round-trip; the typed layers,
-// wsPrecededOnly false: any ';', since their lines never carry a legitimate one), and trimmed
-// again. The typed readers cook every layer's raw, so a quoted environment twin reads unquoted
-// and an edge-spaced one trimmed: a harmless widening.
+// comment) is ignored, and a value with no closing quote is the rest of the line, escapes
+// processed. Any other value is edge-trimmed, cut at the first ';' (the string layer: only one
+// that begins the value or follows a space or tab, so device names with an interior ';'
+// round-trip; the typed layers, wsPrecededOnly false: any ';', since their lines never carry a
+// legitimate one), and trimmed again. The typed readers cook every layer's raw, so a quoted
+// environment twin reads unquoted and an edge-spaced one trimmed: a harmless widening.
 std::string CookIniValue(const std::string& v, bool wsPrecededOnly) {
     const std::string t = TrimEdges(v);
     if (!t.empty() && t[0] == '"') {
