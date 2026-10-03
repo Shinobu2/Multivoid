@@ -19,7 +19,8 @@ namespace coop::permissions::host {
 
 // Builds a fresh Model from `<serverDir>\permissions` (an empty `serverDir` gives the empty store,
 // logged), logs the load and each problem, and publishes the model with its subject
-// (`server=<serverId>`, `mode=listen`). The store loads whole or not at all (ShouldLoad): with any
+// (`mode=listen`, and `server=<serverId>` except for the id `global`, which ContextSet drops as
+// LuckPerms does, so that subject has no server). The store loads whole or not at all (ShouldLoad): with any
 // problem the published model is empty and BROKEN, and every check but the console's is refused
 // until the store is fixed. A server with no store is not broken: the defaults apply.
 // `serverId` is the hosted server's id. TimelineThread.
