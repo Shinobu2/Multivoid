@@ -97,7 +97,9 @@ S3 = re.compile(r"(?:flag (?:it )?for|file (?:it )?(?:as|under)|belongs in|shoul
 # 57 -> 59 (2026-10-03), CONTENT, both lines read: SP-1a's sheet (SERVER_PROFILES_ARC.md §7a) dictated the
 # docs/code-map.md row for coop/server_profile/ and the EnsureHosted call in session_runtime.cpp verbatim --
 # doc quoting code again, no private prose.
-OVERLAP_BASELINE = 59
+# 59 -> 60 (2026-10-03), CONTENT, the line read: CMD C-2's sheet (COMMANDS_ARC.md 10c.3) dictated the
+# command_drill row of config_registry_rows_dev.inc verbatim -- doc quoting code, no private prose.
+OVERLAP_BASELINE = 60
 # EXCLUDED because it is a deliberate practice, not a leak: copying memory topics into the public
 # piles archive. It alone contributes ~1,263 of the raw 1,300 overlaps.
 OVERLAP_SKIP = ("docs/piles/_archive/session-log/",)
