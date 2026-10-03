@@ -225,6 +225,11 @@ void OnRequest(const uint8_t* bytes, size_t len, int slot) {
     coop::net::Session* s = g_session.load(std::memory_order_acquire);
     if (!s || s->role() != coop::net::Role::Host) return;
     if (slot < 1 || slot >= kMaxPeers) return;
+    // A seated slot whose Join has not landed has no player id yet: its line is dropped, before the
+    // bucket. MTA's server ignores a not-yet-joined player's commands
+    // (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:2410, IsJoined); an unmodified
+    // client sends its Join one tick after its slot arrives, so no typed line is lost.
+    if (coop::roster_ledger::Get(slot).guid.empty()) return;
     const Caller caller{slot, s->peerGenerationForSlot(slot), false};
 
     const uint64_t now = ::GetTickCount64();
