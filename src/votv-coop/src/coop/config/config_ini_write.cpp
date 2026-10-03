@@ -150,9 +150,10 @@ bool WriteIniValueAt(const std::wstring& path, const char* key, const char* valu
             }
             lines.push_back(s);
         }, &fault);
-        // A lock passes; bytes that are not text stay, so only a failed read is tried again.
+        // A lock passes; bytes that are not text stay, so only a failed read is tried again --
+        // and never slept after, since no try follows.
         if (st != IniScan::Unreadable || fault != IniFault::ReadFailed) break;
-        ::Sleep(20);
+        if (attempt + 1 < 5) ::Sleep(20);
     }
     if (st == IniScan::Unreadable) {
         // Locked, failing mid-read, or not text: whichever, the collected line list is not the
@@ -298,9 +299,10 @@ static bool RemoveKeyLinesAt(const std::wstring& path, const char* key, int& rem
         lines.clear();
         scan = internal::ScanIniFile(path, [&](const std::string& l) { lines.push_back(l); },
                                      &fault);
-        // A lock passes; bytes that are not text stay, so only a failed read is tried again.
+        // A lock passes; bytes that are not text stay, so only a failed read is tried again --
+        // and never slept after, since no try follows.
         if (scan != IniScan::Unreadable || fault != IniFault::ReadFailed) break;
-        ::Sleep(20);
+        if (attempt + 1 < 5) ::Sleep(20);
     }
     if (scan == IniScan::Absent) return true;
     if (scan != IniScan::Ok) {
