@@ -513,6 +513,9 @@ void Start() {
     pump::SetSession(&session_runtime::Session());
     // A config change's subscribers run on the game thread.
     cfg::SetNotifier([](std::function<void()> task) { GT::Post(std::move(task)); });
+    // The modules that follow a config row subscribe once, here, before any pane draws; the boot
+    // seeds in the timeline thread read the rows, and a later set reaches the modules through these.
+    coop::nameplate::SubscribeRow();
     if (!ui::imgui_overlay::Init()) {
         UE_LOGW("harness: imgui_overlay::Init failed -- F1 menu unavailable this run");
     }

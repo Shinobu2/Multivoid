@@ -370,7 +370,7 @@ void RenderChatPref() {
 void RenderNameplatePref() {
     bool on = coop::nameplate::LocalVisible();
     if (ImGui::Checkbox("Show my nameplate to other players", &on))
-        coop::nameplate::RequestLocalVisible(on);
+        coop::config::SetValue(::coop::config_registry::rows::nameplate, on ? "1" : "0");
     ImGui::TextDisabled("Off = your floating name/health bar disappears on every peer's");
     ImGui::TextDisabled("screen -- synced live and to late joiners; persists across sessions.");
 

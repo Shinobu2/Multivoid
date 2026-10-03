@@ -9,7 +9,6 @@
 #include "coop/session/player_handshake.h"
 #include "coop/voice/voice_chat.h"
 #include "coop/config/config.h"
-#include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/trace.h"   // LineBlockedStatDyn -- the occlusion (gray plate) check
@@ -188,22 +187,28 @@ bool LocalVisible() {
     return g_localVisible.load(std::memory_order_relaxed);
 }
 
-void RequestLocalVisible(bool visible) {
-    // Render thread (the F1 checkbox). Persist NOW (SetValue is
-    // thread-safe/atomic-swap); state + announce hop to the game thread --
-    // the RequestSkin discipline.
-    coop::config::SetValue(coop::config_registry::rows::nameplate, visible ? "1" : "0");
-    ue_wrap::game_thread::Post([visible] {
-        g_localVisible.store(visible, std::memory_order_relaxed);
-        UE_LOGI("nameplate: local plate -> %s (persisted; announcing)",
-                visible ? "VISIBLE" : "HIDDEN");
-        if (coop::net::Session* s = g_session.load(std::memory_order_acquire))
-            coop::player_handshake::AnnounceLocalNameplate(*s, visible);
-        // Transient: this player's own UI confirmation, not the lobby's record.
-        coop::chat_feed::Push(visible ? L"Nameplate: shown to other players"
-                                      : L"Nameplate: hidden from other players",
-                              coop::chat_feed::Keep::Transient);
-    });
+namespace {
+
+// The `nameplate` row changed (a pane's SetValue, a ResetValue, a review keep-line): re-resolve it,
+// apply it locally and announce it to the session (host: broadcast; client: to host for
+// rebroadcast). Game thread -- the config notifier runs every subscriber there.
+void OnNameplateRowChanged() {
+    const bool visible = coop::config::ResolveFlag(::coop::config_registry::rows::nameplate);
+    g_localVisible.store(visible, std::memory_order_relaxed);
+    UE_LOGI("nameplate: local plate -> %s (row applied; announcing)",
+            visible ? "VISIBLE" : "HIDDEN");
+    if (coop::net::Session* s = g_session.load(std::memory_order_acquire))
+        coop::player_handshake::AnnounceLocalNameplate(*s, visible);
+    // Transient: this player's own UI confirmation, not the lobby's record.
+    coop::chat_feed::Push(visible ? L"Nameplate: shown to other players"
+                                  : L"Nameplate: hidden from other players",
+                          coop::chat_feed::Keep::Transient);
+}
+
+}  // namespace
+
+void SubscribeRow() {
+    coop::config::Subscribe(::coop::config_registry::rows::nameplate, &OnNameplateRowChanged);
 }
 
 void StoreVisibleForSlot(int slot, bool visible) {
