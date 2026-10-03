@@ -498,6 +498,16 @@ void Session::Stop() {
 
     auto* sockets = SteamNetworkingSockets();
     if (sockets) {
+        // The band dies with the session: a handle left in it would hold a band entry into the next
+        // session, whose sweep would then close it as an identity that never proved. The net thread
+        // has joined and the accept edges refuse once running_ is false, so nothing parks after
+        // this and the band and peer_admission's host state have no other writer.
+        for (int i = 0; i < kMaxPending; ++i) {
+            const uint32_t h = pendingConns_[i].exchange(0);
+            pendingSinceMs_[i].store(0, std::memory_order_release);
+            peer_admission::HostForgetPending(i);
+            if (h != 0) EndPendingSocket(h, EndReason::HostStopped, "session stop");
+        }
         for (int i = 0; i < kMaxPeers; ++i) {
             // GEN: clear -- session teardown empties every slot. A Session sits stopped between
             // Stop and the next Start, and a generation left live across that window would read
@@ -519,10 +529,12 @@ void Session::Stop() {
             }
         }
         for (int i = 0; i < 20; ++i) {
-            sockets->RunCallbacks();
             // P2P: closing a connection may need a final rendezvous signal, so the signaling
             // transport is polled through the linger window too. Null on the direct transport.
+            // Polled before RunCallbacks, as the net thread does: an offer the last poll delivers
+            // is dispatched, refused and logged in the same iteration.
             if (signaling_) signaling_->Poll();
+            sockets->RunCallbacks();
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         const uint32_t hPoll = hPollGroup_.exchange(0);

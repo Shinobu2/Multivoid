@@ -607,6 +607,13 @@ public:
     // left in the batch. Net thread.
     void RetirePending(int pendIdx, uint32_t hConn, EndReason code, const char* reason);
 
+    // The close of a socket the host ends without ever seating it, for a reason the host decides: a
+    // refusal at the proof, the proof deadline, the band's eviction, an accept-edge refusal, a Stop.
+    // One line per end, so a reader of the log sees how every join the HOST ended without a seat
+    // ended (a socket the client or the transport ends prints its own line or none). Net thread, or
+    // Stop once the net thread has joined.
+    void EndPendingSocket(uint32_t hConn, EndReason code, const char* reason);
+
     // Drop a pending entry (its connection closed, or it was refused).
     void ReleasePending(uint32_t hConn);
     // Is this connection already parked? Net thread only.

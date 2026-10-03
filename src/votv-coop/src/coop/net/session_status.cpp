@@ -152,10 +152,7 @@ int Session::ParkPending(uint32_t hConn) {
                 static_cast<unsigned>(victim), oldest,
                 static_cast<unsigned long long>(NowMs() - oldestMs),
                 Describe(EndReason::TooSlowToProve).id);
-        if (auto* sockets = SteamNetworkingSockets())
-            sockets->CloseConnection(static_cast<HSteamNetConnection>(victim),
-                                     ToTransportEnd(EndReason::TooSlowToProve),
-                                     "too slow to prove your identity", false);
+        EndPendingSocket(victim, EndReason::TooSlowToProve, "too slow to prove your identity");
     }
     return oldest;
 }
@@ -175,10 +172,7 @@ void Session::SweepPending() {
         pendingConns_[i].store(0, std::memory_order_release);
         pendingSinceMs_[i].store(0, std::memory_order_release);
         coop::net::peer_admission::HostForgetPending(i);
-        if (auto* sockets = SteamNetworkingSockets())
-            sockets->CloseConnection(static_cast<HSteamNetConnection>(hConn),
-                                     ToTransportEnd(EndReason::IdentityProofTimedOut),
-                                     "identity proof timed out", false);
+        EndPendingSocket(hConn, EndReason::IdentityProofTimedOut, "identity proof timed out");
     }
 }
 
@@ -191,6 +185,12 @@ void Session::RetirePending(int pendIdx, uint32_t hConn, EndReason code, const c
             coop::net::peer_admission::HostForgetPending(pendIdx);
         }
     }
+    EndPendingSocket(hConn, code, reason);
+}
+
+void Session::EndPendingSocket(uint32_t hConn, EndReason code, const char* reason) {
+    UE_LOGI("net: socket 0x%08x ended without a seat [%s]", static_cast<unsigned>(hConn),
+            Describe(code).id);
     if (auto* sockets = SteamNetworkingSockets())
         sockets->CloseConnection(static_cast<HSteamNetConnection>(hConn),
                                  ToTransportEnd(code),
@@ -380,17 +380,24 @@ void Session::HandleConnStatusChanged(void* info) {
     if (cfg_.role == Role::Host &&
         oldState == k_ESteamNetworkingConnectionState_None &&
         newState == k_ESteamNetworkingConnectionState_Connecting) {
+        // A queued state change can outlive the connection: a child the listen socket's close
+        // destroyed after the last RunCallbacks leaves a Connecting that nothing may accept.
+        if (!sockets->GetConnectionInfo(hConn, nullptr)) return;
         // The accept policy before the accept: the connection cap, at the edge that costs no slot
-        // and no handshake.
+        // and no handshake. A session that is stopping refuses instead (Stop's linger loop pumps
+        // callbacks with running_ already false), so nothing parks after the band is emptied.
         char why[128] = {};
         bool counted = false;
-        const EndReason refusal =
-            AcceptPolicy(sockets, hConn, why, sizeof(why), &counted);
+        EndReason refusal = EndReason::HostStopped;
+        if (running_.load()) {
+            refusal = AcceptPolicy(sockets, hConn, why, sizeof(why), &counted);
+        } else {
+            std::snprintf(why, sizeof(why), "session stop");
+        }
         if (refusal != EndReason::None) {
             const char* text = why[0] ? why : Describe(refusal).text;
             UE_LOGW("net: rejecting incoming connection [%s] '%s'", Describe(refusal).id, text);
-            sockets->CloseConnection(hConn, ToTransportEnd(refusal), text,
-                                     /*bEnableLinger*/false);
+            EndPendingSocket(hConn, refusal, text);
             return;
         }
         const EResult rc = sockets->AcceptConnection(hConn);
@@ -441,16 +448,24 @@ void Session::HandleConnStatusChanged(void* info) {
             // or one where GNS skipped Connecting, which never met the connection cap, so the cap
             // runs here.
             if (!IsPendingConn(hConn)) {
+                // A queued state change can outlive the connection: GNS delivers callbacks it
+                // queued before this side closed the handle (steamnetworkingsockets_udp.cpp:1318-1334
+                // queues Connected inside the accept). A handle that no longer exists was ended by
+                // this side, which logged its end; nothing is parked or refused for it.
+                if (!sockets->GetConnectionInfo(hConn, nullptr)) return;
                 char why[128] = {};
                 bool counted = false;
-                const EndReason refusal =
-                    AcceptPolicy(sockets, hConn, why, sizeof(why), &counted);
+                EndReason refusal = EndReason::HostStopped;
+                if (running_.load()) {
+                    refusal = AcceptPolicy(sockets, hConn, why, sizeof(why), &counted);
+                } else {
+                    std::snprintf(why, sizeof(why), "session stop");
+                }
                 if (refusal != EndReason::None) {
                     const char* text = why[0] ? why : Describe(refusal).text;
                     UE_LOGW("net: rejecting late-register connection [%s] '%s'",
                             Describe(refusal).id, text);
-                    sockets->CloseConnection(hConn, ToTransportEnd(refusal), text,
-                                             /*bEnableLinger*/false);
+                    EndPendingSocket(hConn, refusal, text);
                     return;
                 }
                 const int pend = ParkPending(hConn);
