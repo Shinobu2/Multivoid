@@ -79,7 +79,8 @@ Decision Evaluate(const Resolved& r, std::string_view permission, bool owner);
 bool IsSetExplicitly(const Resolved& r, std::string_view permission);
 
 // The owner thread's cache: one Resolved per (player id, contexts), rebuilt when the groups'
-// revision or that user's revision moved or `validUntil != 0 && now > validUntil`.
+// revision or that user's revision moved or `validUntil != 0 && now > validUntil`. Every id the
+// model has no user for shares one entry, keyed `default` (a 32-hex id never equals it).
 class Checker {
 public:
     explicit Checker(const Model& m) : model_(m) {}

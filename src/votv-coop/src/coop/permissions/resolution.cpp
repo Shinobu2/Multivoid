@@ -135,6 +135,9 @@ bool IsSetExplicitly(const Resolved& r, std::string_view permission) {
 std::shared_ptr<const Resolved> Checker::Get(std::string_view playerId, const ContextSet& subject, int64_t now) {
     Key key{std::string(playerId), subject.Pairs()};
     for (char& c : key.playerId) c = LowerAscii(c);
+    // An id with no user row resolves as the default holder does, so every such id shares the
+    // default holder's one entry: ids a client types are not an unbounded set of cache keys.
+    if (model_.FindUser(key.playerId) == nullptr) key.playerId = std::string(kDefaultGroup);
     const uint64_t groups = model_.GroupsRevision();
     const uint64_t user = model_.UserRevision(key.playerId);
     auto it = entries_.find(key);

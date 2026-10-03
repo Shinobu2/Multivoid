@@ -247,6 +247,24 @@ void CacheCases(CheckSink& sink) {
         const auto after = c.Get(Id('9'), Ctx(), kNow);
         sink.Check(Is(*after, "mine", Tristate::True), "unknown: the same Get sees a grant that creates the user");
     }
+    {
+        // Every id with no user row shares one cache entry, answered as default's nodes whoever asked first.
+        Model m;
+        Grant(m, HolderKind::Group, "default", {{"d.node", true}});
+        Grant(m, HolderKind::User, Id('1'), {{"own", true}});
+        Checker c(m);
+        const auto first = c.Get(Id('8'), Ctx(), kNow);
+        const size_t afterFirst = c.BuildCountForTest();
+        const auto second = c.Get(Id('9'), Ctx(), kNow);
+        sink.Check(second == first && c.BuildCountForTest() == afterFirst,
+                   "cache: two ids with no user row share one entry");
+        sink.Check(Is(*second, "d.node", Tristate::True), "cache: the shared entry answers default's nodes");
+        const auto known = c.Get(Id('1'), Ctx(), kNow);
+        sink.Check(known != first && c.BuildCountForTest() == afterFirst + 1 && Is(*known, "own", Tristate::True),
+                   "cache: an id with a user row keeps its own entry");
+        sink.Check(c.Get(Id('7'), Ctx(), kNow) == first && c.BuildCountForTest() == afterFirst + 1,
+                   "cache: a third unknown id still shares the entry");
+    }
 }
 
 void QueryCases(CheckSink& sink) {
