@@ -108,6 +108,9 @@ void BanPlayer(const PlayerToken& token, const char* reason, bool byAddress) {
         // The typed reason rides the close as its text, so the banned player reads it under the
         // code; the constant stands in when none was typed.
         const char* why = reason.empty() ? "banned by host" : reason.c_str();
+        // Accepted window: the banned player's re-proof over a second connection, whose ban check
+        // ran on the net thread just before the Add above, is seated for this session. MTA has
+        // none: its join runs on the thread its bans do (CGame.cpp:1956).
         if (!s->KickWithToken(token.slot, token.generation, coop::net::EndReason::BannedByHost, why))
             UE_LOGW("moderation: ban #%u -- kick did nothing (already gone?)",
                     static_cast<unsigned>(token.playerNo));
@@ -137,7 +140,11 @@ void BanOffline(const char* guid, const char* reason, bool byAddress) {
                 address.empty() ? "not enforced" : address.c_str());
         // A matching player still seated goes too. MTA's AddBan also kicks every seated player
         // matching the ban's IP (CStaticFunctionDefinitions.cpp:12157-12170); ours kicks the banned
-        // id only and refuses others at that address at their next proof.
+        // id only, so bystanders at a shared address keep their session and meet the refusal at
+        // their next proof (the named cost of an address key, undone by Unban).
+        // Accepted window: a joiner whose ban check ran on the net thread just before the Add
+        // above is seated for this session. MTA has none: its join runs on the thread its bans
+        // do (CGame.cpp:1956).
         for (int k = 1; k < static_cast<int>(coop::players::kMaxPeers); ++k) {
             const uint32_t gen = s->peerGenerationForSlot(k);
             if (gen != 0 && s->ProvedGuidForSlotWithToken(k, gen) == guid)

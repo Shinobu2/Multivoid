@@ -264,7 +264,7 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
         // save-blocked); synchronous, so it completes before Start.
         coop::save_guard::BackupSaveOnSessionStart();
         // The seen-players registry, host bookkeeping on any topology (on a relayed or unknown
-        // path the address stays empty).
+        // path a record keeps the address it last had, and none if it never had one).
         coop::seen_players::Load();
         // The ban list, on every topology: read from the hosted server's folder, and asked at the
         // identity proof, which both transports pass.

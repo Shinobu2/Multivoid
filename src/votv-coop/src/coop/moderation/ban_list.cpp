@@ -317,6 +317,7 @@ void Remove(const char* playerId) {
     std::lock_guard<std::mutex> w(g_writeMutex);
     std::vector<Entry> copy;
     bool removed = false;
+    size_t remaining = 0;
     {
         std::lock_guard<std::mutex> s(g_setMutex);
         const auto it = std::find_if(g_set.begin(), g_set.end(),
@@ -326,12 +327,14 @@ void Remove(const char* playerId) {
             g_index = BuildAddressIndex(g_set);
             copy = g_set;
             removed = true;
+            remaining = g_set.size();
         }
     }
     if (!removed) {
         UE_LOGW("ban_list: unban %.8s... -- was not banned", playerId);
         return;
     }
+    UE_LOGI("ban_list: unbanned %.8s... -- %zu remain", playerId, remaining);
     WriteFile(copy);
 }
 

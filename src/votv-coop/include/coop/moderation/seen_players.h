@@ -1,6 +1,6 @@
 // coop/moderation/seen_players.h -- HOST-side persistent registry of every player this host has
 // ever seen: the durable identity GUID from the Join packet, the last known nick, the last seen
-// time and the last known enforceable address (moderation::EnforceableAddress; empty if none).
+// time and the last known enforceable address (EnforceableAddress; kept across a join without one).
 //
 // Gameplay/network layer (principle 7). It feeds the F1 > Administration > Players panel -- the
 // offline section shows nick and last seen, and the Ban button needs the record's id, which is the
@@ -28,7 +28,7 @@ namespace coop::seen_players {
 struct Entry {
     char      guid[33] = {};   // 32 hex chars + NUL (validated upstream at the wire)
     char      nick[coop::text::kNickBufBytes] = {};  // last known nick, UTF-8
-    char      ip[64]   = {};   // last enforceable remote address (no port); empty when none
+    char      ip[64]   = {};   // last enforceable remote address (no port); kept across a join without one
     long long lastSeenUnix = 0;
     bool      online = false;  // currently connected to this host's session
 };

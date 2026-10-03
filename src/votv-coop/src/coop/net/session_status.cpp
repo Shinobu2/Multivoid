@@ -36,9 +36,10 @@ namespace {
 //
 EndReason JudgeDial(const DialReport& d) {
     // No need to ask "did this dial ever connect", and the reason is the LINE, not ICE: a host
-    // refusing at its own accept edge (a ban, the connection cap) never reaches ICE either, but its
+    // refusing at its own accept edge (the connection cap) never reaches ICE either, but its
     // close still travels the rendezvous channel as a line from its identity, which the dispatch
-    // pass counts BEFORE handing it to the transport. So every host-decided reason arrives with
+    // pass counts BEFORE handing it to the transport. (A ban is not among them: it is refused at
+    // the identity proof, over a link already up.) So every host-decided reason arrives with
     // peerAnswered true and survives, and so does a link lost after a session ran. The one hole,
     // stated rather than waved away: a GNS-level rejection answers with SendRejectionSignal, which
     // this client keeps mute so nobody can scrape who is online, so a host that is registered but

@@ -75,14 +75,14 @@ void KickPlayer(const PlayerToken& token);
 
 // Permanently ban the captured player by the id their identity proof established and, when
 // `byAddress` is set and the host saw their own address on a direct path, that address too; then
-// kick them -- MTA's order in CStaticFunctionDefinitions::BanPlayer, whose KickPlayer/BanPlayer
-// pair this module mirrors. Divergence: MTA's BanPlayer/AddBan also kick every seated player
-// matching the ban's IP (reference/mtasa-blue/Server/mods/deathmatch/logic/
-// CStaticFunctionDefinitions.cpp:11998-12001, :12157-12170); ours kicks the banned id only and
-// refuses others at that address at their next proof. Host-only. The ban survives host restarts
-// and is checked at the identity proof of every future join; `reason` is stored on the record and
-// rides the banned player's close (null/empty is fine). Safe to call from the render thread. The
-// id and the address are read BEFORE the kick because the kick clears the slot.
+// kick them -- MTA's order in CStaticFunctionDefinitions::BanPlayer. Divergence: MTA's BanPlayer/
+// AddBan also kick every seated player matching the ban's IP (reference/mtasa-blue/Server/mods/
+// deathmatch/logic/ CStaticFunctionDefinitions.cpp:11998-12001, :12157-12170); ours kicks the
+// banned id only, because bystanders at a shared address (a household router, a carrier address) keep their
+// session and meet the refusal at their next proof -- the named cost, undone by Unban.
+// Host-only. The ban survives host restarts and is checked at the identity proof of every future
+// join; `reason` is stored on the record and rides the banned player's close (null/empty is fine).
+// Render-thread safe. The id and address are read BEFORE the kick, which clears the slot.
 //
 // ABORTS -- writing no ban and kicking nobody -- if the slot no longer holds the captured player,
 // or their identity proof has not landed. This is the whole point of the token: a permanent ban

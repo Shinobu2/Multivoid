@@ -25,11 +25,14 @@
 
 // Divergences from MTA's CBanManager.cpp (reference/mtasa-blue/Server/mods/deathmatch/logic/):
 //  - MTA matches an IP against wildcard ranges (GetBanFromIP, :209-242); ours matches an exact
-//    address.
+//    address: a range widens the shared-address cost and no range rule is decided (an IPv6
+//    address may rotate, a named cost).
 //  - MTA allows saving from the start of its load (m_bAllowSave, :290), so an unparseable
-//    banlist.xml is overwritten at the next save; ours never rewrites a file it could not read whole.
+//    banlist.xml is overwritten at the next save; ours never rewrites a file it could not read
+//    whole, because the rewrite would drop the records it could not read.
 //  - MTA refuses a second ban on an already-banned IP (IsSpecificallyBanned, :170-181, used by
-//    AddBan at :92 and :106); ours keeps both records and the index answers the first.
+//    AddBan at :92 and :106); ours keeps both records, which are keyed by id, and the index
+//    answers the first.
 namespace coop::ban_list {
 
 // Plain-data record for UI consumption (the F1 Administration panel's Banned section renders
