@@ -88,7 +88,13 @@ S3 = re.compile(r"(?:flag (?:it )?for|file (?:it )?(?:as|under)|belongs in|shoul
 # `AGENT_SPAWNING`, the three `QUESTION_FORM_*`, `SERVER_BROWSER_ARC`), each a real place a move
 # could come FROM. Both moves are SCOPE, both are stated, because a ratchet whose baseline drifts
 # without a reason beside it is a ratchet nobody can audit.
-OVERLAP_BASELINE = 53
+# 53 -> 57 (2026-10-03), CONTENT, every line read: a build sheet dictates the interface it builds and
+# the comments above it word for word, so once built those lines live in the tracked header AND in the
+# unpublished design doc that specified them (in config.h, config_internal.h and the dev rows: the
+# SetValue/Subscribe/selftest declarations and their comments, from SETTINGS_ARC.md; the mannequin drill's
+# lines in its header, dev_lanes.cpp, pump.cpp, the dev menu and its dev row, from its event doc). The direction is doc-quotes-code, not a move of
+# private prose. A lane built from a sheet may raise this again, each time with its lines read and stated.
+OVERLAP_BASELINE = 57
 # EXCLUDED because it is a deliberate practice, not a leak: copying memory topics into the public
 # piles archive. It alone contributes ~1,263 of the raw 1,300 overlaps.
 OVERLAP_SKIP = ("docs/piles/_archive/session-log/",)
