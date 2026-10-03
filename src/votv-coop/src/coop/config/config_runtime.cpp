@@ -13,9 +13,8 @@
 // Also unlike the precedents: the ini is written on every accepted set (MTA's server: only when
 // bSavable && bSave, CMainConfig.cpp:1479-1483; its client: every apply, CSettings.cpp:4790); a
 // live set beats the launch pin so a change holds for the run (MTA: command line wins,
-// CMainConfig.cpp:1050-1081); Source clamps a value out of range and calls back only on a change
-// (convar.cpp:794-798, 843-853), we refuse it and notify every accepted set and reset (MTA's set:
-// CMainConfig.cpp:1485-1486).
+// CMainConfig.cpp:1050-1081); Source clamps an out-of-range value and calls back only on a change
+// (convar.cpp:794-798, 843-853), we refuse it and notify every set and reset (CMainConfig.cpp:1485).
 
 #include "coop/config/config.h"
 
