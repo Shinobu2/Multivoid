@@ -19,7 +19,7 @@ namespace {
 constexpr int kSlot = 1;  // the pair's client
 
 // The step the row names, parsed once at the first Tick. Only Off, Nameplate, NickColor and Red
-// are produced yet; each later sheet adds its row-string case and its branches.
+// are parsed from the row; the other enumerators are not produced yet.
 enum class Token {
     Off, Nameplate, NickColor, Flags, Scale, Font, VoiceMode, VoiceVolume, Server, ServerJoin,
     ServerRed, Red

@@ -10,7 +10,7 @@ namespace coop::net { class Session; }
 
 namespace coop::dev::settings_drill {
 
-// The [dev] settings_drill row's steps; a latched string compare when off. Game thread.
+// The [dev] settings_drill row's steps; a latched enum compare when off. Game thread.
 void Tick(coop::net::Session* session);
 
 // The local session's last link dropped: the steps start over.

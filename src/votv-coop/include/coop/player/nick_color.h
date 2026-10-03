@@ -38,8 +38,8 @@ inline uint8_t B(uint32_t p) { return static_cast<uint8_t>(p); }
 // ticks). 0 = no custom color persisted.
 void SetInitialLocal(uint32_t packed);
 
-// Boot-time init from the RAW multivoid.ini nick_color= value (the harness passes
-// the resolved row (ResolveString)). Three cases: the key ABSENT, which is a new identity,
+// Boot-time init from the resolved nick_color row (the harness passes ResolveString).
+// Three cases: the key ABSENT (a new identity, or a reset),
 // means custom WHITE; an explicitly EMPTY value, which is what unchecking the custom colour
 // writes, means the per-surface defaults (chat palette, role colours); and RRGGBB hex means that
 // colour. This owns the parse so the harness boot glue stays parse-free.

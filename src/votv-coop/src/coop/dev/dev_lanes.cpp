@@ -185,7 +185,7 @@ void TickDrills(coop::net::Session& session) {
     coop::dev::lookat_aim_drill::Tick(&session);  // [dev] walk to a prop and hold the aim (a single bool read when off)
     coop::dev::door_drill::Tick(&session);  // [dev] the door drill's sensor readings and walk (a single bool read when off)
     coop::dev::event_drill::Tick(&session);  // [dev] the event drill's fires and count (a single bool read when off)
-    coop::dev::settings_drill::Tick(&session);  // [dev] the settings drill's steps (a single string compare when off)
+    coop::dev::settings_drill::Tick(&session);  // [dev] the settings drill's steps (a latched enum compare when off)
     coop::dev::mannequin_drill::Tick(&session);  // [dev] the mannequin drill's phases (a single enum read when off)
     coop::dev::toggle_drill::Tick(&session);  // [dev] the toggle drill's toggles (a single check when off)
     coop::dev::world_first_check::Tick();  // [dev] client_world_first's verdict (a single bool read when off)
