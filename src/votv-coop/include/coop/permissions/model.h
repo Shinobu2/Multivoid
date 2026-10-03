@@ -2,9 +2,8 @@
 // LuckPerms' default-group rule and the revisions a cache invalidates on. A user is named by its
 // player id (32 lower-case hex, derived from the proved key), a group by a name IsValidGroupName
 // accepts. Engine-free: no ue_wrap include, no logging. Not locked: one thread at a time uses a
-// Model -- `permission_host` builds it on the TimelineThread at a host start and hands it to the
-// game thread, which owns it from then on; only the immutable resolved answers of a player cross
-// threads.
+// Model -- `permission_host` builds it on the TimelineThread at a host start and hands it over once
+// through its hand-off slot; after the game thread adopts it, only the game thread reads it.
 #pragma once
 
 #include "coop/permissions/node.h"

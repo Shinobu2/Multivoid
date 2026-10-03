@@ -229,10 +229,32 @@ bool ReadFile(const fs::path& path, std::string* text) {
     return !f.bad();
 }
 
+// A key as the log prints it: quoted, with `"`, `\` and the control bytes (< 0x20, 0x7F) escaped,
+// so an empty key is visible and no byte splits the line.
+std::string QuotedKey(const std::string& key) {
+    static const char kHex[] = "0123456789abcdef";
+    std::string out = "\"";
+    for (const char c : key) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if (c == '"' || c == '\\') {
+            out.push_back('\\');
+            out.push_back(c);
+        } else if (u < 0x20 || u == 0x7F) {
+            out += "\\x";
+            out.push_back(kHex[u >> 4]);
+            out.push_back(kHex[u & 0xF]);
+        } else {
+            out.push_back(c);
+        }
+    }
+    out.push_back('"');
+    return out;
+}
+
 void ReportRefusedNodes(const std::vector<size_t>& refused, const std::vector<Node>& nodes,
                         const std::string& stem, LoadReport& report) {
     for (size_t i : refused) {
-        report.problems.push_back(stem + ": key " + nodes[i].key + " refused");
+        report.problems.push_back(stem + ": key " + QuotedKey(nodes[i].key) + " refused");
     }
 }
 

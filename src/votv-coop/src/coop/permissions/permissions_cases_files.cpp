@@ -192,7 +192,7 @@ void NameCases(CheckSink& sink) {
     std::string out;
     sink.Check(NarrowAscii(L"Mods.JSON", &out) && out == "Mods.JSON" && NarrowAscii(L"", &out) && out.empty(),
                "name: an ASCII name narrows unchanged");
-    sink.Check(!NarrowAscii(L"мод", &out) && out.empty() && !NarrowAscii(L"a\u0080", &out),
+    sink.Check(!NarrowAscii(L"мод", &out) && out.empty() && !NarrowAscii(L"a\u0080", &out) && out.empty(),
                "name: a name holding a unit above 0x7F is refused, never narrowed through the code page");
 }
 
