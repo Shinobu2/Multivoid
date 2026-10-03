@@ -42,8 +42,10 @@ float g_scale = 1.25f;   // published combined factor = min(res * user, cap)
 bool  g_rebuild = false;
 bool  g_prefLoaded = false;
 
-// Handed from the game thread (the row's subscriber stores true) to the render thread (the frame
-// consumes it); the render-thread data above is never written from the game thread.
+// The two atomics are the exception to the render-thread-only data above. g_rowChanged is handed
+// from the game thread (the row's subscriber stores true) to the render thread (the frame consumes
+// it); g_rowApplies is incremented by the render thread's apply and read on any thread by
+// RowApplies(). The render-thread data above is never written from the game thread.
 std::atomic<bool>     g_rowChanged{false};
 std::atomic<uint32_t> g_rowApplies{0};
 

@@ -35,8 +35,10 @@ float   g_rolePx[kRoleCount]     = {};
 Family  g_roleFamily[kRoleCount] = {};
 bool    g_rolesRead = false;     // the config is read once; ApplyRowsIfChanged updates after
 
-// Handed from the game thread (the rows' subscriber stores true) to the render thread (the frame
-// consumes it); the render-thread data above is never written from the game thread.
+// The two atomics are the exception to the render-thread-only data above. g_rowsChanged is handed
+// from the game thread (the rows' subscriber stores true) to the render thread (the frame consumes
+// it); g_rowsApplies is incremented by the render thread's apply and read on any thread by
+// RowsApplies(). The render-thread data above is never written from the game thread.
 std::atomic<bool>     g_rowsChanged{false};
 std::atomic<uint32_t> g_rowsApplies{0};
 
