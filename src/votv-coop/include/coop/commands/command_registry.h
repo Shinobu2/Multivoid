@@ -71,8 +71,8 @@ struct CommandSpec {
     std::vector<Alias> aliases;      // root specs only
     bool defaultGranted = false;
     std::string description;
-    // Names a node already declared (before this tree, or by an earlier spec of this tree in
-    // depth-first order) instead of the derived one; then that node is the spec's, none is
+    // Names a node already declared (not a qualifier node; before this tree, or by an earlier spec
+    // of this tree in depth-first order) instead of the derived one; then that node is the spec's, none is
     // declared for it, and defaultGranted is unused (the declared node's default is what a check
     // is given). `/r` names `multivoid.msg`.
     std::string nodeOf;
@@ -84,7 +84,7 @@ struct CommandSpec {
     // before the permission check, and /help does not list it to one.
     bool consoleOnly = false;
     // Each qualifier's node is declared with the spec; a second spec naming the same node (through
-    // nodeOf) does not declare it again.
+    // nodeOf) does not declare it again, if its qualifier is of the same kind.
     std::vector<Qualifier> qualifiers;
     Handler handler = nullptr;
     std::vector<CommandSpec> subVerbs;  // a spec with sub-verbs may also have its own handler
@@ -102,16 +102,16 @@ public:
     // of it: a name or alias that is not 1..32 of [a-z0-9]; an alias on a sub-verb, or whose first
     // preset word names no sub-verb of a root that has them; a nodeOf that is not declared; a
     // derived node already declared; a root name or alias already taken; two sub-verbs of one
-    // parent with one name; a root named printer, content, admin, command or dev (those words
-    // belong to nodes that are not commands); a Rest argument that is not last; a required
-    // argument after an optional one; a spec with neither a handler nor sub-verbs; a spec with a
-    // notHost argument or an Exempt qualifier and no pastTense; a qualifier whose name is not
-    // 1..32 of [a-z0-9]; two qualifiers of one kind on a spec; a GateOffline or Exempt qualifier on
-    // a spec that has not exactly one Player or PlayerOrId argument; a PlayerOrId argument on a spec
-    // with no GateOffline qualifier; a qualifier node that is already declared as something other
-    // than a qualifier node. On success every spec without a
-    // nodeOf is declared as a node (derived, its default and description), and every qualifier's
-    // node `<the spec's node>.<name>` that is not declared yet (default false, described as
+    // parent with one name; a root named printer, content, admin, command or dev; a Rest argument
+    // that is not last; a required argument after an optional one; a spec with neither a handler
+    // nor sub-verbs; a spec with a notHost argument or an Exempt qualifier and no pastTense; a
+    // qualifier name that is not 1..32 of [a-z0-9]; two qualifiers of one kind, or with one name;
+    // a GateOffline or Exempt qualifier on a spec whose target arguments (Player, PlayerOrId,
+    // Players) are not exactly one Player or PlayerOrId; a GateOffline qualifier whose target is
+    // not a PlayerOrId; a PlayerOrId argument with no GateOffline qualifier; a qualifier node
+    // already declared as a non-qualifier node or by a qualifier of another kind; a nodeOf that
+    // names a qualifier node. On success every spec without a nodeOf is declared as a node, and
+    // every qualifier node `<the spec's node>.<name>` not declared yet (default false, described
     // "<the spec's description> -- <name>").
     bool Register(CommandSpec spec, std::string* why);
 

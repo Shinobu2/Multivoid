@@ -1,5 +1,6 @@
 // coop/dev/command_drill.h -- drill: a typed command is run by the host and answered privately (ini
-// command_drill=on|red / env VOTVCOOP_COMMAND_DRILL; BOTH peers).
+// command_drill=on|red|grant|grantred|hostdeny / env VOTVCOOP_COMMAND_DRILL; BOTH peers for on /
+// red; grant and grantred a client, hostdeny the host).
 //
 // Once its world is ready, each peer submits `help` and an unknown command through the chat input's
 // own entry (command_sync::Submit) and checks the reply lines in order. The host's lines run locally;
