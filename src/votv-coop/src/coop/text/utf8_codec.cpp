@@ -22,10 +22,9 @@ std::string ToUtf8(const std::wstring& w) {
         uint32_t cp = 0;
         i += DecodeCodepoint(w, i, &cp);
         if (cp >= 0xD800 && cp <= 0xDFFF) continue;  // unpaired surrogate -- not a character
-        // C0 goes, TAB stays -- SanitizeUtf8 draws the same C0 line and also drops
-        // DEL and the line separators. Absorbing
-        // chat_feed's encoder made this the difference between the two, and
-        // the feed's behaviour is the right one: a nickname cannot contain a
+        // SanitizeUtf8 draws the same C0 line and also drops DEL and the line separators.
+        // C0 goes, TAB stays: absorbing chat_feed's encoder made this the difference between
+        // the two, and the feed's behaviour is the right one: a nickname cannot contain a
         // TAB (SanitizeNickname denies everything below 0x20), so keeping it
         // costs the name path nothing and preserves the chat path exactly.
         if (cp < 0x20 && cp != 0x09) continue;
@@ -231,6 +230,15 @@ bool RunUtf8CodecSelftest() {
         ok(SanitizeUtf8(ls, sizeof(ls) - 1) == "ab", "denylist drops U+2028");
         const char ps[] = "a\xE2\x80\xA9" "b";
         ok(SanitizeUtf8(ps, sizeof(ps) - 1) == "ab", "denylist drops U+2029");
+        const char ell[] = "a\xE2\x80\xA6" "b";
+        ok(SanitizeUtf8(ell, sizeof(ell) - 1) == std::string(ell, sizeof(ell) - 1),
+           "denylist keeps U+2026, a neighbour of U+2028");
+        const char nbsp[] = "a\xC2\xA0" "b";
+        ok(SanitizeUtf8(nbsp, sizeof(nbsp) - 1) == std::string(nbsp, sizeof(nbsp) - 1),
+           "denylist keeps NBSP, a neighbour of U+0085");
+        const char cut[] = "a\xE2\x80";
+        ok(SanitizeUtf8(cut, sizeof(cut) - 1) == std::string(cut, sizeof(cut) - 1),
+           "denylist keeps a truncated sequence at the buffer end as given");
         const std::string cyr = ToUtf8(L"П");
         ok(SanitizeUtf8(cyr.data(), cyr.size()) == cyr, "denylist keeps non-ASCII");
     }

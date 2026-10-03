@@ -42,7 +42,9 @@ std::wstring FromUtf8Lossy(const char* p, size_t n);
 // Strip C0 control bytes (keeping TAB), DEL, and the three line separators U+0085, U+2028 and
 // U+2029 (each whole sequence) from a UTF-8 string. A DENYLIST: it removes what is dangerous at
 // the render surface instead of enumerating what is allowed, which is the only form that can
-// survive a widening alphabet.
+// survive a widening alphabet. The input must already be well-formed UTF-8 (callers decode
+// strictly first): on ill-formed input, dropping a byte can splice its neighbours into a
+// sequence (E2 80 01 A8 becomes U+2028).
 std::string SanitizeUtf8(const char* p, size_t n);
 
 // Cap a UTF-8 string to `maxBytes` without splitting a multi-byte sequence: it backs off past

@@ -249,8 +249,10 @@ void OnReliable(const coop::net::ChatMessagePayload& payload, uint8_t senderPeer
                 static_cast<unsigned>(n));
         return;
     }
-    AuthorAndBroadcast(senderPeerSlot,
-                       coop::text::SanitizeUtf8(payload.text, n));
+    // A line of only dropped characters has no text, as an empty line is not sent.
+    const std::string clean = coop::text::SanitizeUtf8(payload.text, n);
+    if (clean.empty()) return;
+    AuthorAndBroadcast(senderPeerSlot, clean);
 }
 
 void OnChatSpeaker(const coop::net::ChatSpeakerPayload& payload) {
