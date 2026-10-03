@@ -84,7 +84,7 @@ HostingId IdForHosting(std::string_view hostNickUtf8) {
     return h;
 }
 
-void EnsureHosted(std::string_view hostNickUtf8) {
+std::wstring EnsureHosted(std::string_view hostNickUtf8) {
     const HostingId h = IdForHosting(hostNickUtf8);
     const std::string& id = h.id;
 
@@ -100,7 +100,7 @@ void EnsureHosted(std::string_view hostNickUtf8) {
         case coop::config::SetResult::Refused:
             UE_LOGE("server: net.server='%s' was refused by the config -- no server folder this session",
                     id.c_str());
-            return;
+            return {};
         }
     }
     if (h.handTyped) {
@@ -114,7 +114,7 @@ void EnsureHosted(std::string_view hostNickUtf8) {
         UE_LOGE("server: could not create <exe dir unreadable>\\multivoid_servers\\%s -- this session's "
                 "server stores will not persist",
                 id.c_str());
-        return;
+        return {};
     }
 
     // The error_code overload: a refused write is a state to report, never an exception.
@@ -124,9 +124,10 @@ void EnsureHosted(std::string_view hostNickUtf8) {
     if (ec) {
         UE_LOGE("server: could not create %ls (%s) -- this session's server stores will not persist",
                 dir.c_str(), ec.message().c_str());
-        return;
+        return {};
     }
     UE_LOGI("server: hosting '%s' at %ls (%s)", id.c_str(), dir.c_str(), created ? "created" : "existing");
+    return dir.wstring();
 }
 
 }  // namespace coop::server_profile

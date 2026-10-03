@@ -104,7 +104,7 @@ void Session::HandlePendingMessage(int pendIdx, uint32_t hConn, const void* data
     // thread into a net-owned store, because the roster row is game-thread-only; the Join handler
     // reads it back there. The guid naming a player's stored inventory is a fact about a key, not a
     // string the peer asked to be called.
-    SetProvedGuidForSlot(slot, guid);
+    SetProvedGuidForSlot(slot, peerGenerationForSlot(slot), guid);
     UE_LOGI("net: PENDING %d ADMITTED -> slot %d (identity-bound, guid %s)",
             pendIdx, slot, guid.c_str());
     peer_admission::HostForgetPending(pendIdx);

@@ -33,7 +33,7 @@ std::vector<coop::ban_list::Entry>        g_bans;
 //
 // g_banToken is the load-bearing capture for the ONLINE case. The modal takes a
 // typed reason, so it stays open for as long as the admin types, and peer slots
-// recycle -- targeting the slot alone let a permanent IP ban land on the
+// recycle -- targeting the slot alone let a permanent ban land on the
 // successor. The token names the PERSON and is validated against the live
 // net-layer authority when the action finally runs.
 coop::moderation::PlayerToken g_banToken{};
@@ -41,6 +41,8 @@ int  g_banSlot = -1;
 char g_banGuid[33] = {};
 char g_banNick[24] = {};
 char g_banReason[96] = {};
+// The modal's "Also refuse their address" box; set again each time the modal opens.
+bool g_banByAddress = true;
 
 void RefreshSnapshots() {
     const double now = ImGui::GetTime();
@@ -75,6 +77,7 @@ void OpenBanFor(int slot, const char* guid, const char* nick,
     std::snprintf(g_banGuid, sizeof(g_banGuid), "%s", guid ? guid : "");
     std::snprintf(g_banNick, sizeof(g_banNick), "%s", nick ? nick : "");
     g_banReason[0] = '\0';
+    g_banByAddress = true;
 }
 
 void RenderOnlineSection(const coop::roster::Snapshot& rs) {
@@ -150,16 +153,11 @@ void RenderOfflineSection() {
             ImGui::TableSetColumnIndex(2);
             const bool alreadyBanned = [&] {
                 for (const auto& b : g_bans)
-                    if (e.ip[0] && std::strcmp(b.ip, e.ip) == 0) return true;
+                    if (std::strcmp(b.id, e.guid) == 0) return true;
                 return false;
             }();
             if (alreadyBanned) {
                 ImGui::TextDisabled("banned");
-            } else if (!e.ip[0]) {
-                ImGui::TextDisabled("no IP");
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("No stored IP for this player (P2P join) --\n"
-                                      "nothing the IP ban filter could enforce against.");
             } else {
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00f, 0.45f, 0.42f, 1.0f));
                 if (ImGui::SmallButton("Ban...")) OpenBanFor(-1, e.guid, e.nick);
@@ -174,22 +172,27 @@ void RenderOfflineSection() {
 
 void RenderBannedSection() {
     SectionHeader("Banned");
+    if (coop::ban_list::IsReadOnly())
+        ImGui::TextDisabled("The ban file has entries this version cannot read, so bans made now last until the "
+                            "server stops. See the log.");
     if (ImGui::BeginTable("##admin_banned", 5,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_PadOuterX)) {
         ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("IP", ImGuiTableColumnFlags_WidthFixed, S(110.f));
+        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, S(110.f));
         ImGui::TableSetupColumn("When", ImGuiTableColumnFlags_WidthFixed, S(130.f));
         ImGui::TableSetupColumn("Reason", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("##act", ImGuiTableColumnFlags_WidthFixed, S(70.f));
         ImGui::TableHeadersRow();
         for (const auto& b : g_bans) {
             ImGui::TableNextRow();
-            ImGui::PushID(b.ip);
+            ImGui::PushID(b.id);
             ImGui::TableSetColumnIndex(0);
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(b.nick[0] ? b.nick : "(no nick)");
             ImGui::TableSetColumnIndex(1);
-            ImGui::TextDisabled("%s", b.ip);
+            ImGui::TextDisabled("%.8s", b.id);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Player id %s\nAddress %s", b.id, b.address[0] ? b.address : "not blocked");
             ImGui::TableSetColumnIndex(2);
             char when[24];
             FormatUnix(b.bannedUnix, when, sizeof(when));
@@ -198,7 +201,7 @@ void RenderBannedSection() {
             ImGui::TextDisabled("%s", b.reason[0] ? b.reason : "--");
             ImGui::TableSetColumnIndex(4);
             if (ImGui::SmallButton("Unban")) {
-                coop::moderation::Unban(b.ip);
+                coop::moderation::Unban(b.id);
                 g_lastRefresh = -1.0;  // reflect immediately
             }
             ImGui::PopID();
@@ -219,17 +222,23 @@ void RenderBanModal() {
                                ImGuiWindowFlags_AlwaysAutoResize)) {
         ImGui::Text("Permanently ban %s?", g_banNick[0] ? g_banNick : "this player");
         ImGui::TextDisabled(g_banSlot >= 1
-                                ? "Disconnected now and blocked by IP on reconnect."
-                                : "Blocked by their last known IP on reconnect.");
+                                ? "Disconnected now and refused whenever they rejoin."
+                                : "Refused whenever they rejoin.");
         ImGui::Spacing();
         ImGui::SetNextItemWidth(S(320.f));
         ImGui::InputTextWithHint("##banreason", "reason (shown in the Banned list)",
                                  g_banReason, sizeof(g_banReason));
+        ImGui::Checkbox("Also refuse their address", &g_banByAddress);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Also refuses anyone connecting from the same address -- people who share "
+                              "their router or their provider's address are refused too. It only works on "
+                              "a direct connection: a player who comes through a relay is refused by their "
+                              "identity alone.");
         ImGui::Spacing();
         if (ImGui::Button("Ban", ImVec2(S(110.f), 0))) {
             const char* reason = g_banReason[0] ? g_banReason : "banned by host";
-            if (g_banSlot >= 1) coop::moderation::BanPlayer(g_banToken, reason);
-            else                coop::moderation::BanOffline(g_banGuid, reason);
+            if (g_banSlot >= 1) coop::moderation::BanPlayer(g_banToken, reason, g_banByAddress);
+            else                coop::moderation::BanOffline(g_banGuid, reason, g_banByAddress);
             g_banSlot = -1;
             g_banGuid[0] = '\0';
             g_lastRefresh = -1.0;  // pull the new ban row promptly
@@ -253,7 +262,7 @@ void Render() {
     coop::roster::Snapshot rs;
     coop::roster::GetSnapshot(rs);
 
-    ImGui::TextDisabled("Host administration. Bans are permanent (by IP) and survive restarts;");
+    ImGui::TextDisabled("Host administration. Bans follow the player and survive restarts;");
     ImGui::TextDisabled("the registry remembers every player who ever joined this host.");
 
     RenderOnlineSection(rs);

@@ -91,9 +91,10 @@ namespace cfg = coop::config;
 coop::net::Session g_session;
 
 // The host's accept predicate (Session::SetAcceptFilter): a plain function, so it converts to the
-// function pointer; read on the net thread, touching only ban_list's own mutexed state.
+// function pointer; read on the net thread, touching only ban_list's own mutexed state. Asks by
+// address alone: no id is proved at the accept edge.
 bool BanAcceptFilter(const char* remoteIp, char* whyOut, int whyLen) {
-    return !coop::ban_list::IsBanned(remoteIp, whyOut, whyLen);
+    return !coop::ban_list::IsBanned("", remoteIp, whyOut, whyLen);
 }
 
 
@@ -227,12 +228,18 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // And the server id rule: a nickname or a hand-typed name never names a folder outside
     // multivoid_servers, and a wrong rule writes somewhere else without crashing.
     coop::server_profile::RunSelftest();
+    // And the ban file's codec, the address rule and the address index: a record read wrong is a
+    // player let in or a file never rewritten, and neither shows until someone rejoins.
+    coop::ban_list::RunSelftest();
     // Reset net_pump's edge detectors, so a Stop/Start on one process carries no stale "was
     // connected" or "was holding" entries into the new session.
     coop::net_pump::OnSessionStart();
     // The hosted server's folder (coop/server_profile), known before the session layer is filled:
     // the stores a server owns are written under it.
-    if (netCfg.role == coop::net::Role::Host) coop::server_profile::EnsureHosted(coop::session_manager::Nickname());
+    // The folder it returns goes to the stores a server owns, which keep it for their writes.
+    const std::wstring serverDir = (netCfg.role == coop::net::Role::Host)
+        ? coop::server_profile::EnsureHosted(coop::session_manager::Nickname())
+        : std::wstring{};
     // The config's session layer begins with the session, before the transport can deliver a row.
     coop::server_settings_sync::OnSessionStart(netCfg.role == coop::net::Role::Host);
     coop::prop_lifecycle::SetSession(&g_session);
@@ -257,15 +264,14 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
         // Snapshot the canonical save before coop injects state (host only; clients are
         // save-blocked); synchronous, so it completes before Start.
         coop::save_guard::BackupSaveOnSessionStart();
-        // The seen-players registry, host bookkeeping on any topology (on P2P the IP may stay
+        // The seen-players registry, host bookkeeping on any topology (on P2P the address stays
         // empty).
         coop::seen_players::Load();
-        // LanDirect only: the IP-keyed ban filter fails closed on P2P (the Connecting edge has no
-        // remote address, and a public IP is the wrong key there); P2P bans are identity-based.
-        if (netCfg.topology == coop::net::Topology::LanDirect) {
-            coop::ban_list::Load();
+        // The ban list, on every topology: read from the hosted server's folder.
+        coop::ban_list::Load(serverDir);
+        // LanDirect only, until the proof-time check replaces the accept-edge filter.
+        if (netCfg.topology == coop::net::Topology::LanDirect)
             g_session.SetAcceptFilter(&BanAcceptFilter);
-        }
     }
     // The client's connecting state is not raised here but by the browser connect actions, so the
     // loading screen is browser-join only; the env and autotest client boot reaches this function

@@ -6,8 +6,8 @@
 // banlist.xml); keeping each server's stores in its own folder inside one install is our choice,
 // MTA keeps one set per install. The id rule is ours: a name a player types is never a path.
 //
-// This module only names the folder and creates it at a host session start; nothing is stored in
-// it yet. The id of the server this install hosts is kept in multivoid.ini as `net.server`, set
+// This module only names the folder and creates it at a host session start; the stores read and
+// write it from the folder it hands back (bans.json is the first). The id of the server this install hosts is kept in multivoid.ini as `net.server`, set
 // from the host's nickname at the first host start.
 
 #pragma once
@@ -46,9 +46,11 @@ HostingId IdForHosting(std::string_view hostNickUtf8);
 
 // Once per HOST session start, on the TimelineThread, before the config's session layer is
 // filled; never on a client. Resolves the hosted server (setting `net.server` from the nickname at
-// the first host start) and creates its folder when absent. The host session continues when the
-// folder could not be made: the failure is logged.
-void EnsureHosted(std::string_view hostNickUtf8);
+// the first host start) and creates its folder when absent. RETURNS the folder it created or
+// adopted, empty when it could not be made or the config refused the server row: the host session
+// continues and the failure is logged. A store takes this value at its load and keeps it (the ban
+// list's Load); nothing latches it here.
+std::wstring EnsureHosted(std::string_view hostNickUtf8);
 
 // The id rule's selftest, run at each session start; true when every case passes.
 bool RunSelftest();

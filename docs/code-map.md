@@ -31,7 +31,7 @@ One folder, one concept, named after it. `src/votv-coop/src/` holds the implemen
 | `coop/comms/` | text chat | `chat_sync`, `chat_feed`, `chat_bubbles`, `chat_log`, `chat_nick_color`, `peer_action_feed` |
 | `coop/commands/` | commands typed in chat, run on the host | `command_line` (splits a line), `command_targets` (who a word names), `command_registry` (the commands and their nodes), `command_dispatcher` (one line to one verb), `command_sync` (the transport: the chat route, the two wire kinds, the player record) |
 | `coop/voice/` | voice chat | `voice_capture`, `voice_chat`, `voice_playback` (Opus, 3D positional) |
-| `coop/moderation/` | kick and ban | `moderation`, `ban_list`, `seen_players` |
+| `coop/moderation/` | kick, and bans by player id and address | `moderation`, `ban_list`, `seen_players` |
 | `coop/permissions/` | who may ask the host for what (LuckPerms' model) | `context_set`, `node` + `node_map` (a holder's nodes), `model` + `inheritance` (users, groups, parents), `resolution` (a player's resolved answers) |
 | `coop/save/` | the host owns the save | `save_transfer` (streams the host's world to a joiner), `slot_file_read` (a slot file read once it holds still), `save_guard`, `save_block`, `save_button_disable`, `save_indicator_suppress` |
 | `coop/server_profile/` | the server a host runs, as a folder beside the game | `server_profile` (a server's id, the hosted server's folder, its creation at a host start) |

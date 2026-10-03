@@ -221,16 +221,24 @@ void Session::ReleasePending(uint32_t hConn) {
     }
 }
 
-void Session::SetProvedGuidForSlot(int slot, const std::string& guid) {
+void Session::SetProvedGuidForSlot(int slot, uint32_t generation, const std::string& guid) {
     if (slot < 0 || slot >= kMaxPeers) return;
     std::lock_guard<std::mutex> lk(provedGuidMutex_);
-    provedGuidBySlot_[slot] = guid;
+    provedGuidBySlot_[slot].generation = generation;
+    provedGuidBySlot_[slot].guid = guid;
 }
 
 std::string Session::ProvedGuidForSlot(int slot) const {
     if (slot < 0 || slot >= kMaxPeers) return {};
     std::lock_guard<std::mutex> lk(provedGuidMutex_);
-    return provedGuidBySlot_[slot];
+    return provedGuidBySlot_[slot].guid;
+}
+
+std::string Session::ProvedGuidForSlotWithToken(int slot, uint32_t expectedGeneration) const {
+    if (slot < 0 || slot >= kMaxPeers || expectedGeneration == 0) return {};
+    std::lock_guard<std::mutex> lk(provedGuidMutex_);
+    const ProvedId& p = provedGuidBySlot_[slot];
+    return p.generation == expectedGeneration ? p.guid : std::string();
 }
 
 int Session::AdmitPending(int pendingIdx, uint32_t hConn) {
@@ -570,7 +578,7 @@ void Session::HandleConnStatusChanged(void* info) {
         // different mutex), so a reader that sees 0 sees an inbox already drained of this peer.
         if (slot >= 0) {
             peerGenBySlot_[slot].store(0, std::memory_order_release);
-            SetProvedGuidForSlot(slot, std::string());  // the identity dies with the seat
+            SetProvedGuidForSlot(slot, 0, std::string());  // the identity dies with the seat
         }
 
         // Aggregate state: Connected while any peer remains, otherwise everything is cleared.
@@ -712,7 +720,7 @@ bool Session::KickClaimed(int peerSlot, uint32_t hConn, EndReason code, const ch
     peerGenBySlot_[peerSlot].store(0, std::memory_order_release);
     // And the proved identity with it: a recycled slot must not carry its predecessor's storage
     // name.
-    SetProvedGuidForSlot(peerSlot, std::string());
+    SetProvedGuidForSlot(peerSlot, 0, std::string());
 
     // Aggregate state, as in the ClosedByPeer branch.
     if (connectedPeerCount() == 0) {

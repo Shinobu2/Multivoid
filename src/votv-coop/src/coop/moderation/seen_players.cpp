@@ -2,6 +2,7 @@
 
 #include "coop/moderation/seen_players.h"
 
+#include "coop/moderation/moderation.h"    // EnforceableAddress
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"  // kMaxPeers
 #include "coop/text/utf8_codec.h"
@@ -145,13 +146,15 @@ void TouchOnJoin(coop::net::Session& session, int peerSlot) {
     const std::string nick = coop::text::ToUtf8(
         coop::player_handshake::NicknameForSlot(peerSlot));
 
-    char ip[64] = {};
-    session.GetPeerAddress(peerSlot, ip, sizeof(ip));
+    // Only an address a ban could enforce is kept: a relay's, loopback or an unknown path's is
+    // empty, so an offline ban never keys on it.
+    const std::string ip =
+        coop::moderation::EnforceableAddress(session, peerSlot, session.peerGenerationForSlot(peerSlot));
 
     std::lock_guard<std::mutex> lk(g_mutex);
     Record& rec = g_records[guid];
     rec.nick = CleanField(nick.c_str());
-    if (ip[0]) rec.ip = CleanField(ip);  // keep the previous IP if unresolvable now
+    if (!ip.empty()) rec.ip = CleanField(ip.c_str());  // keep the previous address if none now
     rec.lastSeenUnix = static_cast<long long>(::time(nullptr));
     g_onlineGuidBySlot[peerSlot] = guid;
     WriteFileLocked();

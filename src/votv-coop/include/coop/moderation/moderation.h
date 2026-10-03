@@ -12,11 +12,12 @@
 // disk work inline and the game-thread-asserted nick lookup is legal.
 //
 // Principle 7: policy orchestration over a policy-free net layer, which learns about bans only
-// through the injected accept filter (Session::SetAcceptFilter), never by calling this module.
+// through the injected ban predicate, asked at the identity proof, never by calling this module.
 
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 namespace coop::net { class Session; }
 
@@ -28,7 +29,7 @@ namespace coop::moderation {
 //
 // The measured defect it closes: the ban modal captured its target slot when the modal OPENED,
 // then executed after an arbitrary typing delay, while slots recycle lowest-free. A permanent
-// IP ban could therefore land on the SUCCESSOR -- a different person who merely inherited the
+// ban could therefore land on the SUCCESSOR -- a different person who merely inherited the
 // seat.
 //
 // A token is (slot, playerNo, generation) read from ONE ledger row. The generation is validated
@@ -61,34 +62,42 @@ inline PlayerToken TokenFor(int slot, uint16_t playerNo, uint32_t generation) {
 // boot, alongside the other modules' SetSession.
 void SetSession(coop::net::Session* session);
 
+// The slot's remote address as a ban key, or empty. An address is a ban key only when it is the
+// player's own, on a direct path: GNS clears the address of an ICE-relayed path
+// (p2p_ice.cpp:621-623) and an unknown path has none. The read is gated on `generation`, so it
+// never names a successor. Any thread.
+std::string EnforceableAddress(const coop::net::Session& s, int slot, uint32_t generation);
+
 // Disconnect the captured player. Host-only. Safe to call from the render thread
 // (posts to the game thread). No-op if the target has since left or been
 // replaced -- see the token note above.
 void KickPlayer(const PlayerToken& token);
 
-// Permanently ban the captured player by IP, then kick them -- MTA's order in
-// CStaticFunctionDefinitions::BanPlayer, whose KickPlayer/BanPlayer pair this module mirrors.
-// Host-only. The ban survives host restarts (coop::ban_list persists to disk) and rejects that
-// IP on future connects through the accept filter; `reason` is stored on the record for the
-// admin's reference (null/empty is fine). Safe to call from the render thread. The address is
-// read BEFORE the kick because Kick() zeroes the slot and it is unresolvable afterwards.
+// Permanently ban the captured player by the id their identity proof established and, when
+// `byAddress` is set and the host saw their own address on a direct path, that address too; then
+// kick them -- MTA's order in CStaticFunctionDefinitions::BanPlayer, whose KickPlayer/BanPlayer
+// pair this module mirrors. Host-only. The ban survives host restarts (coop::ban_list persists to
+// disk) and is checked at the identity proof of every future join; `reason` is stored on the
+// record and rides the banned player's close (null/empty is fine). Safe to call from the render
+// thread. The id and the address are read BEFORE the kick because the kick clears the slot.
 //
-// ABORTS -- writing no ban and kicking nobody -- if the captured player is gone. This is the
-// whole point of the token: a permanent ban is the least reversible thing the host can do, so
-// it must never land on whoever happens to hold the seat now.
-void BanPlayer(const PlayerToken& token, const char* reason);
+// ABORTS -- writing no ban and kicking nobody -- if the slot no longer holds the captured player,
+// or their identity proof has not landed. This is the whole point of the token: a permanent ban
+// is the least reversible thing the host can do, so it must never land on whoever happens to hold
+// the seat now.
+void BanPlayer(const PlayerToken& token, const char* reason, bool byAddress);
 
-// Permanently ban an OFFLINE player by its seen-players GUID (the F1
-// Administration panel's Offline-section ban). Resolves the player's last known
-// IP + nick from coop::seen_players; warns and does nothing if the record has
-// no IP (nothing to enforce against). Host-only. Safe to call from the render
-// thread.
-void BanOffline(const char* guid, const char* reason);
+// Permanently ban an OFFLINE player by its seen-players GUID (the F1 Administration panel's
+// Offline-section ban). Resolves the player's nick and last enforceable address from
+// coop::seen_players (the address only when `byAddress`); warns and does nothing for an unknown
+// GUID. A matching player still seated is kicked, as MTA's AddBan disconnects a matching player.
+// Host-only. Safe to call from the render thread.
+void BanOffline(const char* guid, const char* reason, bool byAddress);
 
-// Remove an IP ban (the F1 Administration panel's Unban button). Thin
-// pass-through to coop::ban_list::Remove -- runs inline (ban_list is
-// thread-safe); the panel is host-gated upstream. Any thread.
-void Unban(const char* ip);
+// Remove a ban (the F1 Administration panel's Unban button). Host-only; posted to the game thread
+// like the other verbs, so the scoreboard's render-thread click does no net or disk work inline.
+// Any thread.
+void Unban(const char* playerId);
 
 // Teleport the captured player to the host's current pose. Host-only. Token-taking
 // like the others: teleporting the wrong person is not destructive, but a

@@ -397,6 +397,10 @@ public:
     bool GetPeerAddressWithToken(int peerSlot, uint32_t expectedGeneration,
                                  char* out, int outLen) const;
 
+    // The slot's proved id only while it was proved for `expectedGeneration`'s occupancy; empty
+    // otherwise, so a ban never records a successor's id. Any thread.
+    std::string ProvedGuidForSlotWithToken(int slot, uint32_t expectedGeneration) const;
+
   private:
     // Shared teardown for a slot the caller has already claimed (peerConns_ exchanged or CAS'd to
     // 0).
@@ -588,7 +592,9 @@ public:
     // The guid of the peer in `slot`, hex(SHA-256(pub)[0..16]) of the key it proved at admission;
     // empty if the slot is free or unproved. Not a Join-packet field: a value the peer chooses
     // cannot name whose stored inventory it is.
-    void        SetProvedGuidForSlot(int slot, const std::string& guid);
+    // The id is stored WITH the generation it was proved for (ProvedGuidForSlotWithToken reads it
+    // back against a captured token); the teardowns clear it with generation 0.
+    void        SetProvedGuidForSlot(int slot, uint32_t generation, const std::string& guid);
     std::string ProvedGuidForSlot(int slot) const;
 
     // Refuse a pending connection: retire the band entry, then close with `code` and `reason`.
@@ -621,7 +627,11 @@ private:
     // Per-slot proved guid, under its own mutex: remoteMutex_ is taken at 60 Hz by every pose
     // store, and this is written once per admission.
     mutable std::mutex                     provedGuidMutex_;
-    std::array<std::string, kMaxPeers>     provedGuidBySlot_;
+    struct ProvedId {
+        uint32_t    generation = 0;
+        std::string guid;
+    };
+    std::array<ProvedId, kMaxPeers>        provedGuidBySlot_;
 
     // --- Per-slot occupancy generation ---
     // Minted here because slots recycle: lowest-free reuse can replace person X with Y with no

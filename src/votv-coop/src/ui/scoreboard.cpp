@@ -28,6 +28,8 @@ using ui::scale::S;
 int  g_banConfirmSlot = -1;
 char g_banConfirmNick[24] = {};
 coop::moderation::PlayerToken g_banConfirmToken{};
+// The modal's "Also refuse their address" box; set again each time the modal opens.
+bool g_banConfirmByAddress = true;
 
 // A small filled status dot before a name, green when connected, drawn on the window draw list
 // with a dummy spacer so the following name lands to its right, centred on the text line.
@@ -204,6 +206,7 @@ void Render() {
                             // the ban aimed at the person.
                             g_banConfirmToken = token;
                             g_banConfirmSlot = r.slot;
+                            g_banConfirmByAddress = true;
                             std::snprintf(g_banConfirmNick, sizeof(g_banConfirmNick), "%s", nick);
                         }
                         ImGui::EndPopup();
@@ -343,10 +346,16 @@ void Render() {
         if (ImGui::BeginPopupModal("Confirm ban##coop", nullptr,
                                    ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::Text("Permanently ban %s?", g_banConfirmNick);
-            ImGui::TextDisabled("Disconnected now and blocked by IP on reconnect.");
+            ImGui::TextDisabled("Disconnected now and refused whenever they rejoin.");
+            ImGui::Checkbox("Also refuse their address", &g_banConfirmByAddress);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Also refuses anyone connecting from the same address -- people who share "
+                                  "their router or their provider's address are refused too. It only works "
+                                  "on a direct connection: a player who comes through a relay is refused by "
+                                  "their identity alone.");
             ImGui::Spacing();
             if (ImGui::Button("Ban", ImVec2(S(110.f), 0))) {
-                coop::moderation::BanPlayer(g_banConfirmToken, "banned by host");
+                coop::moderation::BanPlayer(g_banConfirmToken, "banned by host", g_banConfirmByAddress);
                 g_banConfirmSlot = -1;
                 ImGui::CloseCurrentPopup();
             }

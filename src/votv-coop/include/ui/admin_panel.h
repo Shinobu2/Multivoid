@@ -5,7 +5,7 @@
 //              Teleport / Kick / Ban actions.
 //   Offline -- every player this host has ever seen (coop::seen_players) that is
 //              not currently online: nick + last seen + Ban action.
-//   Banned  -- every persistent IP ban (coop::ban_list): nick / IP / date /
+//   Banned  -- every persistent ban (coop::ban_list): nick / id / date /
 //              reason + Unban action.
 //
 // ROLE-gated, not dev-gated: the category is only offered to the HOST of a live
