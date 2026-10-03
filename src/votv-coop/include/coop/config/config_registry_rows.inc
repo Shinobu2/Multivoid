@@ -50,6 +50,9 @@ CFG_ENUM(net_role, "net.role", "net", "", "host|client", "VOTVCOOP_NET_ROLE",
     "Multiplayer menu handles hosting and joining.")
 CFG_STRING(net_peer, "net.peer", "net", "127.0.0.1", "VOTVCOOP_NET_PEER", false,
     "Test framework: the host address a client connects to at auto-start (lan topology).")
+CFG_STRING(net_server, "net.server", "net", "", "VOTVCOOP_NET_SERVER", false,
+    "The server this install hosts: the name of its folder under multivoid_servers beside the game. "
+    "Set from your nickname the first time you host; empty means you have not hosted yet.")
 CFG_INT(net_port, "net.port", "net", ::coop::net::kDefaultPort, 1, 65535, "VOTVCOOP_NET_PORT",
     "UDP port a DIRECT host listens on: the lan topology, and a DIRECT game hosted from the menu.")
 CFG_ENUM(net_topology, "net.topology", "net", "lan", "lan|p2p", "VOTVCOOP_NET_TOPOLOGY",

@@ -652,6 +652,8 @@ set(VOTVCOOP_SOURCES
     src/coop/moderation/ban_list.cpp
     src/coop/moderation/moderation.cpp
     src/coop/moderation/seen_players.cpp
+    src/coop/server_profile/server_profile.cpp
+    src/coop/server_profile/server_profile_selftest.cpp
     src/harness/harness.cpp
     src/harness/session_runtime.cpp
     src/harness/join_leave.cpp

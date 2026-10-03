@@ -50,6 +50,7 @@
 #include "coop/text/utf8_codec.h"
 #include "coop/session/session_manager.h"
 #include "coop/session/shutdown.h"
+#include "coop/server_profile/server_profile.h"
 #include "coop/session/subsystems.h"
 #include "coop/session/teleport_client.h"
 #include "coop/world/spawn_authority.h"
@@ -210,9 +211,15 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // And the pen beside it, whose cap has never fired in a run: every park a measured join
     // produced was host-authored, and those are deliberately not capped.
     coop::props::container_park::RunSelftest();
+    // And the server id rule: a nickname or a hand-typed name never names a folder outside
+    // multivoid_servers, and a wrong rule writes somewhere else without crashing.
+    coop::server_profile::RunSelftest();
     // Reset net_pump's edge detectors, so a Stop/Start on one process carries no stale "was
     // connected" or "was holding" entries into the new session.
     coop::net_pump::OnSessionStart();
+    // The hosted server's folder (coop/server_profile), known before the session layer is filled:
+    // the stores a server owns are written under it.
+    if (netCfg.role == coop::net::Role::Host) coop::server_profile::EnsureHosted(coop::session_manager::Nickname());
     // The config's session layer begins with the session, before the transport can deliver a row.
     coop::server_settings_sync::OnSessionStart(netCfg.role == coop::net::Role::Host);
     coop::prop_lifecycle::SetSession(&g_session);
@@ -253,7 +260,10 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     const bool ok = g_session.Start(netCfg, why);
     // A session that never ran never stops, so the stop listener will not end its layer; a Start
     // refused because a session already runs must not end that one's.
-    if (!ok && !g_session.running()) coop::server_settings_sync::OnSessionEnd();
+    if (!ok && !g_session.running()) {
+        coop::server_settings_sync::OnSessionEnd();
+        coop::server_profile::OnSessionEnd();
+    }
     UE_LOGI("harness: ==== COOP SESSION START (%s / %s)%s ====",
             netCfg.role == coop::net::Role::Host ? "host" : "client",
             netCfg.topology == coop::net::Topology::P2P ? "p2p" : "lan-direct",

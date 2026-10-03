@@ -1,0 +1,66 @@
+// coop/server_profile/server_profile.h -- the server a host runs, as a folder beside the game.
+//
+// A server is one folder, `<exe dir>\multivoid_servers\<server id>\`, owned by the host: the stores
+// a server owns (its settings, permissions, bans, players' profiles) live under it. MTA's shape: a
+// server's files are one directory (Server/mods/deathmatch/mtaserver.conf beside acl.xml and
+// banlist.xml). The id rule is ours: a name a player types is never a path.
+//
+// This module only names the folder and creates it at a host session start; nothing is stored in
+// it yet. The id of the server this install hosts is kept in multivoid.ini as `net.server`, set
+// from the host's nickname at the first host start.
+//
+// A store that lives under the server captures HostedDir() ONCE, when it loads at the host start,
+// and keeps that path for its writes: the answer is cleared when the session ends, so a deferred
+// write must never re-ask.
+
+#pragma once
+
+#include <string>
+#include <string_view>
+
+namespace coop::server_profile {
+
+// `<exe dir>\multivoid_servers`; empty when the exe directory is unknown. Creates nothing. Any
+// thread.
+std::wstring ServersDir();
+
+// True iff `id` is a usable folder name: 1..24 bytes of [a-z0-9-], not starting or ending with
+// '-', and not a Windows device name (con, prn, aux, nul, com1..com9, lpt1..lpt9). Pure.
+bool IsValidId(std::string_view id);
+
+// A new server's id from its name: A-Z lowered, a-z and 0-9 kept, every maximal run of any other
+// byte (non-ASCII included) becomes one '-', the ends are trimmed, the result is cut to 24 bytes;
+// empty gives "server" and a device name gets "-server" appended. Always satisfies IsValidId.
+// Pure.
+std::string IdFromName(std::string_view nameUtf8);
+
+// WHICH server this install hosts, without making it real.
+//   rowText    the value of the `net.server` row;
+//   id         the server's id: IdFromName(host nickname) when the row is empty (fromNick), the row
+//              itself when it is a valid id, IdFromName(rowText) when it is not (handTyped).
+// Creates and writes nothing; any thread; COLD (a row read may read the ini from disk).
+struct HostingId {
+    std::string id;
+    bool fromNick = false;
+    bool handTyped = false;
+    std::string rowText;
+};
+HostingId IdForHosting(std::string_view hostNickUtf8);
+
+// The folder of the server this process hosts in its running session, as EnsureHosted latched it;
+// empty outside a hosted session, on a client, and after a failed creation. Any thread.
+std::wstring HostedDir();
+
+// Once per HOST session start, on the TimelineThread, before the config's session layer is
+// filled; never on a client. Clears the latch, resolves the hosted server (setting `net.server`
+// from the nickname at the first host start), creates its folder when absent and latches the path.
+// Returns the folder, or empty when it could not be made: the host session continues either way.
+std::wstring EnsureHosted(std::string_view hostNickUtf8);
+
+// Clears the latch. Any thread (the latch is mutex-guarded).
+void OnSessionEnd();
+
+// The id rule's boot selftest; true when every case passes.
+bool RunSelftest();
+
+}  // namespace coop::server_profile

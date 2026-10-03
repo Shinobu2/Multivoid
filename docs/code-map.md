@@ -32,6 +32,7 @@ One folder, one concept, named after it. `src/votv-coop/src/` holds the implemen
 | `coop/voice/` | voice chat | `voice_capture`, `voice_chat`, `voice_playback` (Opus, 3D positional) |
 | `coop/moderation/` | kick and ban | `moderation`, `ban_list`, `seen_players` |
 | `coop/save/` | the host owns the save | `save_transfer` (streams the host's world to a joiner), `slot_file_read` (a slot file read once it holds still), `save_guard`, `save_block`, `save_button_disable`, `save_indicator_suppress` |
+| `coop/server_profile/` | the server a host runs, as a folder beside the game | `server_profile` (a server's id, the hosted server's folder, its creation at a host start) |
 | `coop/text/` | text encoding and names | `utf8_codec` (the one owner of decoding), `repertoire` + `repertoire_ranges` (what this build can draw), `case_fold`, `mark_ranges`, `ignorable_ranges`, `exclude_ranges`, `novelty_ledger` |
 | `coop/config/` | the ini | `config`, `config_registry` + `config_registry_rows` (every key is a registered row with a description), `config_ini_write`, `config_review`, `config_selftest` |
 | `coop/input/` | who owns the keyboard | `input_owner` (the game, a text field, or the overlay) |
