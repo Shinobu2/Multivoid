@@ -94,7 +94,10 @@ S3 = re.compile(r"(?:flag (?:it )?for|file (?:it )?(?:as|under)|belongs in|shoul
 # SetValue/Subscribe/selftest declarations and their comments, from SETTINGS_ARC.md; the mannequin drill's
 # lines in its header, dev_lanes.cpp, pump.cpp, the dev menu and its dev row, from its event doc). The direction is doc-quotes-code, not a move of
 # private prose. A lane built from a sheet may raise this again, each time with its lines read and stated.
-OVERLAP_BASELINE = 57
+# 57 -> 59 (2026-10-03), CONTENT, both lines read: SP-1a's sheet (SERVER_PROFILES_ARC.md §7a) dictated the
+# docs/code-map.md row for coop/server_profile/ and the EnsureHosted call in session_runtime.cpp verbatim --
+# doc quoting code again, no private prose.
+OVERLAP_BASELINE = 59
 # EXCLUDED because it is a deliberate practice, not a leak: copying memory topics into the public
 # piles archive. It alone contributes ~1,263 of the raw 1,300 overlaps.
 OVERLAP_SKIP = ("docs/piles/_archive/session-log/",)
