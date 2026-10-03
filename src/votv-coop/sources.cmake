@@ -489,6 +489,7 @@ set(VOTVCOOP_SOURCES
     src/coop/dev/kerfus_throw_drill.cpp
     src/coop/dev/desk_crossing_drill.cpp
     src/coop/dev/desk_ping_drill.cpp
+    src/coop/dev/command_drill.cpp
     src/coop/dev/game_window.cpp
     src/coop/dev/desk_verb_drill.cpp
     src/coop/dev/desk_verb_drill_desk.cpp

@@ -139,6 +139,10 @@ CFG_FLAG(event_drill, "event_drill", "dev", false, "VOTVCOOP_EVENT_DRILL",
     "snapshot carries it) and then through the scheduler itself (the clock set to day 2 00:18), then "
     "solar, arirGraff_0 and enasus by the dev fire; the client's DONE line counts the showers and the "
     "fires it replayed. MUTATES the world (the clock, the events), so it is armed per run.")
+CFG_ENUM(command_drill, "command_drill", "dev", "off", "off|on|red", "VOTVCOOP_COMMAND_DRILL",
+    "Commands drill: once its world is ready, this peer submits /help and an unknown command, then (a "
+    "client) six unknown commands at once, and checks the replies in order. red expects a wrong first "
+    "line, so it must fail.")
 CFG_ENUM(settings_drill, "settings_drill", "dev", "off", "off|nameplate|nickcolor|flags|scale|font|voicemode|voicevolume|server|serverjoin|serverred|red", "VOTVCOOP_SETTINGS_DRILL",
     "Drill (host): once the client's world is up, the host sets the named row or rows through SetValue, "
     "checks that their modules followed (a posted probe, or a counter), resets them through ResetValue and checks again. nameplate: the "
