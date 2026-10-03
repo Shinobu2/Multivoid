@@ -239,12 +239,11 @@ void Confirm(Kind kind) {
         return;
     }
     if (kind == Kind::ChangeName) {
-        if (value.empty()) {
+        if (!sm::SetNickname(value)) {
             SetStatus(s, "Type a name first.", kBad);
             return;
         }
-        sm::SetNickname(value);
-        coop::config::SetValue(::coop::config_registry::rows::net_nick, value.c_str());
+        coop::config::SetValue(::coop::config_registry::rows::net_nick, sm::Nickname().c_str());
         UE_LOGI("browser_input_screens: nickname set from the Change name window");
         Hide("name accepted");
         SB::Open();

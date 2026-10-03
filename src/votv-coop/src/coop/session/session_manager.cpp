@@ -163,9 +163,24 @@ std::string OwnLobbyId() {
     return g_ownLobbyId;
 }
 
-void SetNickname(const std::string& nick) {
+namespace {
+// A display name has no edge spaces -- the sanitiser's rule, applied where the name enters. Not a
+// copy of config's TrimEdges, which strips CR and LF too and serves another layer.
+std::string TrimNickEdges(const std::string& s) {
+    const size_t b = s.find_first_not_of(" \t");
+    if (b == std::string::npos) return std::string();
+    const size_t e = s.find_last_not_of(" \t");
+    return s.substr(b, e - b + 1);
+}
+}  // namespace
+
+bool SetNickname(const std::string& nick) {
+    const std::string t = TrimNickEdges(nick);
+    if (t.empty()) return false;  // empty or all spaces: keep the last good name
     std::lock_guard<std::mutex> lk(g_cfgMu);
-    if (!nick.empty()) g_nickname = nick;  // ignore empty (keep the last good name)
+    g_nickname = t;
+    UE_LOGI("session_manager: nickname '%s'", t.c_str());
+    return true;
 }
 
 

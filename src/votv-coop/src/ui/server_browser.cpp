@@ -133,10 +133,16 @@ void Render() {
         ImGui::TextUnformatted("Your name:");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(S(220.0f));
-        if (ImGui::InputText("##nick", g_nick, sizeof(g_nick))) sm::SetNickname(g_nick);
-        // Persist the name once the user finishes editing (not per-keystroke) so it
-        // sticks across relaunches via multivoid.ini's net.nick (the same key boot reads).
-        if (ImGui::IsItemDeactivatedAfterEdit()) coop::config::SetValue(coop::config_registry::rows::net_nick, g_nick);
+        ImGui::InputText("##nick", g_nick, sizeof(g_nick));
+        // Take and persist the name once the user finishes editing (not per-keystroke) so it
+        // sticks across relaunches via multivoid.ini's net.nick (the same key boot reads). The
+        // store trims and refuses an empty name, so the field shows what it holds: a field
+        // emptied with Backspace keeps and persists the last good name.
+        if (ImGui::IsItemDeactivatedAfterEdit()) {
+            sm::SetNickname(g_nick);
+            coop::config::SetValue(coop::config_registry::rows::net_nick, sm::Nickname().c_str());
+            strncpy_s(g_nick, sizeof(g_nick), sm::Nickname().c_str(), _TRUNCATE);
+        }
         ImGui::Spacing();
 
         // Host controls row.

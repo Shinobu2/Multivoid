@@ -446,9 +446,7 @@ void DoHost() {
     if (IsLocked()) cfg::SetValue(::coop::config_registry::rows::net_lobby_password, pw.c_str());
     cfg::SetValue(::coop::config_registry::rows::net_lobby_locked, IsLocked() ? "1" : "0");
 
-    // The string, not the row just written: the row holds the value trimmed, so a password of
-    // spaces would read back empty and host open under a lit padlock. The hide gate is
-    // stated here, where the value is formed (HostWithSave honours it on DIRECT only). The name
+    // The hide gate is stated here, where the value is formed (HostWithSave honours it on DIRECT only). The name
     // comes from the field, never the autofill, sanitised and byte-capped at this boundary (it goes
     // to the master and every browser); a blank falls back to the autofill.
     std::string serverName = coop::text::CapUtf8Bytes(
