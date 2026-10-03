@@ -192,19 +192,27 @@ void Render() {
         if (ImGui::RadioButton("Voice activation", &mode, 1))
             coop::config::SetValue(::coop::config_registry::rows::voice_mode, "activation");
         // The three sliders: the drag previews live through the voice_chat setters, and the
-        // release commits the row (CommitSlider), whose subscriber is the apply. The release value
-        // is the pending atomic (the handle's last active frame), never the frame's snapshot float.
-        // Each slider's range is the panel's own, narrower than its row's; AlwaysClamp holds a
-        // typed value (Ctrl+click) to it before the preview applies it.
+        // release commits the row (CommitSlider), whose subscriber is the apply. The pending atomic
+        // holds the handle's value from every active frame and from the frame a typed value is
+        // applied (SliderFloat returns true then, the item already inactive), never the frame's
+        // snapshot float. The ranges are the panel's own, narrower than the rows'; AlwaysClamp
+        // holds a typed value (Ctrl+click) to them.
         // MTA keeps the in-memory setting as the live value, saved on OK and reverted on Cancel
-        // (CSettings.cpp:5568-5575, :3888-3889, :3904-3916); Source's cvarslider writes the cvar
-        // only at drag end (cvarslider.cpp:310-334) and we follow that: the row is the one apply
-        // path (SETTINGS_ARC 3.1), so the preview is not a second path to it.
+        // (CSettings.cpp:5568-5575, :3888-3889, :3904-3916).
+        // Source's cvarslider has no live preview and writes the cvar at drag end or on the
+        // dialog's OK, discarding on Close (cvarslider.cpp:310-333, tf_controls.cpp:746-755).
+        // Ours previews live because SetValue writes the ini, logs `config: SET` and notifies on
+        // every set (config_runtime.cpp), so the row cannot be MTA's per-frame in-memory store;
+        // the row is set once, on release, and a drag the panel's closing abandons is committed
+        // rather than reverted because this panel has no OK/Cancel and every other control
+        // applies at once.
         if (mode == 1) {
             float thr = s.thresholdDb;
             if (ImGui::SliderFloat("Threshold", &thr, -100.0f, 0.0f, "%.0f dB",
-                                   ImGuiSliderFlags_AlwaysClamp))
+                                   ImGuiSliderFlags_AlwaysClamp)) {
                 VC::SetThresholdDb(thr);
+                g_pendingThreshold.store(thr);
+            }
             if (ImGui::IsItemActive()) {
                 g_pendingThreshold.store(thr);
                 g_draggingThreshold.store(true);
@@ -233,8 +241,10 @@ void Render() {
         ImGui::SeparatorText("Levels");
         float gain = s.gainDb;
         if (ImGui::SliderFloat("Mic gain", &gain, -40.0f, 24.0f, "%+.0f dB",
-                               ImGuiSliderFlags_AlwaysClamp))
+                               ImGuiSliderFlags_AlwaysClamp)) {
             VC::SetGainDb(gain);
+            g_pendingGain.store(gain);
+        }
         if (ImGui::IsItemActive()) {
             g_pendingGain.store(gain);
             g_draggingGain.store(true);
@@ -248,8 +258,10 @@ void Render() {
         }
         float vol = s.masterVolume;
         if (ImGui::SliderFloat("Voice volume", &vol, 0.0f, 3.0f, "%.2fx",
-                               ImGuiSliderFlags_AlwaysClamp))
+                               ImGuiSliderFlags_AlwaysClamp)) {
             VC::SetMasterVolume(vol);
+            g_pendingVolume.store(vol);
+        }
         if (ImGui::IsItemActive()) {
             g_pendingVolume.store(vol);
             g_draggingVolume.store(true);
