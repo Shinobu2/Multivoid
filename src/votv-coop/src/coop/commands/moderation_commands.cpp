@@ -113,6 +113,14 @@ Handler BanHandler(const Ports& p, bool byAddress) {
         if (t.offline) {
             const std::string recorded = p.recordNick(t.offlineId);
             const std::string who = recorded.empty() ? ShortId(t.offlineId) : recorded;
+            // An id no seen_players record names is banned by the console only: a client holding
+            // the offline node would otherwise add a persisted record per line at the bucket rate.
+            // A record with an empty nick reads as unknown here, which only refuses a client.
+            if (recorded.empty() && !ctx.caller.isOperator) {
+                ctx.Reply(ShortId(t.offlineId) +
+                          " has never played here; only the host can ban an unknown id.");
+                return;
+            }
             const ModResult r = p.banOffline(t.offlineId.c_str(), reason.c_str(), byAddress);
             switch (r) {
                 case ModResult::Done:

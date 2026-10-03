@@ -202,28 +202,34 @@ void RenderBannedSection() {
         ImGui::TableSetupColumn("Reason", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("##act", ImGuiTableColumnFlags_WidthFixed, S(70.f));
         ImGui::TableHeadersRow();
-        for (const auto& b : g_bans) {
-            ImGui::TableNextRow();
-            ImGui::PushID(b.id);
-            ImGui::TableSetColumnIndex(0);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(b.nick[0] ? b.nick : "(no nick)");
-            ImGui::TableSetColumnIndex(1);
-            ImGui::TextDisabled("%.8s", b.id);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Player id %s\nAddress %s", b.id, b.address[0] ? b.address : "not blocked");
-            ImGui::TableSetColumnIndex(2);
-            char when[24];
-            FormatUnix(b.bannedUnix, when, sizeof(when));
-            ImGui::TextDisabled("%s", when);
-            ImGui::TableSetColumnIndex(3);
-            ImGui::TextDisabled("%s", b.reason[0] ? b.reason : "--");
-            ImGui::TableSetColumnIndex(4);
-            if (ImGui::SmallButton("Unban")) {
-                coop::command_sync::Submit(std::string("unban ") + b.id);
-                g_lastRefresh = -1.0;  // the row drops at the next refresh after the posted command ran
+        // Only the rows in view are drawn: a client granted the offline ban can grow this list.
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(g_bans.size()));
+        while (clipper.Step()) {
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+                const auto& b = g_bans[static_cast<size_t>(i)];
+                ImGui::TableNextRow();
+                ImGui::PushID(b.id);
+                ImGui::TableSetColumnIndex(0);
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(b.nick[0] ? b.nick : "(no nick)");
+                ImGui::TableSetColumnIndex(1);
+                ImGui::TextDisabled("%.8s", b.id);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Player id %s\nAddress %s", b.id, b.address[0] ? b.address : "not blocked");
+                ImGui::TableSetColumnIndex(2);
+                char when[24];
+                FormatUnix(b.bannedUnix, when, sizeof(when));
+                ImGui::TextDisabled("%s", when);
+                ImGui::TableSetColumnIndex(3);
+                ImGui::TextDisabled("%s", b.reason[0] ? b.reason : "--");
+                ImGui::TableSetColumnIndex(4);
+                if (ImGui::SmallButton("Unban")) {
+                    coop::command_sync::Submit(std::string("unban ") + b.id);
+                    g_lastRefresh = -1.0;  // the row drops at the next refresh after the posted command ran
+                }
+                ImGui::PopID();
             }
-            ImGui::PopID();
         }
         ImGui::EndTable();
     }

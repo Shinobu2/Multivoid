@@ -197,7 +197,7 @@ void KickCases(Checker& check, const Registry& reg, const Caller& console, const
     }
 }
 
-void BanCases(Checker& check, const Registry& reg, const Caller& console) {
+void BanCases(Checker& check, const Registry& reg, const Caller& console, const Caller& bob) {
     using F = Fakes<1>;
     check(Said(Run<1>(reg, console, "ban Cy griefing"), "Banned Cy (cccccccc).") &&
               F::R().verb == "ban" && TokenIs(F::R().token, 2, 5, 9) && F::R().reason == "griefing" &&
@@ -231,6 +231,22 @@ void BanCases(Checker& check, const Registry& reg, const Caller& console) {
     check(Said(Run<1>(reg, console, ("banid " + eve).c_str()), "Banned eeeeeeee (offline).") &&
               !F::R().byAddress && F::R().told == std::vector<Told>{{3, "Host banned eeeeeeee"}},
           "moderation: /banid of an unseated id with no record names it by its first eight");
+    check(Said(Run<1>(reg, bob, ("ban " + eve).c_str()),
+               "eeeeeeee has never played here; only the host can ban an unknown id.") &&
+              F::R().calls == 0 && F::R().told.empty(),
+          "moderation: a client's offline /ban of an id with no record is refused before the verb");
+    check(Said(Run<1>(reg, bob, ("banid " + eve).c_str()),
+               "eeeeeeee has never played here; only the host can ban an unknown id.") &&
+              F::R().calls == 0,
+          "moderation: a client's offline /banid of an id with no record is refused before the verb");
+    {
+        Fakes<1>::R() = Rec{};
+        F::R().nick = "Eve";
+        const DispatchResult r = Dispatch(reg, bob, ("ban " + eve).c_str(), Seated(), MakePolicy());
+        check(Said(r, "Banned Eve (offline).") && F::R().verb == "banOffline" && F::R().id == eve &&
+                  F::R().told == std::vector<Told>{{3, "Bob banned Eve"}, {0, "Bob banned Eve"}},
+              "moderation: a client's offline /ban of an id with a record still bans it");
+    }
     check(Said(RunAs<1>(reg, console, ("ban " + eve).c_str(), ModResult::NoSession),
                "There is no hosted session."),
           "moderation: an offline /ban answers NoSession");
@@ -335,7 +351,7 @@ void ModerationCases(Checker& check) {
     }
 
     KickCases(check, reg, console, bob);
-    BanCases(check, reg, console);
+    BanCases(check, reg, console, bob);
     UnbanCases(check, reg, console);
     TeleportCases(check, reg, console, bob);
 
