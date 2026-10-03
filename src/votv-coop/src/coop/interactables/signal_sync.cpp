@@ -422,19 +422,20 @@ void Tick() {
         for (size_t i = 0; i < g_shadow.size(); ++i) {
             ShadowRow& srow = g_shadow[i];
             if (srow.sent) continue;
+            // No world-ready receiver: on the host every absent peer gets this row through the
+            // save and the seed (SeedSendAppendToSlot), so the row counts as sent; retrying it
+            // across a future ready edge was the measured duplicate, a row broadcast to a joiner
+            // whose save already holds it. On a client no ready receiver means the host is gone,
+            // and the row has nowhere to go. Asked before the send, so a broadcast nobody could
+            // receive is not sent; a peer lost between this check and the send is still refused
+            // once (a net-thread disconnect), and the next poll counts the row as sent.
+            if (!s->AnyWorldReadyPeer()) { srow.sent = true; continue; }
             SD::Row r;
             if (!UE::ReadRow(static_cast<int32_t>(i), r, /*withImage=*/true)) {
                 srow.sent = true;
                 continue;
             }
-            if (!SendRowBlob(s, r)) {
-                // A fan-out refused with ZERO world-ready receivers is a VACUOUS success -- every
-                // absent peer gets this row via save+seed. Retrying it across a future ready edge
-                // was the measured duplicate: the row broadcast to a joiner whose save already
-                // contains it. A refusal WITH a ready peer present stays a real retry.
-                if (!s->AnyWorldReadyPeer()) { srow.sent = true; continue; }
-                break;  // channel refused: retry next poll
-            }
+            if (!SendRowBlob(s, r)) break;  // refused with a live audience: retry next poll
             srow.sent = true;
         }
     }
