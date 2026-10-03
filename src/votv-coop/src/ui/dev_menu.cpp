@@ -404,7 +404,8 @@ void RenderNameplatePref() {
     };
     if (ImGui::Checkbox("Custom nickname color", &custom)) {
         sDirty = false;  // the toggle IS the commit
-        coop::nick_color::RequestLocal(custom ? packWorking() : 0u);
+        coop::config::SetValue(::coop::config_registry::rows::nick_color,
+                               coop::nick_color::IniTextFor(custom ? packWorking() : 0u).c_str());
     }
     if (coop::nick_color::IsCustom(coop::nick_color::LocalPacked())) {
         ImGui::SetNextItemWidth(S(220.f));
@@ -424,7 +425,8 @@ void RenderNameplatePref() {
             sDirty = false;
             const uint32_t packed = packWorking();
             sSeen = packed;  // the commit lands async (GT hop); don't re-seed meanwhile
-            coop::nick_color::RequestLocal(packed);
+            coop::config::SetValue(::coop::config_registry::rows::nick_color,
+                                   coop::nick_color::IniTextFor(packed).c_str());
         }
     }
     ImGui::TextDisabled("Colors your nick everywhere it shows -- nameplate, chat, player list --");

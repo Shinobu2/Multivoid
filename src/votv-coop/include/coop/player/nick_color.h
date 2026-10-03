@@ -10,8 +10,8 @@
 // custom = 0xFF000000 | (r<<16) | (g<<8) | b, where the marker byte keeps a pure-black pick
 // distinct from the "unset" 0.
 //
-// The whole store is ATOMIC (any-thread): writers span the game thread (wire handlers), the
-// render thread (the F1 colour picker) and the bringup thread (the session-start reset).
+// The whole store is ATOMIC (any-thread): writers span the game thread (wire handlers and the
+// `nick_color` row's subscriber) and the bringup thread (the session-start reset).
 
 #pragma once
 
@@ -48,10 +48,14 @@ void SetInitialLocalFromIniHex(const std::string& hex);
 // The local pref (0 = default). Any thread (atomic) -- the F1 picker reads it.
 uint32_t LocalPacked();
 
-// UI entry (render thread): persist to multivoid.ini, apply locally, announce
-// to the session (host: broadcast; client: to host for rebroadcast). packed=0
-// resets to the surface defaults everywhere.
-void RequestLocal(uint32_t packed);
+// The `nick_color` row's text for a packed colour: "" for the per-surface defaults (packed 0),
+// RRGGBB otherwise -- what a pane passes to SetValue. The row's own default `unset` means custom
+// white.
+std::string IniTextFor(uint32_t packed);
+
+// Follow the `nick_color` row: once, at boot. A change of the row (the F1 picker's SetValue, a
+// reset) is applied locally and announced to the session on the game thread.
+void SubscribeRow();
 
 // Wire store: peer `slot` announced its color. Any thread (atomic slots).
 void StoreForSlot(int slot, uint32_t packed);
