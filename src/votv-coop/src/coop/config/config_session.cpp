@@ -53,6 +53,8 @@ int SessionRole() { return g_sessionRole.load(std::memory_order_acquire); }
 
 bool SessionLayerGet(const Row* row, std::string& raw) {
     if (g_sessionRole.load(std::memory_order_acquire) == 0) return false;
+    // Only server-scope rows are ever held, so any other row answers without the lock.
+    if (!config_registry::IsServerScope(row)) return false;
     std::lock_guard<std::mutex> lk(LayerMutex());
     const auto it = g_sessionLayer.find(row);
     if (it == g_sessionLayer.end()) return false;
@@ -80,7 +82,7 @@ std::string SessionSafe(const Row* row, const std::string& raw, const char* why)
 
 void SessionLayerBegin(bool host) {
     std::vector<std::pair<const Row*, std::string>> fresh;
-    size_t stale = 0;
+    std::vector<const Row*> stale;
     {
         // Held across the reads below and the put, so a host-side SetValue lands wholly before
         // or wholly after the session opens.
@@ -98,16 +100,23 @@ void SessionLayerBegin(bool host) {
             }
         }
         std::lock_guard<std::mutex> layerLock(internal::LayerMutex());
-        stale = g_sessionLayer.size();
+        stale.reserve(g_sessionLayer.size());
+        for (const auto& kv : g_sessionLayer) stale.push_back(kv.first);
         g_sessionLayer.clear();
         for (const auto& f : fresh) g_sessionLayer[f.first] = f.second;
         g_sessionRole.store(host ? 1 : 2, std::memory_order_release);
     }
-    if (stale)
-        UE_LOGW("config: SESSION dropped %u stale rows", static_cast<unsigned>(stale));
+    if (!stale.empty())
+        UE_LOGW("config: SESSION dropped %u stale rows", static_cast<unsigned>(stale.size()));
     for (const auto& f : fresh)
         UE_LOGI("config: SESSION %s=%s (host start)", f.first->key, Shown(f.first, f.second));
     for (const auto& f : fresh) internal::PostNotify(f.first);
+    // A dropped row the new layer does not hold again changed too; a fresh row is told above.
+    for (const Row* row : stale) {
+        bool refilled = false;
+        for (const auto& f : fresh) refilled = refilled || f.first == row;
+        if (!refilled) internal::PostNotify(row);
+    }
 }
 
 void SessionLayerPut(const Row* row, const std::string& text) {

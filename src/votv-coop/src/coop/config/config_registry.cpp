@@ -389,11 +389,20 @@ constexpr bool ReplicatedKeysFitTheWire() {
             return false;
     return true;
 }
+constexpr bool ReplicatedDefaultsFitTheWire() {
+    for (size_t i = 0; i < kRowCount; ++i)
+        if ((kRowFlags[i] & kRowReplicated) && kRows[i].defS &&
+            CLen(kRows[i].defS) > kServerSettingTextMax)
+            return false;
+    return true;
+}
 }  // namespace
 static_assert(ReplicatedImpliesServer(), "a kRowReplicated row must also be kRowServer");
 static_assert(NoReplicatedCredential(), "a credential row must never be kRowReplicated");
 static_assert(ReplicatedKeysFitTheWire(),
               "a kRowReplicated row's key is longer than kServerSettingKeyMax");
+static_assert(ReplicatedDefaultsFitTheWire(),
+              "a kRowReplicated row's default text is longer than kServerSettingTextMax");
 
 const char* const* CredentialKeys(size_t& count) {
     count = sizeof(kCredentials) / sizeof(kCredentials[0]);
