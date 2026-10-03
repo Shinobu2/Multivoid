@@ -7,7 +7,9 @@
 
 #include "coop/commands/commands_selftest.h"
 
+#include "coop/commands/command_dispatcher.h"
 #include "coop/commands/command_line.h"
+#include "coop/commands/command_registry.h"
 #include "coop/commands/command_targets.h"
 #include "coop/config/config.h"
 #include "coop/config/config_registry.h"
@@ -193,6 +195,274 @@ void TargetCases(Checker& check) {
           "target: an id beats an identical nick");
 }
 
+// ---- the registry and the dispatcher ----
+
+// What the last handler call saw: Context lives for the call only.
+struct Captured {
+    bool called = false;
+    std::string path;
+    std::vector<TargetResult> targets;
+    std::vector<long long> integers;
+    std::vector<std::string> texts;
+};
+Captured g_cap;
+
+void Capture(Context& ctx) {
+    g_cap.called = true;
+    g_cap.path = ctx.registry.PathOf(ctx.spec);
+    g_cap.targets = ctx.targets;
+    g_cap.integers = ctx.integers;
+    g_cap.texts = ctx.texts;
+    ctx.Reply("ok");
+}
+
+bool CheckDefault(const Caller&, std::string_view, bool defaultGranted) { return defaultGranted; }
+bool CheckAll(const Caller&, std::string_view, bool) { return true; }
+bool CheckAllButSelector(const Caller&, std::string_view node, bool) {
+    return node != "multivoid.command.selector";
+}
+
+CommandSpec KickSpec() {
+    CommandSpec c;
+    c.name = "kick";
+    c.description = "Removes a player from the session.";
+    c.args = {{"who", ArgKind::Player, false}, {"reason", ArgKind::Rest, true}};
+    c.handler = &Capture;
+    return c;
+}
+
+CommandSpec TimeSpec(const char* name) {
+    CommandSpec set;
+    set.name = "set";
+    set.description = "Sets the time of day.";
+    set.args = {{"value", ArgKind::Word, false}};
+    set.handler = &Capture;
+    CommandSpec add;
+    add.name = "add";
+    add.description = "Moves the time of day on.";
+    add.nodeOf = "multivoid.time.set";
+    add.args = {{"amount", ArgKind::Word, false}};
+    add.handler = &Capture;
+    CommandSpec t;
+    t.name = name;
+    t.defaultGranted = true;
+    t.description = "Shows the time of day.";
+    t.aliases = {{"day", "set day"}};
+    t.handler = &Capture;
+    t.subVerbs = {set, add};
+    return t;
+}
+
+// Registers help and the test commands; false if any refused.
+bool BuildRegistry(Registry& reg, bool kickAliases) {
+    bool ok = RegisterBuiltins(reg);
+    CommandSpec kick = KickSpec();
+    if (kickAliases) kick.aliases = {{"boot", "Bob"}, {"why", "Bob said"}};
+    ok = reg.Register(kick, nullptr) && ok;
+    CommandSpec tp;
+    tp.name = "tp";
+    tp.description = "Teleports players.";
+    tp.args = {{"who", ArgKind::Players, false}};
+    tp.handler = &Capture;
+    ok = reg.Register(tp, nullptr) && ok;
+    ok = reg.Register(TimeSpec("time"), nullptr) && ok;
+    CommandSpec add;
+    add.name = "add";
+    add.defaultGranted = true;
+    add.description = "Adds a number.";
+    add.args = {{"n", ArgKind::Integer, false}};
+    add.handler = &Capture;
+    ok = reg.Register(add, nullptr) && ok;
+    return ok;
+}
+
+// A valid spec in kick's shape; each refusal case is a copy with exactly one defect.
+CommandSpec Probe() {
+    CommandSpec c = KickSpec();
+    c.name = "probe";
+    return c;
+}
+
+bool Refuses(Registry& reg, const CommandSpec& c) {
+    std::string why;
+    return !reg.Register(c, &why) && !why.empty();
+}
+
+bool StartsWith(const std::string& s, const char* prefix) { return s.rfind(prefix, 0) == 0; }
+
+bool SaidOnly(const DispatchResult& r, const char* line) {
+    return !r.ran && r.replies.size() == 1 && r.replies[0] == line;
+}
+
+DispatchResult Run(const Registry& reg, const Caller& who, const char* line,
+                   const std::vector<PlayerView>& players, const Policy& policy) {
+    g_cap = Captured{};
+    return Dispatch(reg, who, line, players, policy);
+}
+
+void RegistryCases(Checker& check) {
+    {
+        Registry control;
+        check(control.Register(Probe(), nullptr), "registry: the control probe registers");
+    }
+
+    Registry reg;
+    check(BuildRegistry(reg, false), "registry: help and the test commands register");
+
+    CommandSpec p = Probe();
+    p.name = "admin";
+    check(Refuses(reg, p), "registry: a reserved root name is refused");
+    p = Probe();
+    p.name = "Kick!";
+    check(Refuses(reg, p), "registry: a name outside [a-z0-9] is refused");
+    p = Probe();
+    p.name = "kick";
+    check(Refuses(reg, p), "registry: a second kick is refused");
+    p = Probe();
+    p.aliases = {{"tp", ""}};
+    check(Refuses(reg, p), "registry: an alias that is another root's name is refused");
+    p = Probe();
+    p.handler = nullptr;
+    CommandSpec set = KickSpec();
+    set.name = "set";
+    p.subVerbs = {set, set};
+    check(Refuses(reg, p), "registry: two sub-verbs of one name are refused");
+    p = Probe();
+    p.args = {{"t", ArgKind::Rest, false}, {"w", ArgKind::Word, false}};
+    check(Refuses(reg, p), "registry: a Rest before another argument is refused");
+    p = Probe();
+    p.args = {{"a", ArgKind::Word, true}, {"b", ArgKind::Word, false}};
+    check(Refuses(reg, p), "registry: a required argument after an optional one is refused");
+    p = Probe();
+    p.handler = nullptr;
+    check(Refuses(reg, p), "registry: no handler and no sub-verbs is refused");
+    p = Probe();
+    p.handler = nullptr;
+    set.aliases = {{"s", ""}};
+    p.subVerbs = {set};
+    check(Refuses(reg, p), "registry: an alias on a sub-verb is refused");
+    p = Probe();
+    p.nodeOf = "multivoid.nosuch";
+    check(Refuses(reg, p), "registry: a nodeOf that is not declared is refused");
+
+    CommandSpec r;
+    r.name = "r";
+    r.nodeOf = "multivoid.add";
+    r.args = {{"text", ArgKind::Rest, false}};
+    r.handler = &Capture;
+    check(reg.Register(r, nullptr), "registry: a verb naming a declared node registers");
+    const CommandSpec* rRoot = reg.FindRoot("r", nullptr);
+    check(rRoot != nullptr && reg.NodeOf(*rRoot) == "multivoid.add", "registry: nodeOf is the node");
+    CommandSpec clockSpec = TimeSpec("clock");
+    clockSpec.aliases = {{"bad", "nosuch"}};
+    check(Refuses(reg, clockSpec), "registry: an alias whose preset word names no sub-verb is refused");
+    check(reg.DeclareNode({"multivoid.zzz", false, ""}, nullptr), "registry: a node can be declared");
+    check(!reg.DeclareNode({"multivoid.zzz", false, ""}, nullptr), "registry: not twice");
+    p = Probe();
+    p.name = "zzz";
+    check(Refuses(reg, p), "registry: a root whose derived node is declared is refused");
+    check(reg.FindNode("multivoid.admin") == nullptr && reg.FindNode("multivoid.probe") == nullptr &&
+              reg.FindNode("multivoid.clock") == nullptr,
+          "registry: nothing of a refused tree was declared");
+
+    const CommandSpec* timeRoot = reg.FindRoot("time", nullptr);
+    const CommandSpec* kickRoot = reg.FindRoot("kick", nullptr);
+    check(timeRoot != nullptr && reg.NodeOf(timeRoot->subVerbs[0]) == "multivoid.time.set" &&
+              reg.NodeOf(timeRoot->subVerbs[1]) == "multivoid.time.set",
+          "registry: a sub-verb's node, and nodeOf onto a sibling's");
+    check(kickRoot != nullptr && reg.Usage(*kickRoot) == "/kick <who> [reason...]", "registry: kick's usage");
+    check(timeRoot != nullptr && reg.Usage(timeRoot->subVerbs[0]) == "/time set <value>",
+          "registry: a sub-verb's usage");
+    check(timeRoot != nullptr && reg.Usage(*timeRoot) == "/time [set|add]", "registry: sub-verbs in usage");
+
+    const std::vector<PlayerView> players = FourPlayers();
+    Caller who;
+    who.slot = 1;
+    Policy byDefault;
+    byDefault.check = &CheckDefault;
+    Policy everything;
+    everything.check = &CheckAll;
+    Policy noSelector;
+    noSelector.check = &CheckAllButSelector;
+
+    check(SaidOnly(Run(reg, who, "kick Bob", players, byDefault),
+                   "You do not have permission for /kick (multivoid.kick)."),
+          "dispatch: a node the caller lacks is refused with its name");
+    {
+        const DispatchResult h = Run(reg, who, "help", players, byDefault);
+        check(h.ran && h.replies.size() == 5 && h.replies[0] == "Commands you can use:" &&
+                  StartsWith(h.replies[1], "/add <n> -- ") &&
+                  StartsWith(h.replies[2], "/help [command...] -- ") &&
+                  StartsWith(h.replies[3], "/r <text...> -- ") &&
+                  StartsWith(h.replies[4], "/time [set|add] -- "),
+              "dispatch: help lists exactly what the caller may use");
+    }
+    {
+        const DispatchResult h = Run(reg, who, "help kick", players, byDefault);
+        check(h.ran && h.replies.size() == 1 && StartsWith(h.replies[0], "/kick <who> [reason...] -- "),
+              "dispatch: help of a command shows its usage, permitted or not");
+    }
+    check(Run(reg, who, "help nosuch", players, byDefault).replies ==
+              std::vector<std::string>{"Unknown command '/nosuch'."},
+          "dispatch: help of a stranger");
+    check(SaidOnly(Run(reg, who, "nosuch", players, byDefault),
+                   "Unknown command '/nosuch'. Type /help for the commands."),
+          "dispatch: an unknown command");
+    check(SaidOnly(Run(reg, who, "", players, byDefault), "Type /help for the commands."),
+          "dispatch: an empty line hints at help");
+    check(SaidOnly(Run(reg, who, "add x", players, byDefault),
+                   "'x' is not a whole number. Usage: /add <n>"),
+          "dispatch: a word that is not a whole number");
+    {
+        const DispatchResult a = Run(reg, who, "add +5", players, byDefault);
+        check(a.ran && g_cap.integers.size() == 1 && g_cap.integers[0] == 5, "dispatch: +5 is 5");
+    }
+    check(SaidOnly(Run(reg, who, "add 5 6", players, byDefault), "Usage: /add <n>"),
+          "dispatch: a word left over is a usage error");
+    check(SaidOnly(Run(reg, who, "add +-5", players, byDefault),
+                   "'+-5' is not a whole number. Usage: /add <n>"),
+          "dispatch: +-5 is not a whole number");
+    check(Run(reg, who, "time", players, byDefault).ran && g_cap.path == "time",
+          "dispatch: a verb with sub-verbs runs its own handler");
+    check(SaidOnly(Run(reg, who, "day", players, byDefault),
+                   "You do not have permission for /time set (multivoid.time.set)."),
+          "dispatch: an alias is checked as its expansion");
+
+    check(SaidOnly(Run(reg, who, "kick bo", players, everything),
+                   "'bo' matches several players: Bob (#2), bobby (#5)."),
+          "dispatch: an ambiguous target lists its matches");
+    {
+        const DispatchResult k = Run(reg, who, "kick Bob said \"lol  ", players, everything);
+        check(k.ran && g_cap.targets[0].slots == std::vector<int>{1} &&
+                  g_cap.texts[1] == "said \"lol",
+              "dispatch: Rest keeps the raw remainder, quotes and all");
+    }
+    {
+        const DispatchResult d = Run(reg, who, "DAY", players, everything);
+        check(d.ran && g_cap.path == "time set" && g_cap.texts[0] == "day",
+              "dispatch: an alias runs its expansion, in any case");
+    }
+    check(SaidOnly(Run(reg, who, "time set", players, everything), "Usage: /time set <value>"),
+          "dispatch: a missing required argument prints the usage");
+    check(SaidOnly(Run(reg, who, "tp @a", players, noSelector),
+                   "You do not have permission to use @a or @r (multivoid.command.selector)."),
+          "dispatch: @a needs the selector node");
+
+    Registry withAliases;
+    check(BuildRegistry(withAliases, true), "registry: kick with aliases registers");
+    {
+        const DispatchResult b = Run(withAliases, who, "boot being rude", players, everything);
+        check(b.ran && g_cap.targets[0].slots == std::vector<int>{1} &&
+                  g_cap.texts[1] == "being rude",
+              "dispatch: Rest after an alias takes the raw typed remainder");
+    }
+    {
+        const DispatchResult w = Run(withAliases, who, "why hi  there", players, everything);
+        check(w.ran && g_cap.texts[1] == "said hi  there",
+              "dispatch: Rest starting on a preset word joins the preset and the raw remainder");
+    }
+}
+
 }  // namespace
 
 bool RunSelftest() {
@@ -200,6 +470,7 @@ bool RunSelftest() {
     const bool breakIt = coop::config::ResolveFlag(coop::config_registry::rows::selftest_break_commands);
     SplitCases(check, breakIt);
     TargetCases(check);
+    RegistryCases(check);
 
     if (check.pass == check.total) {
         UE_LOGI("commands selftest: ALL PASS (%d checks)", check.total);
