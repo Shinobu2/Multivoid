@@ -66,12 +66,11 @@ EndReason JudgeDial(const DialReport& d) {
 }
 
 // The host's accept policy, shared by both accept sites (the Connecting edge, and the Connected
-// branch when GNS skips Connecting): the ban list, then the per-address connection cap. None
-// accepts; otherwise the code the refused peer is told, with whyOut as the close text. Both run
-// before AcceptConnection, so a refusal costs no handshake and no band entry. The ban filter is
-// fail-closed: with a filter installed and no resolvable remote IP the connection is refused as
-// AcceptFailed; direct UDP populates m_addrRemote by the Connecting edge, so only a genuinely
-// unresolvable peer is refused. MTA checks its join flood at the join packet, inside the
+// branch when GNS skips Connecting): the per-address connection cap. None accepts; otherwise the
+// code the refused peer is told, with whyOut as the close text. It runs before AcceptConnection,
+// so a refusal costs no handshake and no band entry. The ban list is not asked here: no id is
+// proved yet, and on the internet lane no address either; it is asked at the identity proof
+// (HandlePendingMessage). MTA checks its join flood at the join packet, inside the
 // password check (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:1916-1919),
 // so a wrong-password join is not counted there; ours counts every accepted connection,
 // because what the cap protects is the accept and the save capture behind the seat, not the
@@ -80,24 +79,13 @@ EndReason JudgeDial(const DialReport& d) {
 // counts the arrival (peer_admission), by the address its route reports by then or by the
 // identity it proves over a relay, never by one merely claimed.
 EndReason AcceptPolicy(ISteamNetworkingSockets* sockets, HSteamNetConnection hConn,
-                       Session::AcceptFilterFn filter, char* whyOut, int whyLen,
-                       bool* countedOut) {
+                       char* whyOut, int whyLen, bool* countedOut) {
     if (whyOut && whyLen > 0) whyOut[0] = '\0';
     *countedOut = false;
     char ip[SteamNetworkingIPAddr::k_cchMaxString] = {};
     SteamNetConnectionInfo_t cinfo{};
     if (sockets->GetConnectionInfo(hConn, &cinfo)) {
         cinfo.m_addrRemote.ToString(ip, sizeof(ip), /*bWithPort*/false);
-    }
-    if (filter) {
-        if (!ip[0]) {
-            UE_LOGW("net: incoming connection has no resolvable remote IP -- "
-                    "rejecting (fail-closed ban check)");
-            if (whyOut && whyLen > 0)
-                std::snprintf(whyOut, static_cast<size_t>(whyLen), "no resolvable remote address");
-            return EndReason::AcceptFailed;
-        }
-        if (!filter(ip, whyOut, whyLen)) return EndReason::Banned;
     }
     connect_history::Key key;
     if (connect_history::KeyFromAddressBytes(cinfo.m_addrRemote.m_ipv6, key)) {
@@ -274,9 +262,12 @@ int Session::AdmitPending(int pendingIdx, uint32_t hConn) {
 }
 
 int Session::FindFreePeerSlotForClient() {
-    // Host: the lowest unoccupied client slot; slot 0 is the host itself.
+    // Host: the lowest unoccupied client slot; slot 0 is the host itself. A slot is free when its
+    // teardown has finished: the generation clear is that teardown's last per-slot write, so no
+    // successor can be seated while a predecessor's state is still being cleared.
     for (int i = 1; i < kMaxPeers; ++i) {
-        if (peerConns_[i].load() == 0) return i;
+        if (peerConns_[i].load() == 0 &&
+            peerGenBySlot_[i].load(std::memory_order_acquire) == 0) return i;
     }
     return -1;
 }
@@ -388,12 +379,12 @@ void Session::HandleConnStatusChanged(void* info) {
     if (cfg_.role == Role::Host &&
         oldState == k_ESteamNetworkingConnectionState_None &&
         newState == k_ESteamNetworkingConnectionState_Connecting) {
-        // The accept policy before the accept: the ban list and the connection cap, at the edge
-        // that costs no slot and no handshake.
+        // The accept policy before the accept: the connection cap, at the edge that costs no slot
+        // and no handshake.
         char why[128] = {};
         bool counted = false;
         const EndReason refusal =
-            AcceptPolicy(sockets, hConn, acceptFilter_, why, sizeof(why), &counted);
+            AcceptPolicy(sockets, hConn, why, sizeof(why), &counted);
         if (refusal != EndReason::None) {
             const char* text = why[0] ? why : Describe(refusal).text;
             UE_LOGW("net: rejecting incoming connection [%s] '%s'", Describe(refusal).id, text);
@@ -446,13 +437,13 @@ void Session::HandleConnStatusChanged(void* info) {
         if (slot < 0 && cfg_.role == Role::Host) {
             // The second accept site runs the same policy as the first: park, never seat. A
             // connection reaching Connected with no slot is either already parked (the normal path)
-            // or one where GNS skipped Connecting, which never met the accept-edge ban filter, so
-            // the filter runs here.
+            // or one where GNS skipped Connecting, which never met the connection cap, so the cap
+            // runs here.
             if (!IsPendingConn(hConn)) {
                 char why[128] = {};
                 bool counted = false;
                 const EndReason refusal =
-                    AcceptPolicy(sockets, hConn, acceptFilter_, why, sizeof(why), &counted);
+                    AcceptPolicy(sockets, hConn, why, sizeof(why), &counted);
                 if (refusal != EndReason::None) {
                     const char* text = why[0] ? why : Describe(refusal).text;
                     UE_LOGW("net: rejecting late-register connection [%s] '%s'",
@@ -574,11 +565,12 @@ void Session::HandleConnStatusChanged(void* info) {
             }
         }
 
-        // The generation clear is the last write of the close path, after the inbox erase (under a
-        // different mutex), so a reader that sees 0 sees an inbox already drained of this peer.
+        // The generation clear is the last per-slot write of the close path, after the inbox erase
+        // (under a different mutex), so a reader that sees 0 sees an inbox already drained of this
+        // peer, and FindFreePeerSlotForClient hands the slot out only after it.
         if (slot >= 0) {
-            peerGenBySlot_[slot].store(0, std::memory_order_release);
             SetProvedGuidForSlot(slot, 0, std::string());  // the identity dies with the seat
+            peerGenBySlot_[slot].store(0, std::memory_order_release);
         }
 
         // Aggregate state: Connected while any peer remains, otherwise everything is cleared.
@@ -715,12 +707,11 @@ bool Session::KickClaimed(int peerSlot, uint32_t hConn, EndReason code, const ch
           if (it->senderPeerSlot == peerSlot) it = reliableInbox_.erase(it);
           else ++it;
       } }
-    // The generation clear is the last write, after the inbox erase (the ClosedByPeer path says why
-    // the order matters).
-    peerGenBySlot_[peerSlot].store(0, std::memory_order_release);
-    // And the proved identity with it: a recycled slot must not carry its predecessor's storage
-    // name.
+    // The proved identity goes first: a recycled slot must not carry its predecessor's storage
+    // name. The generation clear is the last per-slot write, after the inbox erase (the
+    // ClosedByPeer path says why the order matters).
     SetProvedGuidForSlot(peerSlot, 0, std::string());
+    peerGenBySlot_[peerSlot].store(0, std::memory_order_release);
 
     // Aggregate state, as in the ClosedByPeer branch.
     if (connectedPeerCount() == 0) {

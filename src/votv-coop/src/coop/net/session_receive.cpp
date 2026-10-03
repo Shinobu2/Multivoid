@@ -78,12 +78,37 @@ void Session::HandlePendingMessage(int pendIdx, uint32_t hConn, const void* data
         return;
     }
 
+    const std::string guid = peer_identity::GuidForPublicKey(res.provedKey);
+
+    // The ban check, MTA's shape (CGame::Packet_PlayerJoinData: the serial at CGame.cpp:1956, then
+    // the IP at :1973), asked here because the proof is the first place every transport holds an
+    // id and a route: the proved id, and the connection's own address (empty on a relayed path or
+    // when GNS has none). Before the supersession kick and the seat: a banned joiner costs no
+    // seat and kicks nobody.
+    if (banCheck_) {
+        char addr[SteamNetworkingIPAddr::k_cchMaxString] = {};
+        SteamNetConnectionInfo_t ci{};
+        auto* sockets = SteamNetworkingSockets();
+        if (sockets && sockets->GetConnectionInfo(static_cast<HSteamNetConnection>(hConn), &ci) &&
+            !(ci.m_nFlags & k_nSteamNetworkConnectionInfoFlags_Relayed) &&
+            !ci.m_addrRemote.IsIPv6AllZeros()) {
+            ci.m_addrRemote.ToString(addr, sizeof(addr), /*bWithPort*/false);
+        }
+        char why[96] = {};
+        if (banCheck_(guid.c_str(), addr, why, sizeof(why))) {
+            UE_LOGI("net: PENDING %d refused -- identity %.8s... or its address is banned (%s) [%s]",
+                    pendIdx, guid.c_str(), why[0] ? why : "no reason recorded",
+                    Describe(EndReason::Banned).id);
+            RetirePending(pendIdx, hConn, EndReason::Banned, why[0] ? why : nullptr);
+            return;
+        }
+    }
+
     // Supersession, one identity one seat: a peer that proved the key already sitting in a slot is
     // that person, so the older connection goes and the new one is seated, here, before the seat is
     // asked for. The trigger is a dropped link, not an attack: GNS takes seconds to time out a dead
     // connection, a player rejoining inside that window would otherwise take a second seat, and the
     // stored inventory is keyed by guid, so both seats would persist it (last writer wins).
-    const std::string guid = peer_identity::GuidForPublicKey(res.provedKey);
     for (int s = 1; s < kMaxPeers; ++s) {
         if (peerConns_[s].load() == 0) continue;
         if (ProvedGuidForSlot(s) != guid) continue;

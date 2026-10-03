@@ -204,11 +204,13 @@ host measures from the connection and publishes so every board shows the same va
 is a row transition, which is how a lost disconnect and a fast replacement heal the same way.
 
 Kick and ban are host-only actions on the player list (`coop/moderation/`). A ban records the
-address, the nickname and the reason in a file next to the mod, is applied at the connection's
-accept filter before a seat is spent, and survives host restarts; the host also keeps a
-seen-players file for the administration panel. Bans are keyed by address, not by identity.
+player's id, and their address when the host saw their own (not a relay's), with the nickname
+and the reason, in the hosted server's folder. Both are checked right after the identity proof,
+before a seat is spent, on every transport, and the ban survives host restarts; the host also
+keeps a seen-players file for the administration panel. A nickname is never a ban
+key: anyone can type any name.
 The kicked or banned player lands at the menu with a modal saying which, under a stable code
-([join.md](join.md) lists them). Beside the ban list, the same accept edge caps how many
+([join.md](join.md) lists them). Beside the ban check, the accept edge caps how many
 connections one address may open in a window (four per thirty seconds by default, a host
 setting), the shape of MTA's join-flood protection (`coop/net/connect_history`).
 
@@ -225,7 +227,7 @@ setting), the shape of MTA's join-flood protection (`coop/net/connect_history`).
 | death and revive | that peer | the native chain; the run-ending travel refused by its author |
 | sleep | each peer reports; the host tallies, accelerates and ends | |
 | inventory | that peer; the host stores it | never on the wire as gameplay |
-| roster, kick, ban | the host | rows asserted as state; a ban at the accept filter |
+| roster, kick, ban | the host | rows asserted as state; a ban by id and address at the identity proof |
 
 ## Wire messages
 
@@ -258,7 +260,7 @@ dead peer through the ragdoll bit of its next pose.
 | After a revive the player can drift horizontally from the base gate, metres over seconds; the cause is unmeasured | `[V]` `harness/autotest/death_state_probe.cpp` reads the position back |
 | Damage a puppet takes on another machine is dropped by design; only the victim's own contacts count | `[V]` `coop/player/player_damage` |
 | A third-party bundle pak cannot be discovered: bundle membership is a fixed table | `[V]` `coop/player/skin_registry` |
-| Bans are by address, so a banned player with a new address is a new player | `[V]` `coop/moderation/ban_list` |
+| A ban is by player id and, on a direct link, by address: a banned player with a new identity key who comes from a new address or through a relay is a new player, and an address ban refuses whoever shares that address | `[V]` `coop/moderation/ban_list` |
 | The connection cap is by address too, so players behind one router share it; over a relayed internet route it counts by the identity a peer proves, so a peer that rotates its identity there gets a fresh count each time | `[V]` `coop/net/connect_history` on the direct lane; `[RD]` on the internet lane, from the transport's source |
 
 ## Code map

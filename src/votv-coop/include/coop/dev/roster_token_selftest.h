@@ -2,7 +2,7 @@
 // roster_token_selftest=1`, HOST only).
 //
 // It covers the claim an idle smoke cannot reach: a moderation token captured from the person who
-// WAS in a slot must be refused once someone else holds that seat, or a permanent IP ban lands on a
+// WAS in a slot must be refused once someone else holds that seat, or a permanent ban lands on a
 // stranger who merely inherited it. The only honest way to observe that is to let a slot actually
 // change hands and then fire the real action with the real stale token.
 //

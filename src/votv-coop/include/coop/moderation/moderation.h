@@ -12,7 +12,7 @@
 // disk work inline and the game-thread-asserted nick lookup is legal.
 //
 // Principle 7: policy orchestration over a policy-free net layer, which learns about bans only
-// through the injected ban predicate, asked at the identity proof, never by calling this module.
+// through the injected Session::SetBanCheck predicate (asked at the proof), never by calling us.
 
 #pragma once
 

@@ -90,11 +90,10 @@ namespace cfg = coop::config;
 // The single networking session; off until a scenario or a menu action starts it.
 coop::net::Session g_session;
 
-// The host's accept predicate (Session::SetAcceptFilter): a plain function, so it converts to the
-// function pointer; read on the net thread, touching only ban_list's own mutexed state. Asks by
-// address alone: no id is proved at the accept edge.
-bool BanAcceptFilter(const char* remoteIp, char* whyOut, int whyLen) {
-    return !coop::ban_list::IsBanned("", remoteIp, whyOut, whyLen);
+// The host's ban predicate (Session::SetBanCheck): a plain function, so it converts to the
+// session's pointer type.
+bool BanCheck(const char* playerId, const char* address, char* whyOut, int whyLen) {
+    return coop::ban_list::IsBanned(playerId, address, whyOut, whyLen);
 }
 
 
@@ -155,7 +154,7 @@ void SpawnSecondPlayerWhenReady() {
 }
 
 // Bring up a session on g_session: reset the per-session edge state, wire every subsystem,
-// (host) back the save up and install the LanDirect ban filter, then Start. The one path for
+// (host) back the save up and load the ban list on every topology, then Start. The one path for
 // "start a coop session", from the env boot and from a browser action; on the TimelineThread,
 // since Start spawns the net thread and the save backup is a blocking copy. Returns Start()'s
 // success, which the browser-join path uses to Fail the join when no connect edge will arrive.
@@ -267,11 +266,10 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
         // The seen-players registry, host bookkeeping on any topology (on P2P the address stays
         // empty).
         coop::seen_players::Load();
-        // The ban list, on every topology: read from the hosted server's folder.
+        // The ban list, on every topology: read from the hosted server's folder, and asked at the
+        // identity proof, which both transports pass.
         coop::ban_list::Load(serverDir);
-        // LanDirect only, until the proof-time check replaces the accept-edge filter.
-        if (netCfg.topology == coop::net::Topology::LanDirect)
-            g_session.SetAcceptFilter(&BanAcceptFilter);
+        g_session.SetBanCheck(&BanCheck);
     }
     // The client's connecting state is not raised here but by the browser connect actions, so the
     // loading screen is browser-join only; the env and autotest client boot reaches this function

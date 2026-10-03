@@ -32,8 +32,8 @@ The version gate runs twice here. The build number is part of every packet heade
 another build never parses a message at all. The game target rides the Join payload and is
 compared byte for byte; on a mismatch the host kicks with a reason and the client shows why.
 
-Before any of that, at the accept edge, the host applies two policies that cost no handshake and
-no seat: the ban list, and a per-address connection cap in the shape of MTA's join-flood
+Before any of that, at the accept edge, the host applies one policy that costs no handshake and
+no seat: a per-address connection cap in the shape of MTA's join-flood
 protection, four connections per thirty seconds by default and then thirty seconds of refusal
 (`MV-H29`; the numbers are the `net.connect_cap` and `net.connect_window_s` settings, and 0
 turns the cap off). On the internet lane no address is known when a connection arrives, because
@@ -41,6 +41,11 @@ no route exists yet, so such an arrival is counted at its identity proof instead
 its route reports, or by the identity it proves when the route is relayed. A second instance of
 the same per-source history bounds password guesses at the proof, ten failures in ten minutes
 (`coop/net/connect_history`).
+
+The ban list is checked right after the identity proof, before a seat is given, as MTA checks a
+serial and an IP at join: the id the proof established, and the connection's own address when the
+path is not relayed. So a ban holds on every transport, and the refusal carries the stored
+reason (`MV-H18`).
 
 Until a client's world is up, the host sends it only a short list of engine-free kinds: the
 roster family (slot, roster rows, skin, nameplate and colour preferences), the save transfer,
@@ -296,7 +301,7 @@ sentence on its status line.
 | `MV-H15` | The host could not send its challenge |
 | `MV-H16` | The identity proof did not arrive in time |
 | `MV-H17` | The host was busy, and this connection was the slowest to prove itself |
-| `MV-H18` | Banned from this server (the ban list, at the accept filter) |
+| `MV-H18` | Banned from this server (by id or address, at the identity proof) |
 | `MV-H19` | Banned by the host |
 | `MV-H20` | Kicked by the host |
 | `MV-H21` | The server is full |

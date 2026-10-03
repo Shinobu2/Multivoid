@@ -371,13 +371,13 @@ public:
 
     // --- Moderation (host-only admin actions) ---
 
-    // The host's accept predicate over an incoming connection's remote IP (dotted decimal); false
-    // closes it as banned, and whatever the filter wrote into `whyOut` (the ban's stored reason)
-    // rides the close as its text, so the banned player reads why. Set once before Start spawns
-    // the net thread (the harness wires coop::ban_list::IsBanned). MTA: the join-time ban check
-    // in CGame::Packet_PlayerJoinData, whose disconnect carries the reason string.
-    using AcceptFilterFn = bool (*)(const char* remoteIp, char* whyOut, int whyLen);
-    void SetAcceptFilter(AcceptFilterFn fn) { acceptFilter_ = fn; }
+    // The host's ban predicate over a joiner's PROVED player id and its connection's own address
+    // (empty when the path is relayed or GNS knows none), asked right after the identity proof and
+    // before a seat is given; true refuses the connection as banned, and whatever it wrote into
+    // `whyOut` rides the close. Set once before Start spawns the net thread. MTA: the serial and IP
+    // checks in CGame::Packet_PlayerJoinData (CGame.cpp:1956, :1973).
+    using BanCheckFn = bool (*)(const char* playerId, const char* address, char* whyOut, int whyLen);
+    void SetBanCheck(BanCheckFn fn) { banCheck_ = fn; }
 
     // Host: disconnect the client at peerSlot with no linger; `code` and `reason` reach the peer's
     // status callback, the code as the transport's application end reason. Runs the ClosedByPeer
@@ -736,9 +736,9 @@ private:
     // connection. event_feed fans it to each puppet.
     std::array<std::atomic<int>, kMaxPeers> rttMsBySlot_{};
 
-    // The host's accept predicate (the ban filter); nullptr = accept all. Set before Start spawns
+    // The host's ban predicate (SetBanCheck); nullptr = nobody is banned. Set before Start spawns
     // the net thread.
-    AcceptFilterFn acceptFilter_ = nullptr;
+    BanCheckFn banCheck_ = nullptr;
 
     // Client: what the host or the transport said when the link ended (the end reason decoded, and
     // its text); written on the net thread, taken on the game thread by TakeHostCloseReason. Its
