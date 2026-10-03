@@ -19,15 +19,6 @@ namespace {
 constexpr size_t kPresetOffset = static_cast<size_t>(-1);
 constexpr const char* kSelectorNode = "multivoid.command.selector";
 
-char LowerAscii(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c; }
-
-bool EqualsNoCase(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (LowerAscii(a[i]) != LowerAscii(b[i])) return false;
-    return true;
-}
-
 // The typed line and its effective words: for an alias, [root name] + the preset words + the
 // words typed after the alias. A preset word has no offset in the typed line.
 struct Expanded {
@@ -76,7 +67,7 @@ Walked Walk(const CommandSpec* root, const Expanded& ex) {
     while (w.next < ex.words.size()) {
         const CommandSpec* hit = nullptr;
         for (const CommandSpec& sub : w.spec->subVerbs)
-            if (EqualsNoCase(ex.words[w.next], sub.name)) { hit = &sub; break; }
+            if (EqualsAsciiNoCase(ex.words[w.next], sub.name)) { hit = &sub; break; }
         if (hit == nullptr) break;
         w.spec = hit;
         ++w.next;

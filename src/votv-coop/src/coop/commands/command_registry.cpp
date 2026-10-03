@@ -27,15 +27,6 @@ bool ValidName(std::string_view s) {
     return true;
 }
 
-char LowerAscii(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c; }
-
-bool EqualsNoCase(std::string_view a, std::string_view b) {
-    if (a.size() != b.size()) return false;
-    for (size_t i = 0; i < a.size(); ++i)
-        if (LowerAscii(a[i]) != LowerAscii(b[i])) return false;
-    return true;
-}
-
 // Words that name nodes which are not commands (`multivoid.printer.*`, `multivoid.admin.menu`,
 // `multivoid.command.selector`, `multivoid.dev.*`): no command may take them.
 bool Reserved(std::string_view name) {
@@ -71,7 +62,7 @@ struct TreeCheck {
                 bool names = false;
                 if (!preset.words.empty())
                     for (const CommandSpec& sub : s.subVerbs)
-                        names = names || EqualsNoCase(preset.words[0], sub.name);
+                        names = names || EqualsAsciiNoCase(preset.words[0], sub.name);
                 if (!names)
                     return Fail("alias '" + a.name + "': its first preset word names no sub-verb of '" +
                                 s.name + "'");
@@ -170,9 +161,9 @@ bool Registry::DeclareNode(NodeDecl d, std::string* why) {
 const CommandSpec* Registry::FindRoot(std::string_view word, const Alias** alias) const {
     if (alias != nullptr) *alias = nullptr;
     for (const auto& r : roots_) {
-        if (EqualsNoCase(word, r->name)) return r.get();
+        if (EqualsAsciiNoCase(word, r->name)) return r.get();
         for (const Alias& a : r->aliases) {
-            if (!EqualsNoCase(word, a.name)) continue;
+            if (!EqualsAsciiNoCase(word, a.name)) continue;
             if (alias != nullptr) *alias = &a;
             return r.get();
         }

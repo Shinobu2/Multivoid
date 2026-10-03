@@ -25,4 +25,9 @@ struct ParsedLine {
 // trailing spaces make no word. Never fails; pure.
 ParsedLine SplitLine(std::string_view line);
 
+// Equal when the two have the same length and every byte is the same after lowering A-Z (ASCII
+// only; any other byte compares as itself). The one compare of command names and sub-verbs, so
+// the registry's alias rule and the dispatcher's walk cannot disagree. Pure.
+bool EqualsAsciiNoCase(std::string_view a, std::string_view b);
+
 }  // namespace coop::commands

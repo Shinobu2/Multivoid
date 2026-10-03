@@ -24,7 +24,16 @@ size_t QuoteLen(std::string_view line, size_t i) {
     return 0;
 }
 
+char LowerAscii(char c) { return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c; }
+
 }  // namespace
+
+bool EqualsAsciiNoCase(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (LowerAscii(a[i]) != LowerAscii(b[i])) return false;
+    return true;
+}
 
 ParsedLine SplitLine(std::string_view line) {
     ParsedLine out;
