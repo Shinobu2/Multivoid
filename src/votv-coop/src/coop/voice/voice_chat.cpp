@@ -121,6 +121,8 @@ void StartDevices() {
     coop::voice::PlaybackConfig pc;
     pc.device = CFG::ResolveString(coop::config_registry::rows::voice_output_device);
     pc.volume = CFG::ResolveFloat(coop::config_registry::rows::voice_volume);
+    // The host's value in a session (the row's session layer, WP-S2); the subscriber below keeps
+    // it applied live, so this read is only the initial value.
     pc.distanceCm = CFG::ResolveFloat(coop::config_registry::rows::voice_distance_cm);
     pc.jitterThreshold = static_cast<int>(CFG::ResolveInt(coop::config_registry::rows::voice_jitter_threshold));
     pc.prebufferFrames = static_cast<int>(CFG::ResolveInt(coop::config_registry::rows::voice_prebuffer_frames));
@@ -153,6 +155,8 @@ void PublishUiSnapshot(coop::net::Session* s) {
     snap.masterVolume = g_playback.MasterVolume();
     snap.thresholdDb = g_capture.ThresholdDb();
     snap.gainDb = g_capture.GainDb();
+    // The APPLIED value (an atomic): a Resolve here would run every game tick.
+    snap.distanceCm = g_playback.DistanceCm();
     (void)s;
     std::lock_guard<std::mutex> lk(g_uiMutex);
     g_uiSnap = snap;
@@ -184,6 +188,19 @@ void OnVoiceVolumeRowChanged() {
     g_playback.SetMasterVolume(CFG::ResolveFloat(coop::config_registry::rows::voice_volume));
 }
 
+// The range row is the host's in a session (WP-S2): its subscriber hands the effective value to
+// the mixer's atomic, with no device restart. 0 = unlimited.
+void OnVoiceRangeRowChanged() {
+    const float cm = CFG::ResolveFloat(coop::config_registry::rows::voice_distance_cm);
+    g_playback.SetDistanceCm(cm);
+    if (cm > 0.0f)
+        UE_LOGI("voice_chat: range %.0f cm (vertical fade %.0f cm)", cm,
+                cm * coop::voice::kVerticalFadeRatio);
+    else
+        UE_LOGI("voice_chat: range unlimited (whisper %.0f cm)",
+                coop::voice::DefaultRangeCm() * 0.5f);
+}
+
 }  // namespace
 
 void SubscribeRows() {
@@ -193,6 +210,7 @@ void SubscribeRows() {
     CFG::Subscribe(::coop::config_registry::rows::voice_threshold_db, &OnVoiceThresholdRowChanged);
     CFG::Subscribe(::coop::config_registry::rows::voice_mic_gain_db, &OnVoiceGainRowChanged);
     CFG::Subscribe(::coop::config_registry::rows::voice_volume, &OnVoiceVolumeRowChanged);
+    CFG::Subscribe(::coop::config_registry::rows::voice_distance_cm, &OnVoiceRangeRowChanged);
 }
 
 void Install(coop::net::Session* session) {

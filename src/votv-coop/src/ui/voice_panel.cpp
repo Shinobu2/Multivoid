@@ -6,6 +6,7 @@
 #include "coop/voice/voice_chat.h"
 #include "coop/voice/voice_playback.h"
 #include "coop/config/config.h"
+#include "coop/player/roster.h"
 #include "ui/scale.h"
 #include "ui/voice_icons.h"
 
@@ -274,6 +275,22 @@ void Render() {
             CommitSlider(::coop::config_registry::rows::voice_volume, g_pendingVolume.load(), "%.2f");
         } else if (ImGui::IsItemDeactivated()) {
             g_draggingVolume.exchange(false);
+        }
+        // The range is the host's in a session; read-only here. The two roster facts are read
+        // on the render thread each frame the panel draws (the roster refreshes them on a
+        // throttle, so the label may lag a session's start or end by a fraction of a second).
+        {
+            coop::roster::Snapshot rs;
+            coop::roster::GetSnapshot(rs);
+            const char* who = "";
+            if (rs.inSession)
+                who = coop::roster::LocalIsHost()
+                          ? " (your server's; multivoid.ini until the settings page)"
+                          : " (set by the host)";
+            if (s.distanceCm > 0.0f)
+                ImGui::TextDisabled("Voice range: %.0f cm%s", s.distanceCm, who);
+            else
+                ImGui::TextDisabled("Voice range: unlimited%s", who);
         }
 
         ImGui::Spacing();

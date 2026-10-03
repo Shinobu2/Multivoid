@@ -90,6 +90,7 @@ struct UiSnapshot {
     float   masterVolume = 1.0f;
     float   thresholdDb = -50.0f;
     float   gainDb = 0.0f;
+    float   distanceCm = 0.0f;  // the applied range (cm; 0 = unlimited): the session's, not a Resolve
 };
 void GetUiSnapshot(UiSnapshot& out);
 void  SetSlotVolume(int slot, float v);
