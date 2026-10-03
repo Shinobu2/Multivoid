@@ -20,6 +20,7 @@ bool RunSelftest() {
     sink.onFail = &ReportFail;
 
     RunContextCases(sink);
+    RunStoreCases(sink);
 
     if (sink.passed == sink.total) {
         UE_LOGI("permissions selftest: ALL PASS (%d checks)", sink.total);
