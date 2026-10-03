@@ -531,6 +531,7 @@ set(VOTVCOOP_SOURCES
     src/coop/dev/door_drill.cpp
     src/coop/dev/door_drill_aim.cpp
     src/coop/dev/event_drill.cpp
+    src/coop/dev/settings_drill.cpp
     src/coop/dev/mannequin_drill.cpp
     src/coop/dev/toggle_drill.cpp
     src/coop/dev/world_first_check.cpp

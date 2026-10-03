@@ -33,6 +33,7 @@
 #include "coop/dev/drone_probe.h"
 #include "coop/dev/end_play_probe.h"  // [dev] every end of play against the K2_DestroyActor seam
 #include "coop/dev/event_drill.h"  // [dev] the event lanes: a scheduler fire, a dev fire, the join snapshot
+#include "coop/dev/settings_drill.h"  // [dev] the host sets its own rows and the modules show they followed
 #include "coop/dev/mannequin_drill.h"  // [dev] the walking mannequin's spawn and baseline drill
 #include "coop/dev/fireext_drill.h"  // [dev] a wall-mounted fire extinguisher taken off and carried, watched on both peers
 #include "coop/dev/floppy_selftest.h"  // [dev] the disc-into-server media transfer, driven
@@ -133,6 +134,7 @@ void EndSession() {
     coop::dev::calib_drill::OnDisconnect();  // [dev] a rejoin's peers run their legs again
     coop::dev::drive_drill::OnDisconnect();  // [dev] the same for the drive drill
     coop::dev::download_drill::OnDisconnect();  // [dev] the same for the download drill
+    coop::dev::settings_drill::OnDisconnect();  // [dev] the steps start over
     coop::dev::mannequin_drill::OnDisconnect();  // [dev] the client's samples belong to one session
     coop::dev::laptop_drill::OnDisconnect();  // [dev] a rejoin's peers run their legs again
     coop::dev::grid_drill::OnDisconnect();  // [dev] the panel and the legs belong to one world
@@ -183,6 +185,7 @@ void TickDrills(coop::net::Session& session) {
     coop::dev::lookat_aim_drill::Tick(&session);  // [dev] walk to a prop and hold the aim (a single bool read when off)
     coop::dev::door_drill::Tick(&session);  // [dev] the door drill's sensor readings and walk (a single bool read when off)
     coop::dev::event_drill::Tick(&session);  // [dev] the event drill's fires and count (a single bool read when off)
+    coop::dev::settings_drill::Tick(&session);  // [dev] the settings drill's steps (a single string compare when off)
     coop::dev::mannequin_drill::Tick(&session);  // [dev] the mannequin drill's phases (a single enum read when off)
     coop::dev::toggle_drill::Tick(&session);  // [dev] the toggle drill's toggles (a single check when off)
     coop::dev::world_first_check::Tick();  // [dev] client_world_first's verdict (a single bool read when off)
