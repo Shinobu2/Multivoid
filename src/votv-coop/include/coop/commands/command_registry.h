@@ -6,12 +6,13 @@
 // from the command's name). The registry is THE declaration of every command node: a node is
 // declared once, here, and the dispatcher asks the policy about it.
 //
-// The production registry has one owner and is filled once at start; a handler is a plain function
-// pointer, the registry is static data.
+// The production registry has one owner and is filled once at start; a handler is a function
+// object that captures what it calls, the registry is static data.
 
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <string>
@@ -24,6 +25,8 @@ namespace coop::commands {
 enum class ArgKind : uint8_t {
     Word,
     Player,   // one player (ResolveTarget with one = true)
+    PlayerOrId,  // one seated player, or, when none matches and the word is 32 hex, that id as an
+                 // OFFLINE target
     Players,  // one or more
     Integer,  // a signed decimal into a long long; a leading `+` before a digit is skipped
     Rest,     // the RAW remainder of the line from its first word, trailing spaces removed; last only
@@ -33,6 +36,22 @@ struct ArgSpec {
     std::string name;
     ArgKind kind;
     bool optional = false;
+    // A Player / PlayerOrId target that is slot 0 is refused: the host is the server, it cannot be
+    // acted on ("That is the host -- it cannot be <pastTense>.").
+    bool notHost = false;
+};
+
+// What a command checks about its target before the handler runs, each a node
+// `<the spec's node>.<name>` declared with the spec (default false).
+enum class QualKind : uint8_t {
+    GateOffline,  // acting on a player who is not seated needs `.offline`
+    Exempt,       // a target that holds `.exempt` explicitly cannot be acted on
+    Notify,       // the seated players that hold `.notify` are told (Context::notifySlots)
+};
+
+struct Qualifier {
+    std::string name;  // the node's last word: `offline`, `exempt`, `notify`
+    QualKind kind;
 };
 
 // On a ROOT command. `presetWords` is split by SplitLine and put before the typed words that
@@ -43,7 +62,8 @@ struct Alias {
 };
 
 struct Context;
-using Handler = void (*)(Context& ctx);
+// A handler captures what it calls; a domain's bindings live in the handler, never in a file static.
+using Handler = std::function<void(Context& ctx)>;
 
 struct CommandSpec {
     std::string name;                // 1..32 of [a-z0-9]
@@ -56,6 +76,15 @@ struct CommandSpec {
     // is given). `/r` names `multivoid.msg`.
     std::string nodeOf;
     std::vector<ArgSpec> args;
+    // The reply's verb (`kicked`, `banned`, `teleported`): Register requires it for a spec with a
+    // notHost argument or an Exempt qualifier.
+    std::string pastTense;
+    // Only the console (a caller flagged isOperator) may run it: the dispatcher refuses any other
+    // before the permission check, and /help does not list it to one.
+    bool consoleOnly = false;
+    // Each qualifier's node is declared with the spec; a second spec naming the same node (through
+    // nodeOf) does not declare it again.
+    std::vector<Qualifier> qualifiers;
     Handler handler = nullptr;
     std::vector<CommandSpec> subVerbs;  // a spec with sub-verbs may also have its own handler
 };
@@ -74,8 +103,11 @@ public:
     // derived node already declared; a root name or alias already taken; two sub-verbs of one
     // parent with one name; a root named printer, content, admin, command or dev (those words
     // belong to nodes that are not commands); a Rest argument that is not last; a required
-    // argument after an optional one; a spec with neither a handler nor sub-verbs. On success
-    // every spec without a nodeOf is declared as a node (derived, its default and description).
+    // argument after an optional one; a spec with neither a handler nor sub-verbs; a spec with a
+    // notHost argument or an Exempt qualifier and no pastTense. On success every spec without a
+    // nodeOf is declared as a node (derived, its default and description), and every qualifier's
+    // node `<the spec's node>.<name>` that is not declared yet (default false, described as
+    // "<the spec's description> -- <name>").
     bool Register(CommandSpec spec, std::string* why);
 
     // Adds a node that is not a command (`multivoid.command.selector`); refuses one declared.

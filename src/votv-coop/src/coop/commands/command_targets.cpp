@@ -118,9 +118,8 @@ TargetResult ResolveNumber(std::string_view word, const Candidates& sorted) {
     return FromMatches(m);
 }
 
-}  // namespace
-
-TargetResult ResolveTarget(std::string_view word, bool one, const Caller& caller,
+// Every form against the seated players.
+TargetResult ResolveSeated(std::string_view word, bool one, const Caller& caller,
                            const std::vector<PlayerView>& players, int (*pick)(int count)) {
     if (word.empty()) return Fail(TargetError::NoMatch);
     const Candidates sorted = BySlot(players);
@@ -186,6 +185,21 @@ TargetResult ResolveTarget(std::string_view word, bool one, const Caller& caller
     for (size_t i = 0; i < sorted.size(); ++i)
         if (folded[i].find(needle) != std::u32string::npos) part.push_back(sorted[i]);
     return FromMatches(part);
+}
+
+}  // namespace
+
+TargetResult ResolveTarget(std::string_view word, bool one, bool orId, const Caller& caller,
+                           const std::vector<PlayerView>& players, int (*pick)(int count)) {
+    TargetResult r = ResolveSeated(word, one, caller, players, pick);
+    if (!orId || r.error != TargetError::NoMatch || word.size() != 32 ||
+        !std::all_of(word.begin(), word.end(), IsHex))
+        return r;
+    TargetResult offline;
+    offline.offline = true;
+    offline.offlineId.assign(word);
+    for (char& c : offline.offlineId) c = LowerAscii(c);
+    return offline;
 }
 
 std::string DescribeTargetError(const TargetResult& r, std::string_view word,

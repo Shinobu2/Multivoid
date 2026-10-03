@@ -140,7 +140,7 @@ void TargetCases(Checker& check) {
     slot3.slot = 3;
     auto resolve = [&](const char* word, bool one = true, const Caller& who = Caller{0, 0, true},
                        int (*pick)(int) = nullptr) {
-        return ResolveTarget(word, one, who, players, pick);
+        return ResolveTarget(word, one, false, who, players, pick);
     };
 
     check(resolve("").error == TargetError::NoMatch, "target: an empty word names nobody");
@@ -191,7 +191,7 @@ void TargetCases(Checker& check) {
     const std::vector<PlayerView> clash = {
         MakePlayer(0, 1, "b2b2b2b2", Repeat("a", 32), true, 0),
         MakePlayer(1, 2, "x", Repeat("b2", 16), true, 0)};
-    check(Resolves(ResolveTarget("b2b2b2b2", true, host, clash, nullptr), {1}),
+    check(Resolves(ResolveTarget("b2b2b2b2", true, false, host, clash, nullptr), {1}),
           "target: an id beats an identical nick");
 }
 
@@ -204,6 +204,7 @@ struct Captured {
     std::vector<TargetResult> targets;
     std::vector<long long> integers;
     std::vector<std::string> texts;
+    std::vector<int> notifySlots;
 };
 Captured g_cap;
 
@@ -213,6 +214,7 @@ void Capture(Context& ctx) {
     g_cap.targets = ctx.targets;
     g_cap.integers = ctx.integers;
     g_cap.texts = ctx.texts;
+    g_cap.notifySlots = ctx.notifySlots;
     ctx.Reply("ok");
 }
 
@@ -468,6 +470,188 @@ void RegistryCases(Checker& check) {
     }
 }
 
+// ---- qualifiers, offline targets, console-only verbs ----
+
+bool NoOfflineNode(const Caller&, std::string_view node, bool) {
+    return node.size() < 8 || node.substr(node.size() - 8) != ".offline";
+}
+bool HoldsAnyone(std::string_view, std::string_view, bool) { return true; }
+// Bob (slot 1) and the id of 32 `e` hold zap.exempt explicitly.
+bool ExplicitBobAndE(std::string_view id, std::string_view node) {
+    return node == "multivoid.zap.exempt" && (id == Repeat("b1", 16) || id == Repeat("e", 32));
+}
+
+CommandSpec ZapSpec() {
+    CommandSpec c;
+    c.name = "zap";
+    c.description = "Zaps a player.";
+    c.pastTense = "zapped";
+    c.args = {{"who", ArgKind::PlayerOrId, false, true}, {"reason", ArgKind::Rest, true}};
+    c.qualifiers = {{"offline", QualKind::GateOffline},
+                    {"exempt", QualKind::Exempt},
+                    {"notify", QualKind::Notify}};
+    c.handler = &Capture;
+    return c;
+}
+
+void QualifierCases(Checker& check) {
+    const std::vector<PlayerView> players = FourPlayers();
+    Caller who;
+    who.slot = 1;
+    Caller console{0, 0, true};
+    Policy everything;
+    everything.check = &CheckAll;
+    Policy full = everything;
+    full.holds = &HoldsAnyone;
+    full.isExplicit = &ExplicitBobAndE;
+    Policy noOffline = full;
+    noOffline.check = &NoOfflineNode;
+    const std::string offlineId = Repeat("d", 32);
+
+    {
+        Registry reg;
+        int hits = 0;
+        CommandSpec c = Probe();
+        c.name = "cap";
+        c.handler = [&hits](Context& ctx) {
+            ++hits;
+            ctx.Reply("captured");
+        };
+        check(reg.Register(c, nullptr), "qualifier: a capturing handler registers");
+        const DispatchResult r = Run(reg, who, "cap Bob", players, everything);
+        check(r.ran && hits == 1 && r.replies == std::vector<std::string>{"captured"},
+              "qualifier: a handler that captures a local runs and sees it");
+    }
+
+    check(!ResolveTarget(offlineId, true, false, console, players, nullptr).offline,
+          "qualifier: a 32-hex word is not offline without orId");
+    {
+        const TargetResult r = ResolveTarget(Repeat("D", 32), true, true, console, players, nullptr);
+        check(r.error == TargetError::None && r.offline && r.offlineId == offlineId && r.slots.empty(),
+              "qualifier: a PlayerOrId word naming nobody seated but 32 hex is offline, lowered");
+    }
+    {
+        const TargetResult r = ResolveTarget(Repeat("a", 32), true, true, console, players, nullptr);
+        check(!r.offline && Resolves(r, {0}), "qualifier: a seated id stays online under orId");
+    }
+    check(ResolveTarget(Repeat("d", 31), true, true, console, players, nullptr).error ==
+              TargetError::NoMatch,
+          "qualifier: 31 hex is not an offline id");
+
+    Registry reg;
+    check(RegisterBuiltins(reg) && reg.Register(ZapSpec(), nullptr), "qualifier: the zap tree registers");
+    const NodeDecl* declared = reg.FindNode("multivoid.zap.exempt");
+    check(declared != nullptr && !declared->defaultGranted &&
+              declared->description == "Zaps a player. -- exempt" &&
+              reg.FindNode("multivoid.zap.offline") != nullptr &&
+              reg.FindNode("multivoid.zap.notify") != nullptr,
+          "qualifier: each qualifier declares its node, default false");
+
+    check(SaidOnly(Run(reg, who, ("zap " + offlineId).c_str(), players, noOffline),
+                   "You do not have permission for /zap on an offline player (multivoid.zap.offline)."),
+          "qualifier: an offline target needs the .offline node");
+    {
+        const DispatchResult r = Run(reg, who, ("zap " + offlineId).c_str(), players, full);
+        check(r.ran && g_cap.targets[0].offline && g_cap.targets[0].offlineId == offlineId,
+              "qualifier: an offline target runs when the caller passes .offline");
+    }
+    check(Run(reg, who, "zap bobby", players, noOffline).ran,
+          "qualifier: a seated target needs no .offline node");
+
+    check(SaidOnly(Run(reg, who, "zap Bob", players, full), "Bob cannot be zapped."),
+          "qualifier: an explicit exempt holder cannot be acted on");
+    check(SaidOnly(Run(reg, who, ("zap " + Repeat("e", 32)).c_str(), players, full),
+                   "eeeeeeee cannot be zapped."),
+          "qualifier: an offline target is judged by its id");
+    check(Run(reg, console, "zap Bob", players, full).ran,
+          "qualifier: the console is not stopped by .exempt");
+    check(SaidOnly(Run(reg, who, "zap Bob", players, everything),
+                   "Bob's identity is not proved yet."),
+          "qualifier: a policy with no isExplicit refuses an exempt target as unproved");
+    {
+        std::vector<PlayerView> unproved = players;
+        unproved[1].playerId.clear();
+        check(SaidOnly(Run(reg, who, "zap #2", unproved, full), "Bob's identity is not proved yet."),
+              "qualifier: an online target with an empty playerId is refused under Exempt");
+        check(Run(reg, console, "zap #2", unproved, full).ran,
+              "qualifier: the console needs no proved id for a target");
+    }
+
+    check(SaidOnly(Run(reg, console, "zap Host", players, full),
+                   "That is the host -- it cannot be zapped."),
+          "qualifier: a notHost target that is slot 0 is refused with the spec's pastTense, even to the console");
+
+    {
+        const DispatchResult r = Run(reg, who, "zap bobby", players, full);
+        check(r.ran && g_cap.notifySlots == std::vector<int>{2, 3},
+              "qualifier: notifySlots excludes the caller and slot 0");
+        const DispatchResult s = Run(reg, console, "zap bobby", players, full);
+        check(s.ran && g_cap.notifySlots == std::vector<int>{1, 2, 3},
+              "qualifier: the console's notifySlots excludes slot 0 only");
+        const DispatchResult n = Run(reg, who, "zap bobby", players, everything);
+        check(n.ran && g_cap.notifySlots.empty(), "qualifier: a null holds notifies nobody");
+    }
+
+    {
+        CommandSpec c = ZapSpec();
+        c.name = "zapped";
+        c.pastTense.clear();
+        Registry bare;
+        check(Refuses(bare, c), "qualifier: a notHost argument without a pastTense is refused");
+        c.args = {{"who", ArgKind::Player, false}};
+        check(Refuses(bare, c), "qualifier: an Exempt qualifier without a pastTense is refused");
+        c.qualifiers = {{"offline", QualKind::GateOffline}, {"notify", QualKind::Notify}};
+        check(bare.Register(c, nullptr),
+              "qualifier: a spec with neither needs no pastTense");
+    }
+
+    {
+        CommandSpec c = ZapSpec();
+        c.name = "zapid";
+        c.nodeOf = "multivoid.zap";
+        check(reg.Register(c, nullptr), "qualifier: a second spec naming the node registers");
+        const NodeDecl* again = reg.FindNode("multivoid.zap.exempt");
+        check(again == declared && again->description == "Zaps a player. -- exempt" &&
+                  reg.FindNode("multivoid.zapid.exempt") == nullptr,
+              "qualifier: a qualifier node is declared once for two specs naming one node");
+        check(SaidOnly(Run(reg, who, "zapid Bob", players, full), "Bob cannot be zapped."),
+              "qualifier: the second spec judges the same exempt node");
+    }
+    {
+        CommandSpec c = ZapSpec();
+        c.name = "zapsub";
+        c.handler = nullptr;
+        CommandSpec sub = Probe();
+        sub.name = "notify";
+        c.subVerbs = {sub};
+        Registry bare;
+        check(Refuses(bare, c),
+              "qualifier: a command node derived onto a qualifier node is refused");
+    }
+
+    {
+        Registry gated;
+        CommandSpec home = Probe();
+        home.name = "home";
+        home.description = "Brings a player to the console.";
+        check(RegisterBuiltins(gated), "qualifier: builtins register");
+        home.consoleOnly = true;
+        check(gated.Register(home, nullptr), "qualifier: a consoleOnly spec registers");
+        check(SaidOnly(Run(gated, who, "home Bob", players, everything),
+                       "/home is the host's until /tp can name a destination."),
+              "qualifier: a consoleOnly spec is refused to a non-operator");
+        const DispatchResult h = Run(gated, who, "help", players, everything);
+        check(h.ran && h.replies.size() == 2 && StartsWith(h.replies[1], "/help "),
+              "qualifier: a consoleOnly spec is absent from a non-operator's help");
+        check(Run(gated, console, "home Bob", players, everything).ran,
+              "qualifier: the console runs a consoleOnly spec");
+        const DispatchResult c = Run(gated, console, "help", players, everything);
+        check(c.ran && c.replies.size() == 3 && StartsWith(c.replies[1], "/help ") &&
+                  StartsWith(c.replies[2], "/home "),
+              "qualifier: the console's help lists a consoleOnly spec");
+    }
+}
+
 }  // namespace
 
 bool RunSelftest() {
@@ -476,6 +660,7 @@ bool RunSelftest() {
     SplitCases(check, breakIt);
     TargetCases(check);
     RegistryCases(check);
+    QualifierCases(check);
 
     if (check.pass == check.total) {
         UE_LOGI("commands selftest: ALL PASS (%d checks)", check.total);

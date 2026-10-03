@@ -4,7 +4,9 @@
 // asked: it splits the line, walks to the verb (an alias through its expansion), asks the
 // caller's Policy, parses and resolves the arguments, calls the handler and collects its reply
 // lines. A handler checks nothing itself (the one exception is /help, which lists what the caller
-// may use). MTA's shape: one command table, checked once at dispatch, the command's default
+// may use). A command's qualifiers -- who may act on an offline player, who cannot be acted on,
+// who is told -- are checked here, before the handler; a handler receives their answers and never
+// asks the permission system. MTA's shape: one command table, checked once at dispatch, the command's default
 // passed into the check (reference/mtasa-blue/Server/mods/deathmatch/logic/CConsole.cpp:68-69).
 
 #pragma once
@@ -26,6 +28,11 @@ using CheckFn = bool (*)(const Caller& caller, std::string_view node, bool defau
 struct Policy {
     CheckFn check = nullptr;  // null refuses everything: a policy that was never installed
     int (*pick)(int count) = nullptr;
+    // A third party's answer, for a Notify qualifier. Null: nobody is notified.
+    bool (*holds)(std::string_view playerId, std::string_view node, bool defaultGranted) = nullptr;
+    // Whether `node` is set on the player or a group it inherits, a wildcard not counting, for an
+    // Exempt qualifier. Null: an Exempt target is refused as "identity is not proved yet".
+    bool (*isExplicit)(std::string_view playerId, std::string_view node) = nullptr;
 };
 
 // What a handler sees, for the handler call only. The caller, the spec, the players, the registry
@@ -33,7 +40,8 @@ struct Policy {
 // needs (slots, player ids, texts, the caller's slot and generation). One entry per `spec.args`
 // index in each vector: `given[i]` is false for an absent optional argument; `targets[i]` is
 // filled for Player / Players, `integers[i]` for Integer, `texts[i]` is the word (the raw
-// remainder for Rest) for every kind.
+// remainder for Rest) for every kind. `notifySlots` is filled for a spec with a Notify qualifier:
+// the seated slots, other than the caller's and the host's, that hold its node.
 struct Context {
     const Caller& caller;
     const CommandSpec& spec;
@@ -45,6 +53,7 @@ struct Context {
     std::vector<std::string> texts;
     std::vector<bool> given;
     std::vector<std::string> replies;
+    std::vector<int> notifySlots;
 
     void Reply(std::string line) { replies.push_back(std::move(line)); }
 };

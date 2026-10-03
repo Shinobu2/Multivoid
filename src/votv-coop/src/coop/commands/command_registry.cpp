@@ -79,6 +79,14 @@ struct TreeCheck {
             else if (sawOptional)
                 return Fail("'" + s.name + "': a required argument after an optional one");
         }
+        if (s.pastTense.empty()) {
+            bool needs = false;
+            for (const ArgSpec& a : s.args) needs = needs || a.notHost;
+            for (const Qualifier& q : s.qualifiers) needs = needs || q.kind == QualKind::Exempt;
+            if (needs)
+                return Fail("'" + s.name +
+                            "': a notHost argument or an Exempt qualifier needs a pastTense");
+        }
 
         std::string node;
         if (!s.nodeOf.empty()) {
@@ -89,6 +97,12 @@ struct TreeCheck {
             node = (isRoot ? std::string("multivoid") : parentNode) + "." + s.name;
             if (IsDeclared(node)) return Fail("the node '" + node + "' is already declared");
             byThisTree.insert(node);
+        }
+        // A qualifier node another spec already declared is not declared twice; a command node
+        // later derived onto one is refused as already declared.
+        for (const Qualifier& q : s.qualifiers) {
+            const std::string qualNode = node + "." + q.name;
+            if (!IsDeclared(qualNode)) byThisTree.insert(qualNode);
         }
 
         std::set<std::string> subNames;
@@ -139,6 +153,10 @@ void Registry::Record(const CommandSpec& c, const std::string& parentPath,
     } else {
         info.node = (parentNode.empty() ? std::string("multivoid") : parentNode) + "." + c.name;
         nodes_.emplace(info.node, NodeDecl{info.node, c.defaultGranted, c.description});
+    }
+    for (const Qualifier& q : c.qualifiers) {
+        const std::string qualNode = info.node + "." + q.name;
+        nodes_.emplace(qualNode, NodeDecl{qualNode, false, c.description + " -- " + q.name});
     }
     const std::string path = info.path;
     const std::string node = info.node;

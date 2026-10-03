@@ -1,14 +1,16 @@
 // coop/commands/command_dispatcher.cpp -- Dispatch and the built-in /help.
 //
 // The order of a dispatch: split, find the root (an alias becomes its expansion), walk to the
-// sub-verb, ask the policy about the reached verb's node, parse and resolve the arguments, ask
-// about the selector node when `@a` or `@r` was used, run the handler. Each refusal is one reply
-// line and sets no `ran`.
+// sub-verb, refuse a console-only verb to anyone else, ask the policy about the reached verb's
+// node, parse and resolve the arguments, ask about the selector node when `@a` or `@r` was used,
+// apply the qualifiers (the host as a target, an offline target, an exempt target, who is told),
+// run the handler. Each refusal is one reply line and sets no `ran`.
 
 #include "coop/commands/command_dispatcher.h"
 
 #include "coop/commands/command_line.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cstddef>
 
@@ -122,10 +124,91 @@ DispatchResult Said(std::string line) {
     return r;
 }
 
+const Qualifier* FindQualifier(const CommandSpec& spec, QualKind kind) {
+    for (const Qualifier& q : spec.qualifiers)
+        if (q.kind == kind) return &q;
+    return nullptr;
+}
+
+std::string NickOf(const std::vector<PlayerView>& players, int slot) {
+    for (const PlayerView& p : players)
+        if (p.slot == slot) return p.nick;
+    return std::string();
+}
+
+// A player id as a person reads it: its first eight characters.
+std::string ShortId(const std::string& id) { return id.substr(0, 8); }
+
+// The qualifier steps over the resolved targets, before the handler: the host as a target, an
+// offline target, an exempt target, then who is told. Returns the refusal line, or empty when the
+// handler may run (`ctx.notifySlots` is then filled). The offline, exempt and identity steps judge
+// the spec's one Player / PlayerOrId argument.
+std::string ApplyQualifiers(Context& ctx) {
+    const CommandSpec& spec = ctx.spec;
+    const Caller& caller = ctx.caller;
+    const Policy& policy = ctx.policy;
+    const std::string node = ctx.registry.NodeOf(spec);
+
+    size_t at = spec.args.size();
+    for (size_t i = 0; i < spec.args.size(); ++i) {
+        const ArgKind kind = spec.args[i].kind;
+        if (ctx.given[i] && (kind == ArgKind::Player || kind == ArgKind::PlayerOrId)) {
+            at = i;
+            break;
+        }
+    }
+
+    for (size_t i = 0; i < spec.args.size(); ++i) {
+        if (!ctx.given[i] || !spec.args[i].notHost) continue;
+        for (int slot : ctx.targets[i].slots)
+            if (slot == 0) return "That is the host -- it cannot be " + spec.pastTense + ".";
+    }
+
+    if (at != spec.args.size()) {
+        const TargetResult& t = ctx.targets[at];
+        const Qualifier* gate = FindQualifier(spec, QualKind::GateOffline);
+        const std::string offlineNode = node + "." + (gate != nullptr ? gate->name : "offline");
+        if (t.offline && !Passes(ctx.registry, policy, caller, offlineNode))
+            return "You do not have permission for /" + ctx.registry.PathOf(spec) +
+                   " on an offline player (" + offlineNode + ").";
+
+        const Qualifier* exempt = FindQualifier(spec, QualKind::Exempt);
+        if (exempt != nullptr && !caller.isOperator) {
+            const std::string exemptNode = node + "." + exempt->name;
+            for (size_t k = 0; k < t.slots.size(); ++k) {
+                const std::string& id = t.playerIds[k];
+                const std::string nick = NickOf(ctx.players, t.slots[k]);
+                if (id.empty() || policy.isExplicit == nullptr)
+                    return nick + "'s identity is not proved yet.";
+                if (policy.isExplicit(id, exemptNode))
+                    return nick + " cannot be " + spec.pastTense + ".";
+            }
+            if (t.offline) {
+                if (policy.isExplicit == nullptr)
+                    return ShortId(t.offlineId) + "'s identity is not proved yet.";
+                if (policy.isExplicit(t.offlineId, exemptNode))
+                    return ShortId(t.offlineId) + " cannot be " + spec.pastTense + ".";
+            }
+        }
+    }
+
+    const Qualifier* notify = FindQualifier(spec, QualKind::Notify);
+    if (notify != nullptr && policy.holds != nullptr) {
+        const std::string notifyNode = node + "." + notify->name;
+        for (const PlayerView& p : ctx.players)
+            if (p.slot > 0 && p.slot != caller.slot && !p.playerId.empty() &&
+                policy.holds(p.playerId, notifyNode, false))
+                ctx.notifySlots.push_back(p.slot);
+        std::sort(ctx.notifySlots.begin(), ctx.notifySlots.end());
+    }
+    return std::string();
+}
+
 void HelpHandler(Context& ctx) {
     if (!ctx.given[0]) {
         ctx.Reply("Commands you can use:");
         for (const CommandSpec* v : ctx.registry.AllVerbs()) {
+            if (v->consoleOnly && !ctx.caller.isOperator) continue;
             if (!Passes(ctx.registry, ctx.policy, ctx.caller, ctx.registry.NodeOf(*v))) continue;
             ctx.Reply(ctx.registry.Usage(*v) + " -- " + v->description);
         }
@@ -156,12 +239,15 @@ DispatchResult Dispatch(const Registry& reg, const Caller& caller, std::string_v
     const CommandSpec& spec = *walked.spec;
     if (spec.handler == nullptr) return Said("Usage: " + reg.Usage(spec));
 
+    if (spec.consoleOnly && !caller.isOperator)
+        return Said("/" + reg.PathOf(spec) + " is the host's until /tp can name a destination.");
+
     const std::string node = reg.NodeOf(spec);
     if (!Passes(reg, policy, caller, node))
         return Said("You do not have permission for /" + reg.PathOf(spec) + " (" + node + ").");
 
     const size_t argCount = spec.args.size();
-    Context ctx{caller, spec, players, reg, policy, {}, {}, {}, {}, {}};
+    Context ctx{caller, spec, players, reg, policy, {}, {}, {}, {}, {}, {}};
     ctx.targets.resize(argCount);
     ctx.integers.assign(argCount, 0);
     ctx.texts.resize(argCount);
@@ -186,8 +272,10 @@ DispatchResult Dispatch(const Registry& reg, const Caller& caller, std::string_v
         if (a.kind == ArgKind::Integer) {
             if (!ParseInteger(word, &ctx.integers[i]))
                 return Said("'" + word + "' is not a whole number. Usage: " + reg.Usage(spec));
-        } else if (a.kind == ArgKind::Player || a.kind == ArgKind::Players) {
-            TargetResult r = ResolveTarget(word, a.kind == ArgKind::Player, caller, players, policy.pick);
+        } else if (a.kind == ArgKind::Player || a.kind == ArgKind::PlayerOrId ||
+                   a.kind == ArgKind::Players) {
+            TargetResult r = ResolveTarget(word, a.kind != ArgKind::Players,
+                                           a.kind == ArgKind::PlayerOrId, caller, players, policy.pick);
             if (r.error != TargetError::None) return Said(DescribeTargetError(r, word, players));
             usedSelector = usedSelector || r.usedSelector;
             ctx.targets[i] = std::move(r);
@@ -197,6 +285,9 @@ DispatchResult Dispatch(const Registry& reg, const Caller& caller, std::string_v
 
     if (usedSelector && !Passes(reg, policy, caller, kSelectorNode))
         return Said(std::string("You do not have permission to use @a or @r (") + kSelectorNode + ").");
+
+    const std::string refusal = ApplyQualifiers(ctx);
+    if (!refusal.empty()) return Said(refusal);
 
     spec.handler(ctx);
     DispatchResult out;
