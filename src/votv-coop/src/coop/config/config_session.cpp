@@ -1,0 +1,153 @@
+// coop/config/config_session.cpp -- the SESSION layer: the session's value of every server-scope
+// row, above the runtime layer while a session runs, on the host and on a client alike. Filled at
+// session start (the host's own values) or from the wire (a client); emptied at session end.
+//
+// Two divergences from Source, whose replicated cvars this layer answers to. (1) A client may still
+// set its own hosting default: Source takes a change of a replicated cvar only from the server's
+// console (iconvar.h:58); here a client's SetValue of a server-scope row writes the install's own
+// value and never the session's. (2) Leaving restores the install's own value, not the default:
+// the SDK sets a client's saved replicated cvars back to their DEFAULT at a level's end
+// (gamerules.cpp:659-663, 914-927; tf_training_ui.cpp:2032), while this layer is emptied and the
+// install's value answers again, as MTA's client keeps the server's synced settings apart from its
+// own config (CPacketHandler.cpp:5491-5541, Packet_SyncSettings).
+
+#include "coop/config/config.h"
+
+#include "config_internal.h"
+#include "coop/config/config_registry.h"
+#include "ue_wrap/core/log.h"
+
+#include <atomic>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace coop::config {
+
+namespace {
+
+using Row = config_registry::Row;
+
+// The layer is a map under the runtime layer's mutex (config_runtime.cpp). The lock order is
+// unchanged: the set lock, then the layer lock; the ini is never read under the layer lock, and a
+// notification runs after every lock is released. Nothing here is a setting changed: a put is a
+// session opened or a value arrived, so it logs its own line and never goes through SetValue.
+// Guarded by internal::LayerMutex().
+std::unordered_map<const Row*, std::string> g_sessionLayer;
+// 0 none, 1 host, 2 client. Written under the layer lock; read lock-free for the fast "no session"
+// answer.
+std::atomic<int> g_sessionRole{0};
+
+// A value as the logs show it: a credential is never printed.
+const char* Shown(const Row* row, const std::string& v) {
+    return config_registry::IsCredentialKey(row->key) ? "<set>" : v.c_str();
+}
+
+}  // namespace
+
+namespace internal {
+
+int SessionRole() { return g_sessionRole.load(std::memory_order_acquire); }
+
+bool SessionLayerGet(const Row* row, std::string& raw) {
+    if (g_sessionRole.load(std::memory_order_acquire) == 0) return false;
+    std::lock_guard<std::mutex> lk(LayerMutex());
+    const auto it = g_sessionLayer.find(row);
+    if (it == g_sessionLayer.end()) return false;
+    raw = it->second;
+    return true;
+}
+
+void SessionLayerPutNoNotify(const Row* row, const std::string& raw) {
+    std::lock_guard<std::mutex> lk(LayerMutex());
+    g_sessionLayer[row] = raw;
+}
+
+std::string SessionSafe(const Row* row, const std::string& raw, const char* why) {
+    const bool tooLong = config_registry::IsReplicated(row) &&
+                         raw.size() > config_registry::kServerSettingTextMax;
+    if (!tooLong && ValueValidForKey(row->key, raw, nullptr)) return raw;
+    // The stored value itself is not printed: it may be a credential's.
+    const std::string def = DefaultText(*row);
+    UE_LOGW("config: SESSION %s=%s (%s; the stored value was not valid or too long)", row->key,
+            Shown(row, def), why);
+    return def;
+}
+
+}  // namespace internal
+
+void SessionLayerBegin(bool host) {
+    std::vector<std::pair<const Row*, std::string>> fresh;
+    size_t stale = 0;
+    {
+        // Held across the reads below and the put, so a host-side SetValue lands wholly before
+        // or wholly after the session opens.
+        std::lock_guard<std::mutex> setLock(internal::SetMutex());
+        if (host) {
+            size_t count = 0;
+            const Row* rows = config_registry::Rows(count);
+            const std::wstring iniPath = internal::LiveIniPath();
+            for (size_t i = 0; i < count; ++i) {
+                const Row* row = &rows[i];
+                if (!config_registry::IsServerScope(row)) continue;
+                std::string raw;
+                internal::RawBelowSession(iniPath, row, raw);
+                fresh.emplace_back(row, internal::SessionSafe(row, raw, "host start"));
+            }
+        }
+        std::lock_guard<std::mutex> layerLock(internal::LayerMutex());
+        stale = g_sessionLayer.size();
+        g_sessionLayer.clear();
+        for (const auto& f : fresh) g_sessionLayer[f.first] = f.second;
+        g_sessionRole.store(host ? 1 : 2, std::memory_order_release);
+    }
+    if (stale)
+        UE_LOGW("config: SESSION dropped %u stale rows", static_cast<unsigned>(stale));
+    for (const auto& f : fresh)
+        UE_LOGI("config: SESSION %s=%s (host start)", f.first->key, Shown(f.first, f.second));
+    for (const auto& f : fresh) internal::PostNotify(f.first);
+}
+
+void SessionLayerPut(const Row* row, const std::string& text) {
+    if (!ValueValidForKey(row->key, text, nullptr)) {
+        UE_LOGW("config: SESSION %s REFUSED -- '%s' is not a valid value", row->key,
+                Shown(row, text));
+        return;
+    }
+    bool held = false;
+    {
+        std::lock_guard<std::mutex> lk(internal::LayerMutex());
+        if (g_sessionRole.load(std::memory_order_acquire) == 2) {
+            g_sessionLayer[row] = text;
+            held = true;
+        }
+    }
+    if (!held) {
+        UE_LOGW("config: SESSION %s ignored -- no client session is running", row->key);
+        return;
+    }
+    UE_LOGI("config: SESSION %s=%s (from the host)", row->key, Shown(row, text));
+    internal::PostNotify(row);
+}
+
+void SessionLayerEnd() {
+    std::vector<const Row*> held;
+    bool had = false;
+    {
+        // The set lock makes the clear final: no host put lands after it.
+        std::lock_guard<std::mutex> setLock(internal::SetMutex());
+        std::lock_guard<std::mutex> layerLock(internal::LayerMutex());
+        had = g_sessionRole.load(std::memory_order_acquire) != 0 || !g_sessionLayer.empty();
+        held.reserve(g_sessionLayer.size());
+        for (const auto& kv : g_sessionLayer) held.push_back(kv.first);
+        g_sessionLayer.clear();
+        g_sessionRole.store(0, std::memory_order_release);
+    }
+    if (!had) return;
+    UE_LOGI("config: SESSION cleared (%u rows)", static_cast<unsigned>(held.size()));
+    for (const Row* row : held) internal::PostNotify(row);
+}
+
+}  // namespace coop::config

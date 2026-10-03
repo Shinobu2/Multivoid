@@ -39,7 +39,8 @@ using Row = config_registry::Row;
 // ResetValueAt across its drop and its ini write, and by the keep-line across its rewrite and its
 // drop (SetMutex).
 std::mutex g_setMutex;
-// The layer map, the subscriber list and the notifier pointer.
+// The layer map, the subscriber list and the notifier pointer; also the session layer's map
+// (config_session.cpp, through internal::LayerMutex).
 std::mutex g_layerMutex;
 std::unordered_map<const Row*, std::string> g_layer;
 std::vector<std::pair<const Row*, void (*)()>> g_subscribers;
@@ -79,6 +80,8 @@ void AddSubscriber(const Row* row, void (*onChange)()) {
 namespace internal {
 
 std::mutex& SetMutex() { return g_setMutex; }
+
+std::mutex& LayerMutex() { return g_layerMutex; }
 
 bool RuntimeLayerGet(const Row* row, std::string& raw) {
     std::lock_guard<std::mutex> lk(g_layerMutex);
@@ -235,6 +238,13 @@ void Subscribe(const config_registry::EnumRow& row, void (*onChange)()) {
 }
 void Subscribe(const config_registry::StringRow& row, void (*onChange)()) {
     AddSubscriber(row.row, onChange);
+}
+
+void SubscribeServerScope(void (*onChange)()) {
+    size_t count = 0;
+    const Row* rows = config_registry::Rows(count);
+    for (size_t i = 0; i < count; ++i)
+        if (config_registry::IsReplicated(&rows[i])) AddSubscriber(&rows[i], onChange);
 }
 
 void SetNotifier(void (*post)(std::function<void()> task)) {

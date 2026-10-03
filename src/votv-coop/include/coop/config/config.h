@@ -85,6 +85,9 @@ void Subscribe(const config_registry::IntRow& row, void (*onChange)());
 void Subscribe(const config_registry::FloatRow& row, void (*onChange)());
 void Subscribe(const config_registry::EnumRow& row, void (*onChange)());
 void Subscribe(const config_registry::StringRow& row, void (*onChange)());
+// Follow every REPLICATED server-scope row with one function: the session module's sender. Any
+// thread, once, at boot.
+void SubscribeServerScope(void (*onChange)());
 
 // How a change notification reaches its thread: `post` is handed a task that calls the row's
 // subscribers. The game wires it to the game thread's queue at boot; a process that sets none
@@ -92,7 +95,28 @@ void Subscribe(const config_registry::StringRow& row, void (*onChange)());
 // SetValue.
 void SetNotifier(void (*post)(std::function<void()> task));
 
-// The typed layered reads: Resolve(row) is a value set while the game runs (the runtime layer),
+// The SESSION layer: the session's value of every server-scope row (config_registry.h), above the
+// runtime layer while a session runs, on the host and on a client alike.
+//
+// A session opened. Any layer left by an earlier session is dropped first (a stale layer can only
+// mean a stop seam that was missed, so it is logged as a warning). On the host, every server-scope
+// row's value is read from the layers below the session (the runtime layer, the environment twin,
+// the ini, the default), sanitised (a value the reader would refuse, or too long for a replicated
+// row, becomes the row's default), held, logged `config: SESSION <key>=<v> (host start)` and
+// announced. On a client the layer stays empty until the host's rows arrive. Any thread.
+void SessionLayerBegin(bool host);
+// A server-scope row's session value from the wire (a length-carried value: the wire's bytes are
+// not NUL-terminated): validated as the reader validates, held, logged `(from the host)` and
+// announced; a value the reader would refuse, or one that arrives with no client session running,
+// is dropped with a warning. Game thread (the receiver's).
+void SessionLayerPut(const config_registry::Row* row, const std::string& text);
+// The session ended: the layer empties and the role is none, logged `config: SESSION cleared`;
+// every row it held tells its subscribers, so a consumer resolves the install's own value again.
+// Any thread. Idempotent: with nothing held and no role it logs nothing.
+void SessionLayerEnd();
+
+// The typed layered reads: Resolve(row) is the session's value of a server-scope row while a
+// session runs (the session layer), then a value set while the game runs (the runtime layer),
 // then the environment variable, then the ini value, then the row's default, validated
 // against the row's kind and range or tokens. One vocabulary for flags (1, true, yes, on and
 // their negations, case-insensitive); a number must parse whole and land in range; an enum must
@@ -129,6 +153,9 @@ FailClosedRead ResolveFailClosed(const config_registry::FailClosedEnumRow& row, 
 // Free strings: a value set while the game runs (the runtime layer), then the environment variable,
 // then the ini value, then the row default; no validation.
 std::string ResolveString(const config_registry::StringRow& row);
+// The text every Resolve of this row starts from: the top layer that answers, or the default as
+// text. Any thread.
+std::string EffectiveText(const config_registry::Row& row);
 
 // The net Config from the runtime layer, env and ini; `enabled` is true iff a host or client role
 // is configured, otherwise hands-on play stays single-machine.

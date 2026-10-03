@@ -609,6 +609,7 @@ bool PickRawLayered(const config_registry::Row* row, std::string& raw, bool* fro
     if (fromEnvOut) *fromEnvOut = false;
     if (scanOut) *scanOut = IniScan::Ok;
     if (faultOut) *faultOut = IniFault::None;
+    if (SessionLayerGet(row, raw)) return true;
     if (RuntimeLayerGet(row, raw)) return true;
     if (row->envVar) {
         const std::string e = ReadEnv(row->envVar);
@@ -774,6 +775,13 @@ std::string ResolveString(const config_registry::StringRow& h) {
     std::string raw;
     if (!internal::PickRawLayered(h.row, raw)) return h.row->defS;
     return raw;
+}
+
+// The answering layer's own text, not a canonical print: a client resolves the same bytes through
+// the same reader as the host, so the two agree on the value.
+std::string EffectiveText(const config_registry::Row& row) {
+    std::string raw;
+    return internal::PickRawLayered(&row, raw) ? raw : internal::DefaultText(row);
 }
 
 }  // namespace coop::config

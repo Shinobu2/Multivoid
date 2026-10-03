@@ -128,6 +128,24 @@ void PostNotify(const config_registry::Row* row);
 // ResetValueAt and the keep-line hold it. Taken before IniMutex, never after; never held across a
 // notification.
 std::mutex& SetMutex();
+// The runtime layer's mutex, which also guards the session layer's map and the subscriber list.
+// Taken after SetMutex, never before; the ini is never read under it, and no call out is made
+// while it is held.
+std::mutex& LayerMutex();
+
+// The session layer (config_session.cpp): the session's value of each server-scope row, above the
+// runtime layer. Any thread.
+// 0 none, 1 host, 2 client.
+int SessionRole();
+// The session's value of `row`: false unless a session runs and the row is held.
+bool SessionLayerGet(const config_registry::Row* row, std::string& raw);
+// The host's in-setter put: SetValueAt and ResetValueAt call it with the set lock held, before
+// their one notification, so it notifies nobody.
+void SessionLayerPutNoNotify(const config_registry::Row* row, const std::string& raw);
+// The one sanitiser a value passes before it enters the host's session layer (a session's start,
+// a reset): `raw` when the reader accepts it and, for a replicated row, the wire can carry it;
+// else the row's DefaultText, logged without the value. `why` names the caller in that line.
+std::string SessionSafe(const config_registry::Row* row, const std::string& raw, const char* why);
 // The keep-line whole: the dedup of `key` in the ini at `path`, then, on success, the row dropped
 // from the runtime layer and its subscribers told. The public RemoveDuplicateKeyLines passes
 // LiveIniPath(); the selftest a scratch file.
