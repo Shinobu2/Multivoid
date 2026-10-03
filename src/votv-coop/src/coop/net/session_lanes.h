@@ -271,7 +271,7 @@ inline bool IsClientRelayableReliableKind(ReliableKind k) {
     // everyone. The relay fires on the net thread at receive time, before a sequence number can
     // exist, so a relayed copy would have no position in the order. EmailAppend is not relayable
     // either: emails are host-authored, and a client's append is a protocol violation the handler
-    // drops.
+    // drops. CommandRequest likewise: the host answers the sender alone.
     case ReliableKind::EmailDelete:       // player-symmetric
     case ReliableKind::SavedSignalAppend: // producer-symmetric
     case ReliableKind::SavedSignalDelete: // player-symmetric
@@ -325,6 +325,8 @@ inline bool IsPreWorldSendableKind(ReliableKind k) {
     // A server-scope setting is pre-world by design: the joiner's snapshot goes when its slot is
     // ready, and the receiver only fills the config layer's session values, touching no world.
     case ReliableKind::ServerSetting:
+    // A command's answer is a private text line; the receiver touches no world.
+    case ReliableKind::CommandReply:
     // PropDriveEnd stays gated: it names a prop by eid, which a joiner has only after its world is up,
     // and the world-ready replay re-sends every driven prop's pose in any case.
         return true;

@@ -84,6 +84,7 @@
 #include "coop/world/firefly_sync.h"
 #include "coop/items/inventory_pickup_sync.h"
 #include "coop/comms/chat_sync.h"
+#include "coop/commands/command_sync.h"
 #include "coop/interactables/upgrade_sync.h"
 #include "coop/interactables/turbine_sync.h"
 #include "coop/interactables/keypad_sync.h"
@@ -217,6 +218,7 @@ void Install(coop::net::Session& session) {
     coop::hook_sync::Install(&session);  // hook lane: owner-phase stream + mirrors, and the ReceiveTick park they depend on
     coop::inventory_pickup_sync::Install(&session);  // inventory-collect blip (PlaySound2D observer)
     coop::chat_sync::Install(&session);  // T-chat (the ui/chat_input send path)
+    coop::command_sync::Install(&session);  // the chat input's `/` route: the host's own line, a client's request
     coop::local_body::Install(&session);  // skins: local first-person body + SkinChange announce
     coop::local_body::Tick();  // applies the persisted skin to the local pawn + 1 Hz convergence
     coop::nameplate::Install(&session);  // plate-pref announce path (F1 checkbox -> NameplateChange)
@@ -431,6 +433,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     // Shut the chat lane's per-slot seed gate: the next occupant's applied range starts empty, so
     // it must get its seed before it hears a live line.
     coop::chat_sync::OnSlotDisconnected(slot);
+    coop::command_sync::OnSlotDisconnected(slot);  // the leaver's command rate bucket and notice clocks
     // Per-slot cleanup: only subsystems with per-slot state are called here; the global-state ones
     // are handled by DisconnectAll.
     coop::trash_mirror::OnDisconnectForSlot(slot);  // phase 1: retire the leaver's trash mirrors BEFORE the generic mirror drain (else the rooted actor leaks)
@@ -528,6 +531,7 @@ DisconnectStats DisconnectAll() {
     coop::skin_preview::OnDisconnect();  // despawn the F1-skins mannequin
     coop::inventory_pickup_sync::OnDisconnect();
     coop::chat_sync::OnDisconnect();
+    coop::command_sync::OnDisconnect();  // every command rate bucket and notice clock
     coop::turbine_sync::OnDisconnect();
     coop::upgrade_sync::OnDisconnect();  // and its own upgrade panel buys locally again
     coop::device_occupancy::OnDisconnect();

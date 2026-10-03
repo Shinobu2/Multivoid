@@ -22,6 +22,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cwctype>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,7 @@ namespace {
 PubKey      g_pub{};
 uint8_t     g_priv[kPrivKeyBytes]{};
 std::string g_guid;
+std::mutex  g_guidMu;  // takes Load()'s write and LocalGuid()'s read
 std::string g_identityString;
 bool        g_loaded = false;
 
@@ -384,7 +386,11 @@ bool Load() {
         }
     }
     ed25519_publickey(g_priv, g_pub.data());
-    g_guid = GuidForPublicKey(g_pub);
+    {
+        const std::string guid = GuidForPublicKey(g_pub);
+        std::lock_guard<std::mutex> lk(g_guidMu);
+        g_guid = guid;
+    }
     if (g_guid.empty()) {
         UE_LOGE("peer_identity: could not derive the guid from our own key");
         return false;
@@ -441,6 +447,10 @@ bool Load() {
 }
 
 const PubKey& LocalPublicKey() { return g_pub; }
+std::string LocalGuid() {
+    std::lock_guard<std::mutex> lk(g_guidMu);
+    return g_guid;
+}
 const std::string& LocalIdentityString() { return g_identityString; }
 
 bool PublicKeyFromIdentityString(const std::string& identity, PubKey& out) {

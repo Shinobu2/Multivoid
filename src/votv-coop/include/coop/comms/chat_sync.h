@@ -1,7 +1,8 @@
 // coop/comms/chat_sync.h -- the T-chat wire half, HOST-AUTHORED.
 //
 // The UI half, ui/chat_input -- the T-opened input bar, Enter sends, ESC closes -- hands typed text
-// to QueueSend, and every receiver renders "<nick>: <text>" through coop::chat_feed.
+// to QueueSend (a line that begins with `/` is a command and goes to coop::command_sync), and every
+// receiver renders "<nick>: <text>" through coop::chat_feed.
 //
 // The authority is the host, not the peers. A client's line reaches the host as an INTENT
 // (ChatMessage, client to host only); the host commits it to the lobby's record in coop::chat_log

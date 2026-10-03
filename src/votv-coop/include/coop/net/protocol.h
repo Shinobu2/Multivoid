@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 210;
+inline constexpr uint16_t kProtocolVersion = 211;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -934,6 +934,18 @@ enum class ReliableKind : uint8_t {
     // slot is ready, a change carries each again. A client never sends it. Never relayed. Pre-world.
     // ServerSettingPayload.
     ServerSetting = 165,
+
+    // Client to host: one chat line that began with `/`, the text after the slash, as a command for the host to run
+    // for the sender. The host answers with CommandReply lines to that client alone. Never relayed. Late join: none
+    // (a command carries no state). Trust: the host resolves the sender from the connection and checks its node; a
+    // client never acts on a CommandRequest. CommandRequestPayload.
+    CommandRequest = 166,
+
+    // Host to one client: one line answering that client's command, a private feed line that never enters the chat
+    // history; a command that can answer only later sends its line when it is ready. Never relayed. Pre-world: the
+    // answer to a line typed while loading still arrives. Late join: none. Trust: only the host sends it; a line
+    // from any other slot is dropped. CommandReplyPayload.
+    CommandReply = 167,
 };
 
 #pragma pack(push, 1)
@@ -2658,6 +2670,25 @@ struct ChatMessagePayload {
 static_assert(sizeof(ChatMessagePayload) == 204, "ChatMessagePayload must be 204 bytes");
 static_assert(sizeof(ChatMessagePayload) <= 256 - 20 - 8,
               "ChatMessagePayload must fit in one reliable datagram");
+
+// A command line a client sends the host (CommandRequest): the text after the `/`, UTF-8, length-prefixed, not
+// NUL-terminated. The sender is the transport's slot; the payload names no one.
+struct CommandRequestPayload {
+    uint8_t len;        // bytes used in text[] (0 < len <= sizeof(text))
+    char    text[203];  // the line after the slash, UTF-8
+};
+static_assert(sizeof(CommandRequestPayload) == 204, "CommandRequestPayload must be 204 bytes");
+static_assert(sizeof(CommandRequestPayload) <= 256 - 20 - 8,
+              "CommandRequestPayload must fit in one reliable datagram");
+
+// One reply line the host sends one client (CommandReply): UTF-8, length-prefixed, not NUL-terminated.
+struct CommandReplyPayload {
+    uint8_t len;        // bytes used in text[] (<= sizeof(text))
+    char    text[203];  // the line, UTF-8
+};
+static_assert(sizeof(CommandReplyPayload) == 204, "CommandReplyPayload must be 204 bytes");
+static_assert(sizeof(CommandReplyPayload) <= 256 - 20 - 8,
+              "CommandReplyPayload must fit in one reliable datagram");
 
 // ChatSpeakerPayload -- WHO the ChatLine that immediately follows is from
 // (ChatSpeaker). Host to client only.

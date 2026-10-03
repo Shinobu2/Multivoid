@@ -4,6 +4,7 @@
 
 #include "coop/comms/chat_feed.h"
 #include "coop/comms/chat_sync.h"
+#include "coop/commands/command_sync.h"
 #include "ui/fonts.h"
 #include "ui/scale.h"
 
@@ -119,7 +120,12 @@ void Render() {
             &HistoryCallback);
         if (submitted) {
             if (g_buf[0] != '\0') {
-                coop::chat_sync::QueueSend(std::string(g_buf));
+                // A line that begins with `/` is a command, not chat: the text after the slash goes
+                // to the commands' transport, which runs it on the host.
+                if (g_buf[0] == '/')
+                    coop::command_sync::Submit(std::string(g_buf + 1));
+                else
+                    coop::chat_sync::QueueSend(std::string(g_buf));
                 if (g_history.empty() || g_history.back() != g_buf) {
                     g_history.emplace_back(g_buf);
                     while (g_history.size() > kHistoryMax) g_history.pop_front();

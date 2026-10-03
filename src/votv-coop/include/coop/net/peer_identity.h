@@ -42,6 +42,12 @@ bool Load();
 // before a successful load.
 const PubKey& LocalPublicKey();
 
+// This install's player id: the 32 lowercase hex the guid above is, as a copy; empty before a
+// successful load. The guid is written by Load() on the boot thread (and by InstallInto only when
+// that boot load failed), so a mutex takes the write and this read; no second derivation exists, a
+// caller never hashes the public key itself. Any thread.
+std::string LocalGuid();
+
 // Our identity as the transport renders it: a prefix plus 64 lowercase hex, 68 chars. The
 // string the P2P lane rendezvouses on: the host publishes it to the master and a joiner
 // parses it back into the identity it dials, so it is the same value as the public key, not a

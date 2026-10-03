@@ -670,6 +670,7 @@ set(VOTVCOOP_SOURCES
     src/coop/permissions/permissions_cases_store.cpp
     src/coop/permissions/permissions_cases_inheritance.cpp
     src/coop/permissions/permissions_cases_resolution.cpp
+    src/coop/commands/command_sync.cpp
     src/harness/harness.cpp
     src/harness/session_runtime.cpp
     src/harness/join_leave.cpp

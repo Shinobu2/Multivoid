@@ -8,6 +8,7 @@
 #include "coop/element/registry.h"
 
 #include "coop/comms/chat_sync.h"
+#include "coop/commands/command_sync.h"
 #include "coop/world/alarm_sync.h"
 #include "coop/interactables/serverbox_sync.h"  // the host-authoritative signal-server state
 #include "coop/interactables/server_upgrade_sync.h"  // the servers' physical upgrades
@@ -316,6 +317,36 @@ bool HandleWorldEvent(net::Session& session,
         net::ChatLinePayload lp{};
         std::memcpy(&lp, msg.payload, sizeof(lp));
         coop::chat_sync::OnChatLine(lp);
+        break;
+    }
+    case net::ReliableKind::CommandRequest: {
+        // A client's command line, client to host only. Identity comes from the transport slot. No
+        // length check or log line here: OnRequest takes the sender's rate first and then judges the
+        // length, so a flood of malformed requests is limited like any other.
+        if (msg.senderPeerSlot < 0 || msg.senderPeerSlot >= net::kMaxPeers) {
+            UE_LOGW("event_feed: CommandRequest invalid senderPeerSlot=%d -- dropping",
+                    msg.senderPeerSlot);
+            break;
+        }
+        coop::command_sync::OnRequest(msg.payload, msg.payloadLen, msg.senderPeerSlot);
+        break;
+    }
+    case net::ReliableKind::CommandReply: {
+        // The host's answer to this client's command: one private feed line.
+        if (msg.payloadLen < sizeof(net::CommandReplyPayload)) {
+            UE_LOGW("event_feed: CommandReply payload too short (%zu < %zu)",
+                    static_cast<size_t>(msg.payloadLen), sizeof(net::CommandReplyPayload));
+            break;
+        }
+        if (msg.senderPeerSlot != 0) {
+            // Only the host answers. A client claiming to would write lines into another peer's feed.
+            UE_LOGW("event_feed: CommandReply from senderPeerSlot=%d -- only the host "
+                    "answers; dropping", msg.senderPeerSlot);
+            break;
+        }
+        net::CommandReplyPayload rp{};
+        std::memcpy(&rp, msg.payload, sizeof(rp));
+        coop::command_sync::OnReply(rp);
         break;
     }
     case net::ReliableKind::SkyState: {
