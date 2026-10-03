@@ -40,6 +40,7 @@
 #include "coop/player/nick_color.h"
 #include "coop/comms/peer_action_feed.h"
 #include "coop/player/roster.h"
+#include "coop/voice/voice_chat.h"
 #include "coop/net/session.h"
 #include "coop/player/puppet_drive.h"
 #include "coop/player/remote_player.h"
@@ -520,14 +521,15 @@ void Start() {
     // The modules that follow a config row subscribe once, here, before any pane draws; the nameplate
     // and nick-colour seeds above have read their rows, the two flag modules load theirs on first
     // use, the scale and font modules load theirs on the render thread's first frame
-    // (LoadUserPrefOnce, ReadRoleFamiliesOnce), and every later set reaches all six through these
-    // subscriptions.
+    // (LoadUserPrefOnce, ReadRoleFamiliesOnce), the voice module reads its rows when a session's
+    // Install opens the devices, and every later set reaches all seven through these subscriptions.
     coop::nameplate::SubscribeRow();
     coop::nick_color::SubscribeRow();
     coop::peer_action_feed::SubscribeRow();
     ui::net_stats_panel::SubscribeRow();
     ui::scale::SubscribeRow();
     ui::fonts::SubscribeRows();
+    coop::voice_chat::SubscribeRows();
     if (!ui::imgui_overlay::Init()) {
         UE_LOGW("harness: imgui_overlay::Init failed -- F1 menu unavailable this run");
     }

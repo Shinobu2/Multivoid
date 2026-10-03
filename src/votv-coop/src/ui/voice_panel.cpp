@@ -38,6 +38,24 @@ char g_micCurrent[160] = {};
 char g_outCurrent[160] = {};
 char g_pttKey[32] = {};
 
+// Each slider's handle value while it is held, and whether it is held. Atomics because Close()
+// runs on three threads and touches none of this: a drag that the panel's closing abandons is
+// committed by CommitAbandonedDrag on the render thread, from these.
+std::atomic<float> g_pendingThreshold{0.0f};
+std::atomic<float> g_pendingGain{0.0f};
+std::atomic<float> g_pendingVolume{0.0f};
+std::atomic<bool>  g_draggingThreshold{false};
+std::atomic<bool>  g_draggingGain{false};
+std::atomic<bool>  g_draggingVolume{false};
+
+// The one path from a slider to its row: the release branch and CommitAbandonedDrag. fmt is the
+// slider's own format, so the row holds what the handle showed.
+void CommitSlider(const coop::config_registry::FloatRow& row, float v, const char* fmt) {
+    char text[16];
+    std::snprintf(text, sizeof(text), fmt, v);
+    coop::config::SetValue(row, text);
+}
+
 void RefreshDevices() {
     g_micDevices = coop::voice::Capture::EnumerateDevices();
     g_outDevices = coop::voice::Playback::EnumerateDevices();
@@ -50,8 +68,8 @@ void RefreshDevices() {
     g_devicesFresh = true;
 }
 
-// A device combo: "(system default)" + the enumerated names. Writes the ini
-// + requests the GT reopen on selection.
+// A device combo: "(system default)" + the enumerated names. Sets the row on selection; the row's
+// subscriber reopens the devices.
 void DeviceCombo(const char* label, const coop::config_registry::StringRow& row, char* current,
                  size_t currentCap, const std::vector<std::string>& names) {
     const char* shown = current[0] ? current : "(system default)";
@@ -59,14 +77,12 @@ void DeviceCombo(const char* label, const coop::config_registry::StringRow& row,
         if (ImGui::Selectable("(system default)", !current[0])) {
             current[0] = 0;
             coop::config::SetValue(row, "");
-            VC::RequestDevicesRestart();
         }
         for (const std::string& n : names) {
             const bool sel = n == current;
             if (ImGui::Selectable(n.c_str(), sel)) {
                 std::snprintf(current, currentCap, "%s", n.c_str());
                 coop::config::SetValue(row, n.c_str());
-                VC::RequestDevicesRestart();
             }
         }
         ImGui::EndCombo();
@@ -83,6 +99,17 @@ void Toggle() {
 void Close() { g_open = false; }
 
 bool IsOpen() { return g_open; }
+
+void CommitAbandonedDrag() {
+    if (g_open.load(std::memory_order_relaxed)) return;
+    if (g_draggingThreshold.exchange(false))
+        CommitSlider(::coop::config_registry::rows::voice_threshold_db, g_pendingThreshold.load(),
+                     "%.0f");
+    if (g_draggingGain.exchange(false))
+        CommitSlider(::coop::config_registry::rows::voice_mic_gain_db, g_pendingGain.load(), "%.0f");
+    if (g_draggingVolume.exchange(false))
+        CommitSlider(::coop::config_registry::rows::voice_volume, g_pendingVolume.load(), "%.2f");
+}
 
 void Render() {
     if (!g_open.load(std::memory_order_relaxed)) return;
@@ -155,27 +182,33 @@ void Render() {
         int mode = s.activationMode ? 1 : 0;
         char pttLabel[64];
         std::snprintf(pttLabel, sizeof(pttLabel), "Push-to-talk (key: %s)", g_pttKey);
-        if (ImGui::RadioButton(pttLabel, &mode, 0)) {
-            coop::config::SetValue(coop::config_registry::rows::voice_mode, "ptt");
-            VC::RequestDevicesRestart();
-        }
+        if (ImGui::RadioButton(pttLabel, &mode, 0))
+            coop::config::SetValue(::coop::config_registry::rows::voice_mode, "ptt");
         ImGui::SameLine();
         ImGui::TextDisabled("(?)");
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("Hold the key to talk. Change the key via voice.ptt_key\n"
                               "in multivoid.ini (single letter or a virtual-key number).");
-        if (ImGui::RadioButton("Voice activation", &mode, 1)) {
-            coop::config::SetValue(coop::config_registry::rows::voice_mode, "activation");
-            VC::RequestDevicesRestart();
-        }
+        if (ImGui::RadioButton("Voice activation", &mode, 1))
+            coop::config::SetValue(::coop::config_registry::rows::voice_mode, "activation");
+        // The three sliders: the drag previews live through the voice_chat setters, and the
+        // release commits the row (CommitSlider), whose subscriber is the apply. Each slider's
+        // range is the panel's own, narrower than its row's; AlwaysClamp holds a typed value
+        // (Ctrl+click) to it before the preview applies it.
         if (mode == 1) {
             float thr = s.thresholdDb;
-            if (ImGui::SliderFloat("Threshold", &thr, -100.0f, 0.0f, "%.0f dB"))
+            if (ImGui::SliderFloat("Threshold", &thr, -100.0f, 0.0f, "%.0f dB",
+                                   ImGuiSliderFlags_AlwaysClamp))
                 VC::SetThresholdDb(thr);
+            if (ImGui::IsItemActive()) {
+                g_pendingThreshold.store(thr);
+                g_draggingThreshold.store(true);
+            }
             if (ImGui::IsItemDeactivatedAfterEdit()) {
-                char v[16];
-                std::snprintf(v, sizeof(v), "%.0f", thr);
-                coop::config::SetValue(coop::config_registry::rows::voice_threshold_db, v);
+                g_draggingThreshold.exchange(false);
+                CommitSlider(::coop::config_registry::rows::voice_threshold_db, thr, "%.0f");
+            } else if (ImGui::IsItemDeactivated()) {
+                g_draggingThreshold.exchange(false);
             }
             ImGui::SameLine();
             ImGui::TextDisabled("(?)");
@@ -193,20 +226,32 @@ void Render() {
         ImGui::Spacing();
         ImGui::SeparatorText("Levels");
         float gain = s.gainDb;
-        if (ImGui::SliderFloat("Mic gain", &gain, -40.0f, 24.0f, "%+.0f dB"))
+        if (ImGui::SliderFloat("Mic gain", &gain, -40.0f, 24.0f, "%+.0f dB",
+                               ImGuiSliderFlags_AlwaysClamp))
             VC::SetGainDb(gain);
+        if (ImGui::IsItemActive()) {
+            g_pendingGain.store(gain);
+            g_draggingGain.store(true);
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
-            char v[16];
-            std::snprintf(v, sizeof(v), "%.0f", gain);
-            coop::config::SetValue(coop::config_registry::rows::voice_mic_gain_db, v);
+            g_draggingGain.exchange(false);
+            CommitSlider(::coop::config_registry::rows::voice_mic_gain_db, gain, "%.0f");
+        } else if (ImGui::IsItemDeactivated()) {
+            g_draggingGain.exchange(false);
         }
         float vol = s.masterVolume;
-        if (ImGui::SliderFloat("Voice volume", &vol, 0.0f, 3.0f, "%.2fx"))
+        if (ImGui::SliderFloat("Voice volume", &vol, 0.0f, 3.0f, "%.2fx",
+                               ImGuiSliderFlags_AlwaysClamp))
             VC::SetMasterVolume(vol);
+        if (ImGui::IsItemActive()) {
+            g_pendingVolume.store(vol);
+            g_draggingVolume.store(true);
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
-            char v[16];
-            std::snprintf(v, sizeof(v), "%.2f", vol);
-            coop::config::SetValue(coop::config_registry::rows::voice_volume, v);
+            g_draggingVolume.exchange(false);
+            CommitSlider(::coop::config_registry::rows::voice_volume, vol, "%.2f");
+        } else if (ImGui::IsItemDeactivated()) {
+            g_draggingVolume.exchange(false);
         }
 
         ImGui::Spacing();

@@ -46,6 +46,10 @@ struct PeerVoiceState {
 void Install(coop::net::Session* session);
 void Tick();
 
+// Follow the six voice rows a pane sets: once, at boot. The mode and the two device rows reopen the
+// devices at the next Tick in a session; the three slider rows apply at once.
+void SubscribeRows();
+
 // Wire ingest (display-only state).
 void OnVoiceState(const coop::net::VoiceStatePayload& p, uint8_t senderSlot);
 
@@ -64,13 +68,16 @@ bool  Muted();
 void  SetMuted(bool m);
 float MicLevelDb();
 float MasterVolume();
+// How many times the devices were reopened since boot; any thread. The settings drill's readiness.
+uint32_t Reopens();
+// PREVIEW of the voice panel's drag: it shows the value live; the row's subscriber is the apply.
 void  SetMasterVolume(float v);
 
 // ---- render-thread surface (scoreboard column / voice panel / HUD) ----
 // A POD snapshot rebuilt each game tick under a small mutex (the roster
 // snapshot pattern); the volume/gain/threshold/mute setters write atomics and
 // are safe from the render thread directly. Device/mode changes need a device
-// reopen -- the panel writes the ini then calls RequestDevicesRestart(); the
+// reopen -- the panel sets the row and the row's subscriber requests it; the
 // next game tick performs the reopen (never the render thread).
 struct UiSnapshot {
     uint8_t icons[coop::players::kMaxPeers] = {};       // VoiceIcon per slot (self = local chain)
@@ -87,8 +94,8 @@ struct UiSnapshot {
 void GetUiSnapshot(UiSnapshot& out);
 void  SetSlotVolume(int slot, float v);
 float SlotVolume(int slot);
+// PREVIEW of the voice panel's drag (as SetMasterVolume): the row's subscriber is the apply.
 void  SetThresholdDb(float db);
 void  SetGainDb(float db);
-void  RequestDevicesRestart();
 
 }  // namespace coop::voice_chat
