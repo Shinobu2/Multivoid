@@ -14,7 +14,7 @@
 // bSavable && bSave, CMainConfig.cpp:1479-1483; its client: every apply, CSettings.cpp:4790); a
 // live set beats the launch pin so a change holds for the run (MTA: command line wins,
 // CMainConfig.cpp:1050-1081); Source clamps and calls back only on a change (convar.cpp:794-798,
-// 843-853), we refuse and notify every accepted set and reset, as MTA (CMainConfig.cpp:1485-1486).
+// 843-853), we notify every accepted set and reset (MTA's set: CMainConfig.cpp:1485-1486).
 
 #include "coop/config/config.h"
 
@@ -161,8 +161,10 @@ SetResult SetValueAt(const std::wstring& iniPath, const Row* row, const char* va
 // (CSettings.cpp:2835-2861); Source's ConVar::Revert is a set to the default
 // (convar.cpp:1076-1081). Ours removes the stored line instead, so a later change of the default,
 // or an environment twin, answers rather than a frozen copy. It notifies even when no line was
-// stored (MTA fires every time; Source's Revert skips the callbacks when the value is unchanged,
-// convar.cpp:843-853).
+// stored: MTA's "Load defaults" has no change callback and re-applies every value unconditionally
+// (CSettings.cpp:2838-2858), while Source's Revert skips the callbacks when the value is unchanged
+// (convar.cpp:843-853). Ours always notifies: it compares no values, and a subscriber re-resolves
+// the row rather than trusting what it saw before.
 SetResult ResetValueAt(const std::wstring& iniPath, const Row* row) {
     if (t_notifying) {
         UE_LOGW("config: RESET %s REFUSED -- called from inside a change notification; a "
