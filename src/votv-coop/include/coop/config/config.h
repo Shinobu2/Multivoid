@@ -76,10 +76,10 @@ SetResult ResetValue(const config_registry::StringRow& row);
 // Call `onChange` after each SetValue or ResetValue of `row` that was not Refused; it re-resolves
 // what it needs. It runs through the notifier (below): on the game thread in the game. Registering
 // the same (row, function) pair again is a no-op. Any thread. Subscribe before the first read of
-// the row; a set in between is then delivered. A subscriber never sets a row: a SetValue made
-// synchronously on its own stack is refused, but a set it defers (game_thread::Post) or hands to
-// another thread is not, and loops inside one drain, so a subscriber never posts or hands off a
-// set either.
+// the row; a set in between is then delivered. A subscriber never sets a row: a SetValue or
+// ResetValue made synchronously on its own stack is refused, but a set it defers
+// (game_thread::Post) or hands to another thread is not, and loops inside one drain, so a
+// subscriber never posts or hands off a set either.
 void Subscribe(const config_registry::FlagRow& row, void (*onChange)());
 void Subscribe(const config_registry::IntRow& row, void (*onChange)());
 void Subscribe(const config_registry::FloatRow& row, void (*onChange)());

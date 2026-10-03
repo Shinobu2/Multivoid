@@ -35,8 +35,9 @@ namespace {
 
 using Row = config_registry::Row;
 
-// Held by SetValueAt across its put and its ini write, so two sets cannot interleave them, and by
-// the keep-line across its rewrite and its drop (SetMutex).
+// Held by SetValueAt across its put and its ini write, so two sets cannot interleave them, by
+// ResetValueAt across its drop and its ini write, and by the keep-line across its rewrite and its
+// drop (SetMutex).
 std::mutex g_setMutex;
 // The layer map, the subscriber list and the notifier pointer.
 std::mutex g_layerMutex;
@@ -130,7 +131,7 @@ void PostNotify(const Row* row) {
 
 SetResult SetValueAt(const std::wstring& iniPath, const Row* row, const char* value) {
     if (t_notifying) {
-        UE_LOGE("config: SET %s REFUSED -- called from inside a change notification; a subscriber "
+        UE_LOGW("config: SET %s REFUSED -- called from inside a change notification; a subscriber "
                 "never sets a row", row->key);
         return SetResult::Refused;
     }
@@ -157,7 +158,7 @@ SetResult SetValueAt(const std::wstring& iniPath, const Row* row, const char* va
 
 SetResult ResetValueAt(const std::wstring& iniPath, const Row* row) {
     if (t_notifying) {
-        UE_LOGE("config: RESET %s REFUSED -- called from inside a change notification; a "
+        UE_LOGW("config: RESET %s REFUSED -- called from inside a change notification; a "
                 "subscriber never sets a row", row->key);
         return SetResult::Refused;
     }
