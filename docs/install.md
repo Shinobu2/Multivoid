@@ -141,7 +141,7 @@ from the folder that contains `VotV-Win64-Shipping.exe`, then install normally.
   without it (UE4SS may remain; it does nothing on its own).
 
 For a full clean sweep, also delete the mod's runtime files next to the
-executable (all optional — they only store mod settings and logs):
+executable unless noted (all optional — they only store mod settings and logs):
 `multivoid.ini`, `multivoid.ini.example`, `multivoid.log`, `multivoid.prev.log`,
 `multivoid-loaded.txt`, `multivoid-compat-report.txt`, `multivoid-players.txt`,
 `multivoid-banlist.txt`, the folder `multivoid_servers` (it holds your hosted server's
@@ -149,8 +149,9 @@ folder), the skin-pak folder
 `VotV\Content\Paks\LogicMods\multivoid` if you created one, and, from builds before this
 one, a folder `%LOCALAPPDATA%\Multivoid` (no longer read). Your identity is a separate
 file beside the executable, `multivoid_identity.key`, which only your Windows account can
-read (another account on the same PC that cannot read it keeps its own key beside it, as
-`multivoid_identity_<a code for that account>.key`; to move that one to another PC, rename
+read (another account on the same PC that cannot read it keeps its own key beside it
+(if it may write the game folder; otherwise each launch runs on a temporary identity and the
+log says so), as `multivoid_identity_<a code for that account>.key`; to move that one to another PC, rename
 it to `multivoid_identity.key`). If another program is holding that
 file when the game starts, that launch runs on a temporary identity and the log says so;
 nothing is written over the file and your inventory is back the next launch. Leave it unless

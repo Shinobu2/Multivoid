@@ -101,11 +101,12 @@ bool FromHex(const std::string& hex, uint8_t* out, size_t n) {
 // it -- so an update changes nobody's identity, a Steam library move carries it, and a tester's
 // two installs are two players. It is created under a private access list (this account and the
 // system, nothing inherited), re-applied at every load, so another account on the same PC cannot
-// read it. An account that cannot read the install's file -- another account holds it -- or finds
-// none keeps its own key for this install beside it (`multivoid_identity_<account>.key`), so two
-// accounts stay two players; a folder that refuses the write leaves the session on a temporary
-// identity, as it leaves every file the mod writes. Never in the ini: inis get pasted into bug
-// reports.
+// read it. An account that cannot read the install's file -- another account holds it -- keeps its
+// own key for this install beside it (`multivoid_identity_<account>.key`), so two accounts stay two
+// players; while the install has no file of its own, an account that has such a file reads it, and
+// one that has none mints the install's. A folder that refuses the write leaves the session on a
+// temporary identity, as it leaves every file the mod writes. Never in the ini: inis get pasted
+// into bug reports.
 
 const char* kKeyFileName = "multivoid_identity.key";
 
@@ -173,19 +174,28 @@ const PrivateAcl& KeyFileAcl() {
     return acl;
 }
 
-// This account's key for an install whose own key file another account holds, or that has none:
-// beside it, named by a hash of this account's SID, so two accounts on one install stay two
-// players and the game folder holds everything the mod writes (D14). Empty when nothing
-// resolves.
+// The file name of an account's own key: a hash of the account's SID bytes and nothing else, so two
+// accounts on one install stay two players. Empty when the SID is empty or the hash fails.
+std::wstring AccountKeyFileName(const uint8_t* sid, size_t n) {
+    if (sid == nullptr || n == 0) return {};
+    uint8_t digest[32];
+    if (!Sha256(sid, n, digest)) return {};
+    std::wstring name = L"multivoid_identity_";
+    for (char c : ToHex(digest, 8)) name.push_back(static_cast<wchar_t>(c));
+    return name + L".key";
+}
+
+// This account's key for an install whose own key file another account holds (minted here), read
+// first when the install has no key file: beside it, named by a hash of this account's SID, so two
+// accounts on one install stay two players and the game folder holds everything the mod writes.
+// Empty when nothing resolves.
 std::wstring AccountKeyFilePath() {
     const std::wstring dir = ue_wrap::paths::ExeDir();
     const std::vector<uint8_t>& sid = KeyFileAcl().userSid;
-    if (dir.empty() || sid.empty()) return {};
-    uint8_t digest[32];
-    if (!Sha256(sid.data(), sid.size(), digest)) return {};
-    std::wstring id;
-    for (char c : ToHex(digest, 8)) id.push_back(static_cast<wchar_t>(c));
-    return dir + L"\\multivoid_identity_" + id + L".key";
+    if (dir.empty()) return {};
+    const std::wstring name = AccountKeyFileName(sid.data(), sid.size());
+    if (name.empty()) return {};
+    return dir + L"\\" + name;
 }
 
 // Sets the private list on the file; reports a volume that keeps none. False says only that the
@@ -324,7 +334,7 @@ bool Load() {
     DWORD readErr = 0;
     // This account's own file: used when it loads; an unreadable one ends TEMPORARY with nothing
     // written (never mint over a durable key a transient error hid); a malformed or missing one
-    // is minted over, into `mintTarget`.
+    // gives way to a new key written to `mintTarget` (over it only when `mintTarget` is this file).
     auto readAccountKey = [&](const std::wstring& mintTarget) {
         switch (ReadKeyFile(account, g_priv, &readErr)) {
         case ReadResult::Loaded:
@@ -340,7 +350,7 @@ bool Load() {
             break;
         case ReadResult::Malformed:
             UE_LOGW("peer_identity: %ls is not a key file this build can read -- minting a new "
-                    "identity over it", account.c_str());
+                    "identity into %ls", account.c_str(), mintTarget.c_str());
             minted = true;
             target = mintTarget;
             break;
@@ -611,19 +621,20 @@ bool RunSelftest() {
               std::memcmp(parsed.m_genericBytes, g_pub.data(), kPubKeyBytes) == 0,
               "our rendered identity does not parse back to our own public key");
 
-        // 17-19: this account's key path resolves exactly when its SID does, is stable, and sits
-        // beside the install under a 16-hex id -- two accounts on one install are two players only
-        // while the name is derived from the account and from nothing else.
+        // 17-20: this account's key path resolves exactly when its SID does, is stable, and sits
+        // beside the install under a 16-hex id; 20 pins the name to the SID alone with a known
+        // answer (the SYSTEM SID), since two accounts on one install are two players only while
+        // the name is derived from the account and from nothing else.
         const std::wstring a = AccountKeyFilePath();
         check(KeyFileAcl().userSid.empty() == a.empty(),
-              "the account key path resolves exactly when the SID does");
+              "the account key path does not resolve exactly when the SID does");
         if (!a.empty()) {
             const std::wstring exe = ue_wrap::paths::ExeDir();
             check(a == AccountKeyFilePath() && a != InstallKeyFilePath() &&
                   a.rfind(exe + L"\\multivoid_identity_", 0) == 0 &&
                   a.size() == exe.size() + 20 + 16 + 4 &&
                   a.compare(a.size() - 4, 4, L".key") == 0,
-                  "the account key path is stable and beside the install");
+                  "the account key path is not stable, or not beside the install");
             bool hex = true;
             for (size_t i = a.size() - 4 - 16; i < a.size() - 4; ++i) {
                 const wchar_t c = a[i];
@@ -631,6 +642,12 @@ bool RunSelftest() {
             }
             check(hex, "the account key path's id is not 16 lower-case hex");
         }
+        uint8_t systemSid[SECURITY_MAX_SID_SIZE];
+        DWORD systemSidLen = sizeof(systemSid);
+        check(::CreateWellKnownSid(WinLocalSystemSid, nullptr, systemSid, &systemSidLen) != 0 &&
+              AccountKeyFileName(systemSid, systemSidLen) ==
+                  L"multivoid_identity_f53c7fa26c1476dc.key",
+              "the account key name is not the hash of the SID bytes alone (SYSTEM known answer)");
     }
 
     if (pass == total) {
