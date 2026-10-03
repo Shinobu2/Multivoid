@@ -44,6 +44,7 @@
 #include "coop/net/session.h"
 #include "coop/player/puppet_drive.h"
 #include "coop/player/remote_player.h"
+#include "coop/session/server_settings_sync.h"
 #include "coop/session/shutdown.h"
 #include "ui/dev_menu.h"
 #include "ui/imgui_overlay.h"
@@ -523,7 +524,9 @@ void Start() {
     // on first use, the scale and font modules load theirs in the overlay's bring-up, which retries
     // on a later frame if it fails (LoadUserPrefOnce, ReadRoleFamiliesOnce), the voice module reads
     // its rows when a session's Install opens the devices, and every later set reaches all seven
-    // through these subscriptions.
+    // through these subscriptions. The host's server-scope sender follows the replicated rows the
+    // same way, and its session handle and stop listener are bound first, because the first
+    // session start on the TimelineThread reads them.
     coop::nameplate::SubscribeRow();
     coop::nick_color::SubscribeRow();
     coop::peer_action_feed::SubscribeRow();
@@ -531,6 +534,8 @@ void Start() {
     ui::scale::SubscribeRow();
     ui::fonts::SubscribeRows();
     coop::voice_chat::SubscribeRows();
+    coop::server_settings_sync::BindSession(session_runtime::Session());
+    coop::server_settings_sync::SubscribeRows();
     if (!ui::imgui_overlay::Init()) {
         UE_LOGW("harness: imgui_overlay::Init failed -- F1 menu unavailable this run");
     }

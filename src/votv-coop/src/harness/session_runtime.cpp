@@ -46,6 +46,7 @@
 #include "coop/session/net_pump.h"
 #include "coop/session/player_handshake.h"
 #include "coop/session/rig_ready.h"
+#include "coop/session/server_settings_sync.h"
 #include "coop/text/utf8_codec.h"
 #include "coop/session/session_manager.h"
 #include "coop/session/shutdown.h"
@@ -212,6 +213,8 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // Reset net_pump's edge detectors, so a Stop/Start on one process carries no stale "was
     // connected" or "was holding" entries into the new session.
     coop::net_pump::OnSessionStart();
+    // The config's session layer begins with the session, before the transport can deliver a row.
+    coop::server_settings_sync::OnSessionStart(netCfg.role == coop::net::Role::Host);
     coop::prop_lifecycle::SetSession(&g_session);
     coop::npc_sync::SetSession(&g_session);
     coop::prop_snapshot::SetSession(&g_session);
@@ -248,6 +251,9 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // loading screen is browser-join only; the env and autotest client boot reaches this function
     // directly and shows nothing.
     const bool ok = g_session.Start(netCfg, why);
+    // A session that never ran never stops, so the stop listener will not end its layer; a Start
+    // refused because a session already runs must not end that one's.
+    if (!ok && !g_session.running()) coop::server_settings_sync::OnSessionEnd();
     UE_LOGI("harness: ==== COOP SESSION START (%s / %s)%s ====",
             netCfg.role == coop::net::Role::Host ? "host" : "client",
             netCfg.topology == coop::net::Topology::P2P ? "p2p" : "lan-direct",
