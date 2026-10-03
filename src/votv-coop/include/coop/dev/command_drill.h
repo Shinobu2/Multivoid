@@ -7,7 +7,7 @@
 // unknown commands at once: the host's per-sender rate accepts the first few, drops the rest and tells
 // the client once, and the client counts the accepted answers before that notice. `red` expects a wrong
 // first reply line, so the drill must fail.
-// Lines tagged [CMD-DRILL]; 'host DONE' and 'client DONE' end it, FAIL names the reply that differed.
+// Lines tagged [CMD-DRILL]; 'host DONE' and 'client DONE' end it, FAIL names the reply that differed, or an answered count outside 1..5.
 
 #pragma once
 

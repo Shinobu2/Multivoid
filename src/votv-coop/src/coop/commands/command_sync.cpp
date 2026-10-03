@@ -262,7 +262,10 @@ void OnRequest(const uint8_t* bytes, size_t len, int slot) {
     }
 
     // MTA strips control codes where a command enters the console, as chat_sync does at its boundary
-    // (reference/mtasa-blue/Server/mods/deathmatch/logic/CConsole.cpp:43).
+    // (reference/mtasa-blue/Server/mods/deathmatch/logic/CConsole.cpp:44). TAB is kept: MTA's
+    // stripControlCodes drops every byte below 32
+    // (reference/mtasa-blue/Shared/mods/deathmatch/logic/Utils.cpp:277-293), SanitizeUtf8 keeps TAB
+    // as chat does, and SplitLine splits on ' ' only.
     const std::string line = coop::text::SanitizeUtf8(p.text, p.len);
     const auto result = coop::commands::Dispatch(Commands(), caller, line, BuildPlayers(s), g_policy);
     UE_LOGI("command_sync: slot %d /%s -> %s", slot, LogWord(line).c_str(),
