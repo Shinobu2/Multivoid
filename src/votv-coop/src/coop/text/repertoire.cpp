@@ -64,6 +64,13 @@ const CodepointRange* ExcludeRanges(size_t* outCount) {
     return kExclude;
 }
 
+bool AnyRepertoireCodepoint(bool (*pred)(uint32_t)) {
+    for (size_t i = 0; i < kRepertoireCount; ++i)
+        for (uint32_t c = kRepertoire[i].begin; c <= kRepertoire[i].end; ++c)
+            if (pred(c)) return true;
+    return false;
+}
+
 bool RunRepertoireSelftest() {
     int pass = 0, total = 0;
     auto ok = [&](bool cond, const char* what) {
@@ -187,17 +194,6 @@ bool RunRepertoireSelftest() {
        "the ignorable set covers CGJ, ZWSP, BOM and HANGUL FILLER");
     ok(!IsDefaultIgnorable(U' ') && !IsDefaultIgnorable(0x00A0),
        "a space is not ignorable, and neither is NBSP (it carries real advance)");
-
-    // Nothing the atlas bakes may also be denied in a name: if a codepoint were
-    // in both tables, a name could contain a character that renders -- or one
-    // that does not -- depending on which check ran first.
-    {
-        bool disjoint = true;
-        for (size_t i = 0; i < kRepertoireCount && disjoint; ++i)
-            for (uint32_t c = kRepertoire[i].begin; c <= kRepertoire[i].end; ++c)
-                if (IsDefaultIgnorable(c)) { disjoint = false; break; }
-        ok(disjoint, "the repertoire and the ignorable set do not overlap");
-    }
 
     UE_LOGI("repertoire selftest: %s (%d/%d) -- %zu fold ranges, %zu exclude ranges",
             pass == total ? "PASS" : "FAIL", pass, total, kRepertoireCount, kExcludeCount);

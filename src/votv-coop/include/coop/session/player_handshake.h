@@ -22,6 +22,10 @@ namespace coop::player_handshake {
 // would accept.
 inline constexpr size_t kNickMaxChars = 20;
 
+// SanitizeNickname's own trims, asserted at boot: a non-idempotent sanitizer shows one name on the
+// host and another on every client.
+bool RunNicknameSanitizerSelftest();
+
 // Set the local player's requested display name, what the person typed in the browser or the
 // ini, sanitized on the way in by the sanitizer that also runs on inbound peer names. Also sets
 // the displayed name: until a host says otherwise, what you asked for is what you are.

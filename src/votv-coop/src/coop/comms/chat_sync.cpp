@@ -2,6 +2,7 @@
 
 #include "coop/comms/chat_sync.h"
 
+#include "coop/text/name_filter.h"
 #include "coop/text/novelty_ledger.h"
 #include "coop/text/utf8_codec.h"
 
@@ -355,7 +356,12 @@ void OnChatSpeaker(const coop::net::ChatSpeakerPayload& payload) {
     sp.valid    = true;
     sp.slot     = payload.slot;
     sp.nickArgb = payload.nickArgb;
-    sp.nick     = coop::text::SanitizeUtf8(payload.nick, n);
+    // A speaker's name is a NAME: the name filter, not the chat text's list. `Admissible` already
+    // refused an ill-formed nick, so the strict decode succeeds here.
+    std::wstring wide;
+    sp.nick     = coop::text::FromUtf8Strict(payload.nick, n, &wide)
+                      ? coop::text::ToUtf8(coop::text::FilterNameChars(wide))
+                      : std::string();
 }
 
 void OnChatLine(const coop::net::ChatLinePayload& payload) {

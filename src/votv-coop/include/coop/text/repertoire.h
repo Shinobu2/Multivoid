@@ -62,15 +62,18 @@ bool IsDefaultIgnorable(uint32_t cp);
 // Is `cp` a combining mark this build can DRAW (Mn/Me/Mc, in the render set, and not held out
 // by the exclude set)?
 //
-// One consumer, and the reason this is generated rather than written down: SanitizeNickname
-// drops a mark at position 0, because a mark with no base sits on whatever the UI drew before
-// the name. A hand-written range for that rule covers the Latin block only and misses the
-// Thaana, Tamil, Thai, Arabic and Hebrew marks, every one of which draws.
+// One consumer, `coop::text::FilterNameChars`, which drops a mark at position 0 of every displayed
+// name, because a mark with no base sits on whatever the UI drew before the name; the table is
+// generated rather than written down so that rule covers every script the atlas draws.
 //
 // It is deliberately not `!InRepertoire`-shaped and not a denylist: a mark in the MIDDLE of a
 // name is legitimate text in five scripts and passes untouched. Only position 0 is a
 // rendering problem.
 bool IsCombiningMark(uint32_t cp);
+
+// Whether any codepoint of the generated repertoire satisfies `pred`: how a neighbour asserts a
+// property against the table without the table leaving this file.
+bool AnyRepertoireCodepoint(bool (*pred)(uint32_t));
 
 // Asserted at boot beside the codec and arbiter selftests. Covers the table's own invariants
 // (sorted, disjoint, non-empty) and the four membership facts the fold depends on.

@@ -14,7 +14,9 @@
 #include "coop/net/peer_admission.h"
 #include "coop/net/peer_identity.h"
 #include "coop/player/nickname_arbiter.h"
+#include "coop/session/player_handshake.h"
 #include "coop/text/case_fold.h"
+#include "coop/text/name_filter.h"
 #include "coop/text/repertoire.h"
 #include "coop/text/novelty_ledger.h"
 #include "coop/text/utf8_codec.h"
@@ -204,6 +206,10 @@ bool Session::Start(const Config& cfg, Refusal* why) {
     static const bool kNickArbiterOk = coop::nickname_arbiter::RunNicknameArbiterSelftest();
     (void)kNickArbiterOk;
 
+    // The nickname's own trims, beside the arbiter that folds it.
+    static const bool kNickSanitizerOk = coop::player_handshake::RunNicknameSanitizerSelftest();
+    (void)kNickSanitizerOk;
+
     // The UTF-8 codec's self-test: its interesting cases are an ill-formed byte sequence a peer
     // would have to send deliberately, and a cap landing mid-character.
     static const bool kCodecOk = coop::text::RunUtf8CodecSelftest();
@@ -214,6 +220,11 @@ bool Session::Start(const Config& cfg, Refusal* why) {
     // disjoint) and the membership facts the fold depends on.
     static const bool kRepertoireOk = coop::text::RunRepertoireSelftest();
     (void)kRepertoireOk;
+
+    // The name filter's self-test beside the table it reads: a wrong verdict here is a nickname
+    // that splits a log line, which no drill sees.
+    static const bool kNameFilterOk = coop::text::RunNameFilterSelftest();
+    (void)kNameFilterOk;
 
     // The case table beside it, generated in the same run. Its rows are positive: a generated table
     // that arrives empty folds nothing, and "no two names collided" is also what a healthy lobby

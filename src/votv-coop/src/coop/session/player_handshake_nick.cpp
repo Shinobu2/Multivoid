@@ -13,6 +13,7 @@
 #include "coop/player/nickname_arbiter.h"
 #include "coop/player/roster_ledger.h"
 #include "coop/session/session_manager.h"
+#include "coop/text/name_filter.h"
 #include "coop/text/repertoire.h"
 #include "coop/text/utf8_codec.h"
 #include "ue_wrap/core/log.h"
@@ -69,51 +70,56 @@ std::wstring FromUtf8(const uint8_t* p, int len) {
 // the plate and the join. Applied symmetrically to the inbound Join and to our own outbound
 // name. Not a profanity filter.
 std::wstring SanitizeNickname(const std::wstring& raw) {
-    // A denylist: an allowlist cannot survive a widening alphabet, because the script it forgot
-    // fails silently. The invisibles are the Unicode Default_Ignorable_Code_Point property rather
-    // than a hand-written list of ranges: an enumeration of the invisibles one happens to think of
-    // is a site list, and one it missed (the combining grapheme joiner, advance 0 in both default
-    // families) gave two identical-looking names distinct fold keys.
-    auto denied = [](uint32_t c) {
-        if (c < 0x20 || c == 0x7F) return true;          // C0 controls + DEL
-        if (c >= 0xD800 && c <= 0xDFFF) return true;     // unpaired surrogate
-        return coop::text::IsDefaultIgnorable(c);
-    };
-    // No hand-written mark range here: five scripts' marks draw now, and a range beside the
-    // generated table would be a second owner of one fact, silently policing Latin diacritics
-    // alone.
-    std::wstring out;
-    out.reserve(raw.size());
-    bool lastWasSpace = true;  // primes the leading-space trim
-    // In codepoints: iterating wchar_t units cannot see a supplementary-plane character, so every
-    // tag character, all ignorable, would pass the denylist as two anonymous halves.
-    for (size_t i = 0; i < raw.size(); ) {
-        uint32_t c = 0;
-        const size_t units = coop::text::DecodeCodepoint(raw, i, &c);
-        const wchar_t* at = raw.data() + i;
-        i += units;
-        if (denied(c)) continue;
-        if (c == L' ') {
-            if (!lastWasSpace) { out.push_back(L' '); lastWasSpace = true; }
-            continue;
-        }
-        // A combining mark with nothing to combine with stacks onto whatever the UI drew before the
-        // name. Only at position 0: a mark in the middle is legitimate text in five scripts.
-        if (out.empty() && coop::text::IsCombiningMark(c)) continue;
-        out.append(at, units);
-        lastWasSpace = false;
-    }
+    std::wstring out = coop::text::FilterNameChars(raw);
     // The cap is in codepoints, never wchar_t units, or an astral character could be cut in half
     // and leave an unpaired surrogate on the wire.
     out = coop::text::CapCodepoints(out, kNickMaxChars);
-    // Trailing spaces and dashes.
-    while (!out.empty() && (out.back() == L' ' || out.back() == L'-'))
-        out.pop_back();
-    // Leading dashes; leading spaces are already gone through the primed space flag.
-    size_t start = 0;
-    while (start < out.size() && out[start] == L'-') ++start;
-    if (start > 0) out.erase(0, start);
+    // Trimming a dash can expose a leading space or mark, so filter and trim until nothing
+    // changes: the host and every client then show one name. It ends: the filter only removes and
+    // the trims only cut, so every pass that changes the name shortens it.
+    for (;;) {
+        std::wstring next = coop::text::FilterNameChars(out);
+        // Trailing spaces and dashes.
+        while (!next.empty() && (next.back() == L' ' || next.back() == L'-'))
+            next.pop_back();
+        // Leading dashes; leading spaces are already gone (FilterNameChars).
+        size_t start = 0;
+        while (start < next.size() && next[start] == L'-') ++start;
+        if (start > 0) next.erase(0, start);
+        if (next == out) break;
+        out = next;
+    }
     return out.empty() ? std::wstring(L"Player") : out;
+}
+
+bool RunNicknameSanitizerSelftest() {
+    int pass = 0, total = 0;
+    auto check = [&](bool ok, const char* what) {
+        ++total;
+        if (ok) { ++pass; return; }
+        UE_LOGE("nick_sanitizer selftest FAIL: %s", what);
+    };
+
+    struct Case { const wchar_t* in; const wchar_t* want; const char* what; };
+    const Case cases[] = {
+        {L"- a", L"a", "a dash then a space leaves no leading space"},
+        {L"-\u0301a", L"a", "a dash then a mark leaves no leading mark"},
+        {L"- - a", L"a", "repeated dash-space prefixes all go"},
+        {L"-\u0301-\u0301a", L"a", "repeated dash-mark prefixes all go"},
+        {L"--", L"Player", "a name of dashes is the default"},
+    };
+    for (const Case& c : cases) {
+        const std::wstring once = SanitizeNickname(c.in);
+        check(once == c.want, c.what);
+        check(SanitizeNickname(once) == once, "the sanitizer is idempotent");
+    }
+
+    if (pass == total) {
+        UE_LOGI("nick_sanitizer selftest: ALL PASS (%d checks)", total);
+        return true;
+    }
+    UE_LOGE("nick_sanitizer selftest: %d/%d checks passed", pass, total);
+    return false;
 }
 
 void SetLocalNickname(const std::wstring& nick) {

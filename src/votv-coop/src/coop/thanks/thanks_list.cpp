@@ -5,7 +5,7 @@
 #include "coop/net/lobby_client.h"
 #include "coop/net/master_slots.h"  // the chosen master, the one the browser talks to
 #include "coop/session/shutdown.h"
-#include "coop/text/repertoire.h"
+#include "coop/text/name_filter.h"
 #include "coop/text/utf8_codec.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/paths.h"
@@ -58,27 +58,13 @@ std::string Trim(const std::string& s) {
 }
 
 // One displayable string, or empty. Refused whole when it is not well-formed UTF-8 (a repair
-// would show a name nobody has); then the nickname lane's denylist, in codepoints: controls,
-// the line and paragraph separators, and every Default_Ignorable codepoint, which is where the
-// bidi overrides and the zero-width characters live. A name can then neither reorder the text
-// around it nor break into a second line the roll did not count.
+// would show a name nobody has); then the name filter the nickname lane uses too
+// (`coop::text::FilterNameChars`): no controls, no line separators, no Default_Ignorable
+// codepoint, no leading combining mark, runs of spaces made one.
 std::string Clean(const std::string& raw, size_t maxBytes) {
     std::wstring wide;
     if (!coop::text::FromUtf8Strict(raw.data(), raw.size(), &wide)) return {};
-    std::wstring kept;
-    kept.reserve(wide.size());
-    for (size_t i = 0; i < wide.size();) {
-        uint32_t c = 0;
-        const size_t units = coop::text::DecodeCodepoint(wide, i, &c);
-        const wchar_t* at = wide.data() + i;
-        i += units;
-        if (c < 0x20 || (c >= 0x7F && c <= 0x9F)) continue;   // C0, DEL, C1
-        if (c >= 0xD800 && c <= 0xDFFF) continue;             // an unpaired surrogate
-        if (c == 0x2028 || c == 0x2029) continue;             // line and paragraph separators
-        if (coop::text::IsDefaultIgnorable(c)) continue;
-        if (kept.empty() && coop::text::IsCombiningMark(c)) continue;  // nothing to combine with
-        kept.append(at, units);
-    }
+    const std::wstring kept = coop::text::FilterNameChars(wide);
     return coop::text::CapUtf8Bytes(Trim(coop::text::ToUtf8(kept)), maxBytes);
 }
 
