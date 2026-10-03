@@ -125,6 +125,13 @@ Decision Evaluate(const Resolved& r, std::string_view permission, bool owner) {
     return d;
 }
 
+bool IsSetExplicitly(const Resolved& r, std::string_view permission) {
+    std::string lowered(permission);
+    for (char& c : lowered) c = LowerAscii(c);
+    auto it = r.flat.find(lowered);
+    return it != r.flat.end() && it->second.value;
+}
+
 std::shared_ptr<const Resolved> Checker::Get(std::string_view playerId, const ContextSet& subject, int64_t now) {
     Key key{std::string(playerId), subject.Pairs()};
     for (char& c : key.playerId) c = LowerAscii(c);

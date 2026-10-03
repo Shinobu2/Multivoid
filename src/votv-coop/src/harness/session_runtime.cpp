@@ -32,6 +32,7 @@
 #include "coop/net/peer_admission.h"
 #include "coop/net/peer_identity.h"
 #include "coop/net/stream_slot.h"
+#include "coop/permissions/permission_host.h"
 #include "coop/permissions/permissions_selftest.h"
 #include "coop/player/movement_ledger.h"
 #include "coop/player/players_registry.h"
@@ -270,6 +271,10 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
         // identity proof, which both transports pass.
         coop::ban_list::Load(serverDir);
         g_session.SetBanCheck(&BanCheck);
+        // The server's permission store, read here and published to the game thread before
+        // Start spawns the net thread, so every check a client's line causes sees it.
+        coop::permissions::host::OnHostStart(
+            serverDir, coop::server_profile::IdForHosting(coop::session_manager::Nickname()).id);
     }
     // The client's connecting state is not raised here but by the browser connect actions, so the
     // loading screen is browser-join only; the env and autotest client boot reaches this function

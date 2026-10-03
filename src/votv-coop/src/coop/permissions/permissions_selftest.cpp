@@ -1,5 +1,6 @@
 // coop/permissions/permissions_selftest.cpp -- the boot runner of the permission model's selftest;
-// see coop/permissions/permissions_selftest.h. The only file of the folder that logs or reads config.
+// see coop/permissions/permissions_selftest.h. This runner and `permission_host` (the in-game glue)
+// are the only files of the folder that log or read config; every other file is engine-free.
 
 #include "coop/permissions/permissions_selftest.h"
 
@@ -23,6 +24,7 @@ bool RunSelftest() {
     RunStoreCases(sink);
     RunInheritanceCases(sink);
     RunResolutionCases(sink);
+    RunFilesCases(sink);
 
     if (sink.passed == sink.total) {
         UE_LOGI("permissions selftest: ALL PASS (%d checks)", sink.total);

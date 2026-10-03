@@ -1,0 +1,43 @@
+// coop/permissions/permission_files.h -- the hosted server's permission store, read-only: LuckPerms'
+// JSON layout under `<server folder>\permissions\` (groups\<name>.json, users\<32 hex>.json). A
+// holder is named by its FILE stem, as LuckPerms names one. Engine-free: nlohmann and
+// <filesystem> only, no ue_wrap include, no logging; the caller logs the report.
+//
+// Ported from LuckPerms common/src/main/java/me/lucko/luckperms/common/storage/implementation/file/
+// AbstractConfigurateStorage.java:411-504 (MIT, THIRD-PARTY-NOTICES.md): the three permission
+// forms, the three parent forms, the attributes. The store is edited by hand and read at each host
+// start; nothing is written back.
+#pragma once
+
+#include "coop/permissions/model.h"
+
+#include <filesystem>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace coop::permissions {
+
+struct LoadReport {
+    int groups = 0;
+    int users = 0;
+    std::vector<std::string> problems;
+};
+
+// Parses one holder file's text. PURE. False when the text is not a JSON object (the problem is
+// appended), and an invalid UTF-8 byte anywhere refuses the file whole. On true, `primaryGroup` is
+// the stored `primaryGroup` (`default` when absent or not a string, the latter with a problem) and
+// `nodes` the file's `permissions` entries then its `parents` entries (each a `group.<name>` node
+// with that entry's expiry and context). An entry with a wrong-typed attribute, or a context pair
+// ContextSet::Add refuses, is refused WHOLE (dropping the pair would widen it to global) with a
+// problem naming `stem` and the field. Every other top-level key is ignored.
+bool ParseHolderText(std::string_view text, std::string_view stem, std::string* primaryGroup,
+                     std::vector<Node>* nodes, std::vector<std::string>* problems);
+
+// Reads `dir` (`<server folder>\permissions`) into `m`: every groups\*.json first, sorted by name so
+// a user's parents exist, then every users\*.json. A missing `dir` gives an empty report. A group
+// stem (lower-cased) must pass IsValidGroupName and a user stem be 32 hex; a file that fails is
+// skipped with a problem. Expired nodes load as written (Applies filters them).
+LoadReport LoadStore(const std::filesystem::path& dir, Model& m);
+
+}  // namespace coop::permissions

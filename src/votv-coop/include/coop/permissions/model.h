@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 namespace coop::permissions {
 
@@ -49,6 +50,17 @@ public:
     // that is not among them becomes the first of them.
     bool SetNode(HolderKind kind, std::string_view name, Node n);
     bool UnsetNode(HolderKind kind, std::string_view name, Node n);
+
+    // The load half of a store read at start. LoadGroup creates the group and LoadUser the user
+    // (`default` always exists and takes the nodes); each node goes through SetNode's key
+    // normalisation, and the index in `nodes` of every node the key rules refuse is appended to
+    // `refused`. False ONLY for the holder: an invalid name or id, or one that exists, and then
+    // nothing of it loads. LoadUser then runs the default step, so a user with no stored global
+    // group gains `group.default`; a `primaryGroup` naming no group is kept as written (lower-cased)
+    // while the user holds a `group.` node for it, and the caller reports it.
+    bool LoadGroup(std::string_view name, const std::vector<Node>& nodes, std::vector<size_t>* refused);
+    bool LoadUser(std::string_view playerId, std::string_view primaryGroup, const std::vector<Node>& nodes,
+                  std::vector<size_t>* refused);
 
     // False for a missing user or group, or when the primary was already that group.
     bool SetPrimaryGroup(std::string_view playerId, std::string_view group);

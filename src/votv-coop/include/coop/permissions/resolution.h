@@ -72,6 +72,12 @@ std::shared_ptr<const Resolved> Resolve(const Model& m, std::string_view playerI
 // answer a chain left undefined is True from `owner`.
 Decision Evaluate(const Resolved& r, std::string_view permission, bool owner);
 
+// True when `r.flat` holds `permission` itself with value true. A node set on the holder or a group
+// it inherits, not one a wildcard implies: a wildcard key (`a.b.*`, `*`) is a different key and
+// never counts. Essentials' own exempt checks go through isAuthorized, which honours wildcards; ours
+// never lets a wildcard exempt.
+bool IsSetExplicitly(const Resolved& r, std::string_view permission);
+
 // The owner thread's cache: one Resolved per (player id, contexts), rebuilt when the groups'
 // revision or that user's revision moved or `validUntil != 0 && now > validUntil`.
 class Checker {

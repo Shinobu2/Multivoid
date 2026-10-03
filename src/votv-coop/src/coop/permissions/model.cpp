@@ -130,6 +130,45 @@ bool Model::UnsetNode(HolderKind kind, std::string_view name, Node n) {
     return true;
 }
 
+bool Model::LoadGroup(std::string_view name, const std::vector<Node>& nodes, std::vector<size_t>* refused) {
+    const std::string lowered = Lowered(name);
+    if (lowered != kDefaultGroup && !CreateGroup(lowered)) return false;
+    Holder& group = groups_.find(lowered)->second;
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        Node n = nodes[i];
+        std::string key;
+        if (!NormalizeKey(n.key, &key)) {
+            if (refused) refused->push_back(i);
+            continue;
+        }
+        n.key = std::move(key);
+        group.nodes.Set(n);
+    }
+    ++groupsRevision_;
+    return true;
+}
+
+bool Model::LoadUser(std::string_view playerId, std::string_view primaryGroup, const std::vector<Node>& nodes,
+                     std::vector<size_t>* refused) {
+    const std::string lowered = Lowered(playerId);
+    if (!IsPlayerId(lowered) || users_.count(lowered) != 0) return false;
+    Holder user{HolderKind::User, lowered, Lowered(primaryGroup), NodeMap()};
+    for (size_t i = 0; i < nodes.size(); ++i) {
+        Node n = nodes[i];
+        std::string key;
+        if (!NormalizeKey(n.key, &key)) {
+            if (refused) refused->push_back(i);
+            continue;
+        }
+        n.key = std::move(key);
+        user.nodes.Set(n);
+    }
+    GiveDefaultIfNeeded(user);
+    users_.emplace(lowered, std::move(user));
+    ++userRevisions_[lowered];
+    return true;
+}
+
 bool Model::SetPrimaryGroup(std::string_view playerId, std::string_view group) {
     const std::string lowered = Lowered(playerId);
     auto it = users_.find(lowered);
