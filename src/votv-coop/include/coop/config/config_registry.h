@@ -120,7 +120,8 @@ const char* const* CredentialKeys(size_t& count);
 // A row's scope, declared with the row by CFG_ROWFLAGS in the row list: kRowServer = it belongs to
 // the server being hosted; kRowReplicated = its session value is sent to every client (Source's
 // FCVAR_REPLICATED, iconvar.h:55-62); replicated implies server. A replicated row is never a
-// credential and its key and value fit the wire: static_asserts in config_registry.cpp.
+// credential, and its key and its default fit the wire (static_asserts in config_registry.cpp);
+// a value longer than kServerSettingTextMax is refused by SetValue at run time.
 enum RowFlag : unsigned {
     kRowServer = 1u << 0,
     kRowReplicated = 1u << 1,

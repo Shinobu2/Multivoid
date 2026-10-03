@@ -44,8 +44,9 @@ bool EnsureIniSkeleton();
 // discovered in the file.
 bool WriteIniValue(const config_registry::IdentityRow& row, const char* value);
 
-// What SetValue did. Refused: the value is one the reader would refuse, or the call came from
-// inside a subscriber; nothing changed. HeldNotSaved: held for this run, but the ini could not be
+// What SetValue did. Refused: the value is one the reader would refuse, the call came from
+// inside a subscriber, or a replicated row's value is longer than the wire carries
+// (kServerSettingTextMax bytes); nothing changed. HeldNotSaved: held for this run, but the ini could not be
 // written. Saved: held and written.
 enum class SetResult : unsigned char { Refused, HeldNotSaved, Saved };
 
@@ -53,8 +54,9 @@ enum class SetResult : unsigned char { Refused, HeldNotSaved, Saved };
 // (line breaks removed, edges trimmed unless the row is a String row, which keeps them), refused
 // if the reader would refuse it, held in the runtime layer (which every Resolve reads above the
 // environment), written to multivoid.ini, logged, and announced to the row's subscribers. Held
-// means every later Resolve returns it; a reader that latched the row at its first use keeps what
-// it latched until the next launch. Any thread; two sets are serialised.
+// means every later Resolve returns it (a server-scope row on a client in a session excepted: the
+// session's value answers); a reader that latched the row at its first use keeps what it latched
+// until the next launch. Any thread; two sets are serialised.
 // A server-scope row (config_registry::IsServerScope): on the host in a session the value also
 // goes into the session layer, inside the setter and before its one notification, so the session
 // sees it; on a client in a session the set changes the install's own hosting default and nothing

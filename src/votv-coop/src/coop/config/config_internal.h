@@ -126,7 +126,7 @@ void NotifySubscribers(const config_registry::Row* row);
 // calling thread; nothing when the row has none.
 void PostNotify(const config_registry::Row* row);
 // The lock that makes a change of the runtime layer and its ini write one step: SetValueAt,
-// ResetValueAt and the keep-line hold it. Taken before IniMutex, never after; never held across a
+// ResetValueAt, the keep-line, SessionLayerBegin and SessionLayerEnd hold it. Taken before IniMutex, never after; never held across a
 // notification.
 std::mutex& SetMutex();
 // The runtime layer's mutex, which also guards the session layer's map and the subscriber list.
