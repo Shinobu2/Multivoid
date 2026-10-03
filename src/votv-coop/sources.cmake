@@ -664,10 +664,12 @@ set(VOTVCOOP_SOURCES
     src/coop/permissions/node_map.cpp
     src/coop/permissions/model.cpp
     src/coop/permissions/inheritance.cpp
+    src/coop/permissions/resolution.cpp
     src/coop/permissions/permissions_selftest.cpp
     src/coop/permissions/permissions_cases_context.cpp
     src/coop/permissions/permissions_cases_store.cpp
     src/coop/permissions/permissions_cases_inheritance.cpp
+    src/coop/permissions/permissions_cases_resolution.cpp
     src/harness/harness.cpp
     src/harness/session_runtime.cpp
     src/harness/join_leave.cpp
