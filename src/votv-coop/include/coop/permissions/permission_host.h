@@ -20,17 +20,18 @@ namespace coop::permissions::host {
 // Builds a fresh Model from `<serverDir>\permissions` (an empty `serverDir` gives the empty store,
 // logged), logs the load and each problem, and publishes the model with its subject
 // (`server=<serverId>`, `mode=listen`). The store loads whole or not at all (ShouldLoad): with any
-// problem the published model is EMPTY and only the defaults apply until the store is fixed.
+// problem the published model is empty and BROKEN, and every check but the console's is refused
+// until the store is fixed. A server with no store is not broken: the defaults apply.
 // `serverId` is the hosted server's id. TimelineThread.
 void OnHostStart(const std::wstring& serverDir, std::string serverId);
 
 // The decision for `playerId` (32 hex) on `node`: the resolved chain's True / False, else
 // `defaultGranted`. `owner` fills what the chain leaves undefined with True (the server's console).
-// GAME THREAD.
+// With a broken store it is `owner` alone: default-granted nodes are refused too. GAME THREAD.
 bool Allows(std::string_view playerId, std::string_view node, bool defaultGranted, bool owner);
 
 // True when `node` is set on the player or a group it inherits, with value true; a wildcard that
-// implies it does not count (IsSetExplicitly). GAME THREAD.
+// implies it does not count (IsSetExplicitly). Always false with a broken store. GAME THREAD.
 bool HoldsExplicitly(std::string_view playerId, std::string_view node);
 
 }  // namespace coop::permissions::host

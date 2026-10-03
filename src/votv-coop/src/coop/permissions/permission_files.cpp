@@ -205,11 +205,18 @@ std::vector<std::pair<std::string, fs::path>> ListHolders(const fs::path& dir, c
     if (!isDir) return out;
     fs::directory_iterator it(dir, ec);
     for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
-        std::error_code fileEc;
-        if (!it->is_regular_file(fileEc) || fileEc) continue;
         const fs::path& p = it->path();
         std::string ext;
         if (!NarrowAscii(p.extension().wstring(), &ext) || Lowered(ext) != ".json") continue;
+        std::error_code fileEc;
+        const bool regular = it->is_regular_file(fileEc);
+        if (fileEc) {
+            std::string name;
+            if (!NarrowAscii(p.filename().wstring(), &name)) name = "a file whose name is not ASCII";
+            report.problems.push_back(std::string(label) + ": " + name + " unreadable");
+            continue;
+        }
+        if (!regular) continue;
         std::string stem;
         if (!NarrowAscii(p.stem().wstring(), &stem)) {
             report.problems.push_back(std::string(label) + ": a file whose name is not ASCII, skipped");
@@ -294,6 +301,43 @@ bool ParseHolderText(std::string_view text, std::string_view stem, std::string* 
     return true;
 }
 
+bool LoadHolderText(std::string_view text, std::string_view stem, bool group, Model& m, LoadReport& report) {
+    const std::string name(stem);
+    std::string primary;
+    std::vector<Node> nodes;
+    if (!ParseHolderText(text, stem, &primary, &nodes, &report.problems)) return false;
+    std::vector<size_t> refused;
+    const bool loaded = group ? m.LoadGroup(name, nodes, &refused) : m.LoadUser(name, primary, nodes, &refused);
+    if (!loaded) {
+        report.problems.push_back(name + ": refused");
+        return false;
+    }
+    ReportRefusedNodes(refused, nodes, name, report);
+    if (group) {
+        ++report.groups;
+    } else {
+        ++report.users;
+    }
+    return true;
+}
+
+void ReportMissingGroups(const Model& m, std::string_view stem, bool group, LoadReport& report) {
+    const Holder* holder = group ? m.FindGroup(stem) : m.FindUser(stem);
+    if (holder == nullptr) return;
+    const std::string name(stem);
+    if (!group && m.FindGroup(holder->primaryGroup) == nullptr) {
+        report.problems.push_back(name + ": primary group " + QuotedKey(holder->primaryGroup) + " does not exist");
+    }
+    static constexpr std::string_view kGroupPrefix = "group.";
+    for (const Node& n : holder->nodes.Nodes()) {
+        if (n.key.compare(0, kGroupPrefix.size(), kGroupPrefix) != 0) continue;
+        const std::string parent = n.key.substr(kGroupPrefix.size());
+        if (m.FindGroup(parent) == nullptr) {
+            report.problems.push_back(name + ": parent group " + QuotedKey(parent) + " does not exist");
+        }
+    }
+}
+
 LoadReport LoadStore(const fs::path& dir, Model& m) {
     LoadReport report;
     std::error_code ec;
@@ -304,6 +348,7 @@ LoadReport LoadStore(const fs::path& dir, Model& m) {
     }
     if (!exists) return report;
 
+    std::vector<std::pair<std::string, bool>> loadedHolders;
     for (const bool groups : {true, false}) {
         for (const auto& [stem, path] : ListHolders(dir / (groups ? "groups" : "users"), groups ? "groups" : "users", report)) {
             if (groups ? !IsValidGroupName(stem) : !IsPlayerIdStem(stem)) {
@@ -316,26 +361,10 @@ LoadReport LoadStore(const fs::path& dir, Model& m) {
                 report.problems.push_back(stem + ": unreadable");
                 continue;
             }
-            std::string primary;
-            std::vector<Node> nodes;
-            if (!ParseHolderText(text, stem, &primary, &nodes, &report.problems)) continue;
-            std::vector<size_t> refused;
-            const bool loaded = groups ? m.LoadGroup(stem, nodes, &refused)
-                                       : m.LoadUser(stem, primary, nodes, &refused);
-            if (!loaded) {
-                report.problems.push_back(stem + ": refused");
-                continue;
-            }
-            ReportRefusedNodes(refused, nodes, stem, report);
-            if (groups) {
-                ++report.groups;
-            } else {
-                ++report.users;
-                if (m.FindGroup(primary) == nullptr)
-                    report.problems.push_back(stem + ": primary group " + primary + " does not exist");
-            }
+            if (LoadHolderText(text, stem, groups, m, report)) loadedHolders.emplace_back(stem, groups);
         }
     }
+    for (const auto& [stem, groups] : loadedHolders) ReportMissingGroups(m, stem, groups, report);
     return report;
 }
 

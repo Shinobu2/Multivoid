@@ -23,6 +23,7 @@ namespace {
 struct Published {
     Model model;
     ContextSet subject;
+    bool broken = false;  // the store had a problem: `model` is empty and every check is refused
 };
 
 // The hand-off slot: the pointer under the mutex, the flag set with release after it.
@@ -34,6 +35,7 @@ std::atomic<bool> g_published{false};
 // `default` group only), so a check is never made over nothing.
 Model g_model;
 ContextSet g_subject;
+bool g_broken = false;
 std::optional<Checker> g_checker;
 
 Checker& LiveChecker() {
@@ -46,6 +48,7 @@ Checker& LiveChecker() {
         if (adopted) {
             g_model = std::move(adopted->model);
             g_subject = std::move(adopted->subject);
+            g_broken = adopted->broken;
             g_checker.emplace(g_model);  // its cache belongs to the old model
         }
     }
@@ -72,8 +75,9 @@ void OnHostStart(const std::wstring& serverDir, std::string serverId) {
                     dir.c_str());
         } else {
             fresh->model = Model();
-            UE_LOGW("permissions: the store has %d problem(s); none of it is loaded -- only the defaults apply "
-                    "until it is fixed",
+            fresh->broken = true;
+            UE_LOGW("permissions: the store has %d problem(s); none of it is loaded -- every command but the "
+                    "host's is refused until it is fixed",
                     static_cast<int>(report.problems.size()));
         }
     }
@@ -87,6 +91,7 @@ void OnHostStart(const std::wstring& serverDir, std::string serverId) {
 bool Allows(std::string_view playerId, std::string_view node, bool defaultGranted, bool owner) {
     UE_ASSERT_GAME_THREAD("permission_host::Allows");
     Checker& checker = LiveChecker();
+    if (g_broken) return owner;  // the console keeps everything; no other caller, default-granted nodes included
     const std::shared_ptr<const Resolved> r = checker.Get(playerId, g_subject, NowSeconds());
     switch (Evaluate(*r, node, owner).value) {
         case Tristate::True: return true;
@@ -99,6 +104,7 @@ bool Allows(std::string_view playerId, std::string_view node, bool defaultGrante
 bool HoldsExplicitly(std::string_view playerId, std::string_view node) {
     UE_ASSERT_GAME_THREAD("permission_host::HoldsExplicitly");
     Checker& checker = LiveChecker();
+    if (g_broken) return false;
     const std::shared_ptr<const Resolved> r = checker.Get(playerId, g_subject, NowSeconds());
     return IsSetExplicitly(*r, node);
 }

@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace coop::permissions {
@@ -173,19 +174,87 @@ void LoadCases(CheckSink& sink) {
                "load: the nodes around a refused one load");
 }
 
+bool ReportHas(const LoadReport& r, std::string_view needle) {
+    for (const std::string& s : r.problems) {
+        if (s == needle) return true;
+    }
+    return false;
+}
+
+// What LoadStore does after listing, over texts held in memory: each file through LoadHolderText,
+// then every loaded holder through ReportMissingGroups.
+struct MemoryStore {
+    Model model;
+    LoadReport report;
+    std::vector<std::pair<std::string, bool>> loaded;
+
+    void Add(std::string_view stem, bool group, std::string_view text) {
+        if (LoadHolderText(text, stem, group, model, report)) loaded.emplace_back(std::string(stem), group);
+    }
+    void Finish() {
+        for (const auto& [stem, group] : loaded) ReportMissingGroups(model, stem, group, report);
+    }
+};
+
 void WholeStoreCases(CheckSink& sink) {
-    // A store with one bad entry among good holders: the entry's problem is in the report, and the
-    // report says do not load. A clean report loads.
-    const Parsed good = Parse(R"({"permissions":["ok.node"]})");
+    // A report with a problem is a broken store (ShouldLoad false); a report without one, and the
+    // report of a server with no store, are not.
+    MemoryStore clean;
+    clean.Add("a", true, R"({"parents":["b"],"permissions":["ok.node"]})");
+    clean.Add("b", true, R"({"permissions":["other.node"]})");
+    clean.Add(Id('a'), false, R"({"primaryGroup":"a","parents":["a"]})");
+    clean.Finish();
+    sink.Check(clean.report.problems.empty() && clean.report.groups == 2 && clean.report.users == 1 &&
+                   ShouldLoad(clean.report),
+               "whole: a clean store loads, a parent group that sorts later is no miss");
+
     const Parsed bad = Parse(R"({"permissions":[{"permission":"deny.me","value":"no"},"b"]})");
-    LoadReport clean;
-    clean.groups = 1;
-    clean.users = 2;
-    sink.Check(good.problems.empty() && ShouldLoad(clean), "whole: a report without a problem loads");
-    LoadReport dirty = clean;
-    dirty.problems = bad.problems;
-    sink.Check(HasProblem(bad, "permission entry 0 refused (value)") && !ShouldLoad(dirty),
-               "whole: one refused entry among good holders loads nothing");
+    MemoryStore oneBad;
+    oneBad.Add("a", true, R"({"permissions":["ok.node"]})");
+    oneBad.Add("b", true, R"({"permissions":[{"permission":"deny.me","value":"no"},"b"]})");
+    oneBad.Add(Id('a'), false, R"({"permissions":["ok.node"]})");
+    oneBad.Finish();
+    sink.Check(HasProblem(bad, "permission entry 0 refused (value)") && !oneBad.report.problems.empty() &&
+                   !ShouldLoad(oneBad.report),
+               "whole: one refused entry among good holders makes the store broken");
+
+    Model scratch;
+    LoadReport noStore;
+    sink.Check(noStore.problems.empty() && ShouldLoad(noStore) &&
+                   LoadStore("multivoid_selftest_no_such_store_folder", scratch).problems.empty(),
+               "whole: no store is not a broken store");
+
+    MemoryStore key;
+    key.Add("g1", true, R"({"permissions":["has space"]})");
+    key.Finish();
+    sink.Check(ReportHas(key.report, "g1: key \"has space\" refused") && !ShouldLoad(key.report) &&
+                   key.report.groups == 1,
+               "whole: a refused key is a problem and the holder still loads");
+
+    MemoryStore holder;
+    holder.Add("g1", true, "{}");
+    holder.Add("g1", true, "{}");
+    holder.Add("zz", false, "{}");
+    holder.Finish();
+    sink.Check(ReportHas(holder.report, "g1: refused") && ReportHas(holder.report, "zz: refused") &&
+                   holder.report.groups == 1 && holder.report.users == 0 && !ShouldLoad(holder.report),
+               "whole: a refused holder (a duplicate group, an invalid user id) is a problem");
+
+    MemoryStore primary;
+    primary.Add(Id('a'), false, R"({"primaryGroup":"ghost"})");
+    primary.Finish();
+    sink.Check(ReportHas(primary.report, Id('a') + ": primary group \"ghost\" does not exist") &&
+                   !ShouldLoad(primary.report),
+               "whole: a user whose primary group is missing is a problem");
+
+    MemoryStore parent;
+    parent.Add("g1", true, R"({"parents":["phantom"]})");
+    parent.Add(Id('b'), false, R"({"parents":["nowhere"]})");
+    parent.Finish();
+    sink.Check(ReportHas(parent.report, "g1: parent group \"phantom\" does not exist") &&
+                   ReportHas(parent.report, Id('b') + ": parent group \"nowhere\" does not exist") &&
+                   !ShouldLoad(parent.report),
+               "whole: a group or user naming a missing parent group is a problem");
 }
 
 void NameCases(CheckSink& sink) {
