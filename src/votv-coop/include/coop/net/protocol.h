@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 209;
+inline constexpr uint16_t kProtocolVersion = 210;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -927,6 +927,12 @@ enum class ReliableKind : uint8_t {
     // host runs the box's fix when it is broken and within the player's reach, and a refusal is answered to the
     // presser alone with the state row (ServerState). Never relayed. ServerRepairPayload.
     ServerRepair = 164,
+
+    // Host to client: one server-scope setting of the session, a row named by its KEY (the way Source's
+    // NET_SetConVar names a cvar) and its value as text. The join carries every replicated row when the
+    // slot is ready, a change carries each again. A client never sends it. Never relayed. Pre-world.
+    // ServerSettingPayload.
+    ServerSetting = 165,
 };
 
 #pragma pack(push, 1)
@@ -1962,6 +1968,20 @@ struct DeskPingVerdictPayload {
 };
 static_assert(sizeof(DeskPingVerdictPayload) == 48, "DeskPingVerdictPayload must be 48 bytes");
 static_assert(sizeof(DeskPingVerdictPayload) <= 228, "DeskPingVerdictPayload must fit the inline reliable buffer");
+
+// A server-scope setting's session value (ServerSetting): the row's key, then its value as text,
+// `keyLen + valueLen` bytes of `text`, no terminator, sent as `2 + keyLen + valueLen` bytes. The two
+// limits repeat config_registry::kServerSettingKeyMax and kServerSettingTextMax, which this catalog
+// cannot include; the sender's file asserts that they agree.
+inline constexpr uint8_t kServerSettingKeyMax  = 24;
+inline constexpr uint8_t kServerSettingTextMax = 200;
+struct ServerSettingPayload {
+    uint8_t keyLen;
+    uint8_t valueLen;
+    char    text[kServerSettingKeyMax + kServerSettingTextMax];
+};
+static_assert(sizeof(ServerSettingPayload) == 226 && sizeof(ServerSettingPayload) <= 228,
+              "ServerSettingPayload must be 226 bytes and fit the inline reliable buffer");
 
 // The shared payload of the keyed monotone-decreasing dirt scalars (WindowCleanState, GrimeState):
 // the instance's identity string (a Key for a window, a quantized position for a grime decal), the

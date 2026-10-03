@@ -390,6 +390,7 @@ set(VOTVCOOP_SOURCES
     src/coop/session/join_beacon.cpp
     src/coop/session/join_progress.cpp
     src/coop/session/join_seed.cpp
+    src/coop/session/server_settings_sync.cpp
     src/coop/session/net_pump.cpp
     src/coop/player/puppet_drive.cpp
     src/coop/props/registry_reaper.cpp

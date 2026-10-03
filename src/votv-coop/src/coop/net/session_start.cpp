@@ -450,8 +450,16 @@ bool Session::StartP2P(bool relayOnly) {
     return true;
 }
 
+void Session::SetStopListener(void (*onStopped)()) {
+    void (*expected)() = nullptr;
+    if (!stopListener_.compare_exchange_strong(expected, onStopped) && expected != onStopped)
+        UE_LOGE("session: a second stop listener was refused -- one owner");
+}
+
 void Session::Stop() {
     if (!running_.exchange(false)) return;
+    // Told once per stopped session, after running() reads false and before the teardown below.
+    if (void (*onStopped)() = stopListener_.load()) onStopped();
     // The linger flush needs RunCallbacks pumping, so connections are closed after the net thread
     // is joined and the callbacks pumped by hand: signal exit and join, close every peer with
     // linger, pump for about 200 ms so GNS flushes the queued reliable data, then destroy the poll

@@ -2,6 +2,7 @@
 // kMaxPeers-1 clients over GameNetworkingSockets, driven by one net thread (RunCallbacks and the
 // receive loop). Remote state is indexed by peerSlot, the players::Registry index (0 = the host).
 // Topology-blind past Session::Start: a LAN dial and an ICE rendezvous are driven the same way.
+// One owner may be told when a session stops (Session::SetStopListener).
 
 #pragma once
 
@@ -126,6 +127,11 @@ public:
     // is CouldNotStart with no detail when the failing site names nothing of its own.
     bool Start(const Config& cfg, Refusal* why = nullptr);
     void Stop();
+    // One function, set once at boot, called from inside Stop() the first time it stops a running
+    // session -- whoever stops it, on whatever thread. Not called from the destructor, which
+    // clears the slot before its own Stop(): at process end no other file's statics are reached.
+    // A second, different listener is refused with an error line: one owner, by design.
+    void SetStopListener(void (*onStopped)());
 
     bool running() const { return running_.load(); }
     // Aggregate connection state (any peer connected -> Connected).
@@ -501,6 +507,8 @@ private:
     Config cfg_;
     std::thread thread_;
     std::atomic<bool> running_{false};
+    // SetStopListener's one slot; a plain function pointer, the transport knows nothing of its owner.
+    std::atomic<void (*)()> stopListener_{nullptr};
     std::atomic<ConnState> state_{ConnState::Disconnected};
 
     // GNS handles as uint32_t, so this header does not include the GNS API.

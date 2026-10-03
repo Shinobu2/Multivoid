@@ -1,8 +1,9 @@
 // coop/dispatch/event_dispatch_state.cpp -- the keyed device-state reliable-kind case bodies:
 // the keyed toggle family, the keypad, the power panel, the ATV, the drone, the window and
 // grime scalars, the trash pile counters, the kerfur convert, the device claim, sleep, email,
-// inventory and voice. The client-to-host intent cases live in event_dispatch_intent.cpp and
-// the signal-pipeline cases in event_dispatch_signal.cpp; see coop/dispatch/event_dispatch.h.
+// inventory, voice, and the host's server-scope settings. The client-to-host intent cases live in
+// event_dispatch_intent.cpp and the signal-pipeline cases in event_dispatch_signal.cpp; see
+// coop/dispatch/event_dispatch.h.
 
 #include "event_dispatch.h"  // co-located private header (src tree, not include/)
 
@@ -19,6 +20,7 @@
 #include "coop/creatures/kerfus_state.h"  // HOST->CLIENT a Kerfus's on, charging and energy
 #include "coop/interactables/keypad_sync.h"
 #include "coop/world/power_panel.h"
+#include "coop/session/server_settings_sync.h"  // the host's server-scope rows on a client
 #include "coop/props/container_contents_sync.h"  // the container stack slice lane
 #include "coop/props/trash_pile_sync.h"
 #include "coop/interactables/turbine_sync.h"
@@ -561,6 +563,11 @@ bool HandleStateEvent(net::Session& session,
         coop::kerfus_state::OnState(p);
         break;
     }
+    case net::ReliableKind::ServerSetting:
+        // The host's session value of one server-scope row; the module checks length, role, sender
+        // and row. coop::server_settings_sync.
+        coop::server_settings_sync::HandleServerSetting(session, msg);
+        break;
     default:
         return false;  // not a state-family kind -> event_feed tries the next family
     }

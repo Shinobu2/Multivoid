@@ -42,7 +42,12 @@ static_assert(static_cast<int>(Lane::Count) == 3,
 
 }  // namespace
 
-Session::~Session() { Stop(); }
+Session::~Session() {
+    // The listener's owner may be gone at process end, and the game's own quit runs no orderly
+    // shutdown: clear the slot first, so this Stop() reaches no other file's statics.
+    stopListener_.store(nullptr);
+    Stop();
+}
 
 bool Session::TryGetReliable(ReliableMessage& out) {
     std::lock_guard<std::mutex> lk(reliableInboxMutex_);

@@ -322,6 +322,9 @@ inline bool IsPreWorldSendableKind(ReliableKind k) {
     // The join beacon is pre-world by definition: every phase it reports happens before the joiner
     // has a world, and the receiver only stamps a timestamp and two numbers.
     case ReliableKind::JoinPhaseNote:
+    // A server-scope setting is pre-world by design: the joiner's snapshot goes when its slot is
+    // ready, and the receiver only fills the config layer's session values, touching no world.
+    case ReliableKind::ServerSetting:
     // PropDriveEnd stays gated: it names a prop by eid, which a joiner has only after its world is up,
     // and the world-ready replay re-sends every driven prop's pose in any case.
         return true;
