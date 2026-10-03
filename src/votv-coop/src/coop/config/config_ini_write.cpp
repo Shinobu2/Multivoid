@@ -1,6 +1,7 @@
 // coop/config/config_ini_write.cpp -- the guarded multivoid.ini mutation engine: the skeleton
-// seeder, the single-key writer, the owner reformat and the keep-line dedup. Shares the reader
-// core's primitives through config_internal.h; every public entry holds the one ini mutex.
+// seeder, the single-key writer, the reset's line removal, the owner reformat and the keep-line
+// dedup. Shares the reader core's primitives through config_internal.h; every public entry holds
+// the one ini mutex.
 // The destruction guards: never rebuild from a file that exists but cannot be read cleanly (a
 // lock, a mid-stream error, bytes that are not text), and every rebuild goes .new, checked
 // writes, then an atomic move; a locked-file write once rebuilt the host's ini from an empty line
@@ -38,8 +39,8 @@ bool IsSectionHeader(const std::string& line, std::string& nameOut) {
 }
 
 // The checked .new-then-atomic-swap tail shared by every file rebuild (the single-key write,
-// the reformat, the keep-line dedup). Every write is checked before the swap: a disk-full .new
-// must never replace the good ini.
+// the reset's line removal, the reformat, the keep-line dedup). Every write is checked before
+// the swap: a disk-full .new must never replace the good ini.
 bool AtomicWriteLines(const std::wstring& path, const std::vector<std::string>& lines,
                       const char* what) {
     const std::wstring tmp = path + L".new";
@@ -287,13 +288,20 @@ bool WriteIniValue(const config_registry::IdentityRow& row, const char* value) {
 // Drops every line whose key is `key` (case-insensitive): the keep-line's scan-and-rewrite
 // without a kept line, because a reset returns the row to whatever answers below the file. No
 // file means no line (true, nothing written); a file that cannot be read whole is left untouched
-// (false).
+// (false). A transient sharing lock is tried again as the single-key write tries it.
 static bool RemoveKeyLinesAt(const std::wstring& path, const char* key, int& removed) {
     removed = 0;
     std::vector<std::string> lines;
     IniFault fault = IniFault::None;
-    const IniScan scan =
-        internal::ScanIniFile(path, [&](const std::string& l) { lines.push_back(l); }, &fault);
+    IniScan scan = IniScan::Absent;
+    for (int attempt = 0; attempt < 5; ++attempt) {  // transient sharing locks
+        lines.clear();
+        scan = internal::ScanIniFile(path, [&](const std::string& l) { lines.push_back(l); },
+                                     &fault);
+        // A lock passes; bytes that are not text stay, so only a failed read is tried again.
+        if (scan != IniScan::Unreadable || fault != IniFault::ReadFailed) break;
+        ::Sleep(20);
+    }
     if (scan == IniScan::Absent) return true;
     if (scan != IniScan::Ok) {
         UE_LOGW("config: reset of '%s' SKIPPED -- multivoid.ini %s; nothing deleted", key,
