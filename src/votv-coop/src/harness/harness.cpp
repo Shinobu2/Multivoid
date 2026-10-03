@@ -515,8 +515,9 @@ void Start() {
     coop::nameplate::SetInitialLocalVisible(cfg::ResolveFlag(coop::config_registry::rows::nameplate));
     // The persisted nick colour (ini nick_color=RRGGBB); nick_color owns the parse.
     coop::nick_color::SetInitialLocalFromIniHex(cfg::ResolveString(coop::config_registry::rows::nick_color));
-    // The modules that follow a config row subscribe once, here, before any pane draws; the seeds
-    // above have read the rows, and every later set reaches the modules through these.
+    // The modules that follow a config row subscribe once, here, before any pane draws; the nameplate
+    // and nick-colour seeds above have read their rows, the two flag modules load theirs on first
+    // use, and every later set reaches all four through these subscriptions.
     coop::nameplate::SubscribeRow();
     coop::nick_color::SubscribeRow();
     coop::peer_action_feed::SubscribeRow();

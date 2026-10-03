@@ -1,8 +1,9 @@
-// coop/dev/settings_drill.h -- [dev] the host sets one of its own rows through SetValue, resets it, and
-// the module shows it followed each time. The step is SET -> PROBE -> RESET -> PROBE, host only,
-// started once the client's world is up: the probe is posted to the game thread right after the set,
-// the queue is FIFO and the set queued the row's subscribers first, so when the probe runs the
-// subscriber has run -- no clock, no tick count. Tagged [SETTINGS-DRILL]; the [dev] settings_drill row.
+// coop/dev/settings_drill.h -- [dev] the host sets its own rows through SetValue (one row per step; the
+// flags token sets two), resets them, and the module that follows each row shows it followed both times.
+// The step is SET -> PROBE -> RESET -> PROBE, host only, started once the client's world is up: the
+// probe is posted to the game thread right after the set, the queue is FIFO and the set queued the
+// rows' subscribers first, so when the probe runs the subscribers have run -- no clock, no tick count.
+// Tagged [SETTINGS-DRILL]; the [dev] settings_drill row.
 
 #pragma once
 
