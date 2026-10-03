@@ -38,9 +38,9 @@ char g_micCurrent[160] = {};
 char g_outCurrent[160] = {};
 char g_pttKey[32] = {};
 
-// Each slider's handle value while it is held, and whether it is held. Atomics because Close()
-// runs on three threads and touches none of this: a drag that the panel's closing abandons is
-// committed by CommitAbandonedDrag on the render thread, from these.
+// Each slider's handle value while it is held, and whether it is held. Written by Render and read
+// by CommitAbandonedDrag, both on the render thread; Close(), which runs on three threads, never
+// touches them. A drag the panel's closing abandons is committed from these.
 std::atomic<float> g_pendingThreshold{0.0f};
 std::atomic<float> g_pendingGain{0.0f};
 std::atomic<float> g_pendingVolume{0.0f};
@@ -192,9 +192,14 @@ void Render() {
         if (ImGui::RadioButton("Voice activation", &mode, 1))
             coop::config::SetValue(::coop::config_registry::rows::voice_mode, "activation");
         // The three sliders: the drag previews live through the voice_chat setters, and the
-        // release commits the row (CommitSlider), whose subscriber is the apply. Each slider's
-        // range is the panel's own, narrower than its row's; AlwaysClamp holds a typed value
-        // (Ctrl+click) to it before the preview applies it.
+        // release commits the row (CommitSlider), whose subscriber is the apply. The release value
+        // is the pending atomic (the handle's last active frame), never the frame's snapshot float.
+        // Each slider's range is the panel's own, narrower than its row's; AlwaysClamp holds a
+        // typed value (Ctrl+click) to it before the preview applies it.
+        // MTA keeps the in-memory setting as the live value, saved on OK and reverted on Cancel
+        // (CSettings.cpp:5568-5575, :3888-3889, :3904-3916); Source's cvarslider writes the cvar
+        // only at drag end (cvarslider.cpp:310-334) and we follow that: the row is the one apply
+        // path (SETTINGS_ARC 3.1), so the preview is not a second path to it.
         if (mode == 1) {
             float thr = s.thresholdDb;
             if (ImGui::SliderFloat("Threshold", &thr, -100.0f, 0.0f, "%.0f dB",
@@ -206,7 +211,8 @@ void Render() {
             }
             if (ImGui::IsItemDeactivatedAfterEdit()) {
                 g_draggingThreshold.exchange(false);
-                CommitSlider(::coop::config_registry::rows::voice_threshold_db, thr, "%.0f");
+                CommitSlider(::coop::config_registry::rows::voice_threshold_db,
+                             g_pendingThreshold.load(), "%.0f");
             } else if (ImGui::IsItemDeactivated()) {
                 g_draggingThreshold.exchange(false);
             }
@@ -235,7 +241,8 @@ void Render() {
         }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             g_draggingGain.exchange(false);
-            CommitSlider(::coop::config_registry::rows::voice_mic_gain_db, gain, "%.0f");
+            CommitSlider(::coop::config_registry::rows::voice_mic_gain_db, g_pendingGain.load(),
+                         "%.0f");
         } else if (ImGui::IsItemDeactivated()) {
             g_draggingGain.exchange(false);
         }
@@ -249,7 +256,7 @@ void Render() {
         }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             g_draggingVolume.exchange(false);
-            CommitSlider(::coop::config_registry::rows::voice_volume, vol, "%.2f");
+            CommitSlider(::coop::config_registry::rows::voice_volume, g_pendingVolume.load(), "%.2f");
         } else if (ImGui::IsItemDeactivated()) {
             g_draggingVolume.exchange(false);
         }

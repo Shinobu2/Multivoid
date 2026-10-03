@@ -4,10 +4,10 @@
 // interactive surface (it joins the input-capture set); the open state latches
 // until V / the window's X closes it.
 //
-// The panel sets a row and nothing else: a device/mode change is applied by the row's subscriber
-// (voice_chat::SubscribeRows), which reopens the devices on the next game tick, never here. The
-// three sliders preview a drag live through voice_chat's atomic setters and commit their row on
-// release. Render thread only.
+// Rows are applied by their subscribers (voice_chat::SubscribeRows): a device/mode change reopens
+// the devices on the next game tick, never here. The panel calls voice_chat directly only for the
+// mute toggle and the sliders' live drag preview (its atomic setters); each slider commits its row
+// on release. Render thread only.
 
 #pragma once
 
