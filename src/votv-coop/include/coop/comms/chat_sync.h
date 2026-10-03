@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace coop::net {
 class Session;
@@ -34,6 +35,15 @@ void Install(coop::net::Session* session);
 // True while a session exists + is connected -- the T key only opens the chat
 // input during a coop session (chat is meaningless solo). Any thread.
 bool SessionActive();
+
+// The one shaping a line takes before the lobby records it: a strict UTF-8 decode check, then
+// coop::text::SanitizeUtf8, then trim and the payload byte cap. False (and `*out` empty) when the
+// input is not well-formed UTF-8 or nothing is left. Pure; any thread.
+bool ShapeChatLine(std::string_view raw, std::string* out);
+
+// The un-gated selftest of ShapeChatLine on pinned lines, run once per session start. Logs
+// `chat-line selftest: ALL PASS (N checks)` or one `FAIL` line per failing case.
+bool RunChatLineSelftest();
 
 // Queue a chat line. UTF-8 in, trimmed and length-capped inside; an empty or whitespace-only line
 // is dropped. On the HOST this commits and broadcasts; on a CLIENT it sends the intent and waits

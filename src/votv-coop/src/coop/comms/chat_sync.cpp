@@ -20,6 +20,8 @@
 #include <atomic>
 #include <cstring>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace coop::chat_sync {
 namespace {
@@ -145,26 +147,23 @@ void SendLine(coop::net::Session& s, int toSlot, uint32_t lineSeq, uint16_t spea
 // Host: commit `raw` as spoken by `slot`, broadcast it, and render it locally.
 //
 // THE ONE GATE for the lobby's record: the host's own line (QueueSend) and a client's (OnReliable)
-// both arrive here raw, and nothing is committed that did not pass the same steps, in this order.
-// Decode strictly (SanitizeUtf8 requires well-formed input: dropping a byte from an ill-formed run
-// can splice its neighbours into a separator), SANITIZE, then TRIM and cap. Trim comes after
-// sanitize so a space between two dropped separators is edge whitespace and not text; trimmed
-// first, it would survive as a one-space row every peer and later joiner renders. A line empty
-// after both is refused here: no row, no lineSeq, no broadcast.
+// both arrive here raw, and nothing is committed that did not pass ShapeChatLine. A line it
+// refuses is refused here: no row, no lineSeq, no broadcast.
 void AuthorAndBroadcast(uint8_t slot, const std::string& raw) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->running()) return;
 
-    std::wstring decoded;
-    if (!coop::text::FromUtf8Strict(raw.data(), raw.size(), &decoded)) {
-        UE_LOGW("chat: refused a line from slot %u (%zu byte(s)) -- ill-formed UTF-8",
-                static_cast<unsigned>(slot), raw.size());
-        return;
-    }
-    const std::string text = TrimAndCap(coop::text::SanitizeUtf8(raw.data(), raw.size()));
-    if (text.empty()) {
-        UE_LOGI("chat: refused a line from slot %u (%zu byte(s)) -- nothing left after "
-                "sanitising and trimming", static_cast<unsigned>(slot), raw.size());
+    std::string text;
+    if (!ShapeChatLine(raw, &text)) {
+        // Refusal path only: which of ShapeChatLine's two refusals it was, named in the log so a
+        // drill can tell them apart.
+        std::wstring decoded;
+        if (!coop::text::FromUtf8Strict(raw.data(), raw.size(), &decoded))
+            UE_LOGW("chat: refused a line from slot %u (%zu byte(s)) -- ill-formed UTF-8",
+                    static_cast<unsigned>(slot), raw.size());
+        else
+            UE_LOGI("chat: refused a line from slot %u (%zu byte(s)) -- nothing left after "
+                    "sanitising and trimming", static_cast<unsigned>(slot), raw.size());
         return;
     }
 
@@ -191,6 +190,70 @@ void AuthorAndBroadcast(uint8_t slot, const std::string& raw) {
 }
 
 }  // namespace
+
+// The steps, in this order: decode strictly (SanitizeUtf8 requires well-formed input: dropping a
+// byte from an ill-formed run can splice its neighbours into a separator), SANITIZE, then TRIM and
+// cap. Trim comes after sanitize so a space between two dropped separators is edge whitespace and
+// not text; trimmed first, it would survive as a one-space row every peer and later joiner renders.
+bool ShapeChatLine(std::string_view raw, std::string* out) {
+    out->clear();
+    std::wstring decoded;
+    if (!coop::text::FromUtf8Strict(raw.data(), raw.size(), &decoded)) return false;
+    std::string text = TrimAndCap(coop::text::SanitizeUtf8(raw.data(), raw.size()));
+    if (text.empty()) return false;
+    *out = std::move(text);
+    return true;
+}
+
+bool RunChatLineSelftest() {
+    int pass = 0, total = 0;
+    auto check = [&](bool ok, const char* what) {
+        ++total;
+        if (ok) { ++pass; return; }
+        UE_LOGE("chat-line selftest FAIL: %s", what);
+    };
+    const size_t cap = sizeof(coop::net::ChatMessagePayload{}.text);
+    std::string out;
+    auto refused = [&](const std::string& in) { return !ShapeChatLine(in, &out) && out.empty(); };
+    auto shaped = [&](const std::string& in, const std::string& want) {
+        return ShapeChatLine(in, &out) && out == want;
+    };
+
+    check(cap == 203, "the payload cap is 203 bytes");
+    check(refused("\xE2\x80\xA8"), "a line of only U+2028 is refused");
+    check(refused("\x7F"), "a line of only DEL is refused");
+    check(refused("\xE2\x80\xA8 \xE2\x80\xA8"),
+          "U+2028, a space and U+2028 leave nothing: the space is edge whitespace");
+    check(shaped("  hi  ", "hi"), "edge whitespace is trimmed");
+    check(shaped("a\xE2\x80\xA8" "b", "ab"), "U+2028 inside a line is dropped");
+    check(shaped("a\xC2\x85" "b", "ab"), "U+0085 inside a line is dropped");
+    check(shaped("a\tb", "a\tb"), "an inner TAB is kept");
+    check(refused(std::string("\xE2\x80\x01\xA8", 4)),
+          "an ill-formed sequence is refused whole, not repaired into U+2028");
+    {
+        const std::string longLine(300, 'x');
+        check(ShapeChatLine(longLine, &out) && out.size() == cap && out == longLine.substr(0, cap),
+              "a 300-byte ASCII line is capped to the payload's bytes");
+    }
+    {
+        // 202 ASCII bytes then sixteen 3-byte characters (U+20AC): 250 bytes, ending in a 3-byte
+        // character, and the first of them spans bytes 202..204, across the 203-byte cap.
+        std::string straddle(202, 'x');
+        for (int i = 0; i < 16; ++i) straddle += "\xE2\x82\xAC";
+        std::wstring wide;
+        const bool ok = ShapeChatLine(straddle, &out);
+        check(straddle.size() == 250 && ok && out.size() <= cap && out == std::string(202, 'x') &&
+              coop::text::FromUtf8Strict(out.data(), out.size(), &wide),
+              "a character straddling the cap is cut whole, leaving well-formed UTF-8");
+    }
+
+    if (pass == total) {
+        UE_LOGI("chat-line selftest: ALL PASS (%d checks)", total);
+        return true;
+    }
+    UE_LOGE("chat-line selftest: %d/%d checks passed", pass, total);
+    return false;
+}
 
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);

@@ -9,6 +9,7 @@
 #include "harness/world_boot.h"
 
 #include "coop/commands/commands_selftest.h"
+#include "coop/comms/chat_sync.h"
 #include "coop/config/config.h"
 #include "coop/creatures/npc_sync.h"
 #include "coop/dev/dev_gate.h"
@@ -203,6 +204,10 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // And the newest-wins latch every received stream keeps: no LAN run reorders a datagram, so the
     // batch that arrives behind one already taken is refused here, on pinned sequences.
     coop::net::stream_slot::RunSelftest();
+    // And the chat line's one shaping, which decides what the whole lobby records: a line of only
+    // separators, a space between two of them, a cap landing mid-character -- none of which a typed
+    // drill line reaches.
+    coop::chat_sync::RunChatLineSelftest();
     // And the lobby password inside it: if the salt were ignored, every locked lobby would open to
     // one table, and the only visible difference is that joins keep succeeding. The negatives are
     // the test: one password under two host keys must not collide, an empty password must refuse to
