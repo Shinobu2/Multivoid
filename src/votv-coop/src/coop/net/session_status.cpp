@@ -535,11 +535,18 @@ void Session::HandleConnStatusChanged(void* info) {
             // would seat us on an unchallenged host.
             peer_admission::ClientReset();
         }
+        // The close path is one of the exclusive claimants of a slot, like Kick, KickWithToken and
+        // LeaveHost: it takes the slot by CAS on the handle it found. A kick that already took it
+        // runs the whole per-slot teardown, so this path then does only what concerns the handle.
+        bool owned = false;
         if (slot >= 0) {
             // GEN: clear -- deferred to the END of this close path, after the inbox erase: its
             // drop to 0 is what tells the ledger the slot emptied, and clearing it here would let
             // a still-queued reliable from this peer dispatch after the teardown.
-            peerConns_[slot].store(0);
+            uint32_t expect = hConn;
+            owned = peerConns_[slot].compare_exchange_strong(expect, 0);
+        }
+        if (owned) {
             peerLanesConfigured_[slot].store(false, std::memory_order_release);
             // The departing peer's queued reliable state dies with it, and so does the link
             // measurement: the next occupant's GNS counters start at zero, so ours must too.
@@ -553,11 +560,11 @@ void Session::HandleConnStatusChanged(void* info) {
 
         // Per-slot reset, so a reconnecting peer (seq from 0) is not stale-dropped.
         { std::lock_guard<std::mutex> lk(remoteMutex_);
-          if (slot >= 0) ResetPeerRemoteState(slot); }
+          if (owned) ResetPeerRemoteState(slot); }
 
         // Drop the reliables still queued from the departing peer: a PropSpawn from a ghost landing
         // after the slot cleared could never be destroyed.
-        if (slot >= 0) {
+        if (owned) {
             std::lock_guard<std::mutex> lk(reliableInboxMutex_);
             for (auto it = reliableInbox_.begin(); it != reliableInbox_.end();) {
                 if (it->senderPeerSlot == slot) it = reliableInbox_.erase(it);
@@ -567,8 +574,10 @@ void Session::HandleConnStatusChanged(void* info) {
 
         // The generation clear is the last per-slot write of the close path, after the inbox erase
         // (under a different mutex), so a reader that sees 0 sees an inbox already drained of this
-        // peer, and FindFreePeerSlotForClient hands the slot out only after it.
-        if (slot >= 0) {
+        // peer, and FindFreePeerSlotForClient hands the slot out only after it. It runs only for
+        // the path that claimed the slot: a racing kick's teardown owns the clear otherwise, and a
+        // second one would wipe a successor seated in between.
+        if (owned) {
             SetProvedGuidForSlot(slot, 0, std::string());  // the identity dies with the seat
             peerGenBySlot_[slot].store(0, std::memory_order_release);
         }
@@ -699,8 +708,8 @@ bool Session::KickClaimed(int peerSlot, uint32_t hConn, EndReason code, const ch
     }
 
     // A connection we close is not closed by its peer, so the close path's teardown does not run for
-    // it and is replicated here; the exchange(0) above makes a racing callback's FindPeerSlotForConn
-    // return -1, so the teardown runs exactly once.
+    // it and is replicated here; the claim above makes a racing callback's FindPeerSlotForConn
+    // return -1, or its own claim fail if it found the slot first, so the teardown runs exactly once.
     { std::lock_guard<std::mutex> lk(remoteMutex_); ResetPeerRemoteState(peerSlot); }
     { std::lock_guard<std::mutex> lk(reliableInboxMutex_);
       for (auto it = reliableInbox_.begin(); it != reliableInbox_.end();) {
