@@ -185,8 +185,8 @@ std::wstring AccountKeyFileName(const uint8_t* sid, size_t n) {
     return name + L".key";
 }
 
-// This account's key for an install whose own key file another account holds (minted here), read
-// first when the install has no key file: beside it, named by a hash of this account's SID, so two
+// This account's key for an install whose own key file another account holds (minted here), read,
+// before anything is minted, when the install has no key file: beside it, named by a hash of this account's SID, so two
 // accounts on one install stay two players and the game folder holds everything the mod writes.
 // Empty when nothing resolves.
 std::wstring AccountKeyFilePath() {
@@ -227,7 +227,8 @@ bool ApplyKeyFileAcl(const std::wstring& path) {
 
 // What a read found. Denied is the case the fallback exists for: the file is there and this
 // account may not read it, which is another account's file. Malformed is a file that is not a
-// key (a truncated or edited one); it is minted over, and the log says so. Unreadable is any
+// key (a truncated or edited one); it gives way to a new key (written over it, except an account's
+// own file while the install has none, whose new key goes to the install's path), and the log says so. Unreadable is any
 // other failure to open or read a file that may well be there (a sharing violation from a scanner
 // holding it, a device error): nothing is written over it, and this session runs on a temporary
 // identity, because minting over a durable key that a transient error hid is the one loss this
@@ -545,7 +546,7 @@ bool RunSelftest() {
               "SHA-256(\"\") != the published digest");
     }
 
-    // 4-9: Ed25519 against RFC 8032 section 7.1 vectors 1 and 2 -- the primitive the
+    // 4-13: Ed25519 against RFC 8032 section 7.1 vectors 1 and 2 -- the primitive the
     // whole admission decision rests on. A tamper arm follows each, because a
     // verifier that accepts everything passes every positive test there is.
     struct Kat { const char* sk; const char* pk; const char* msg; const char* sig; };
@@ -584,7 +585,7 @@ bool RunSelftest() {
               "ed25519_sign_open ACCEPTED a tampered signature");
     }
 
-    // 10-13: the decision this module actually exports -- sign with our own key, verify against the
+    // 14-17: the decision this module actually exports -- sign with our own key, verify against the
     // identity bytes a receiver would read off a connection, and refuse both a flipped signature
     // and a different signer's key. That last one is the attack: GNS binds a cert's identity to
     // nothing, so a peer CAN claim a victim's key -- and this is the check that refuses it.
@@ -605,7 +606,7 @@ bool RunSelftest() {
         check(GuidForPublicKey(g_pub) == g_guid && g_guid.size() == 32,
               "the derived guid is not stable / not 32 chars");
 
-        // 14-16: the ROUTING form is the same value as the signing form. This is
+        // 18-20: the ROUTING form is the same value as the signing form. This is
         // asserted because the two are produced by different code -- our own hex
         // in Load(), GNS's in ToString() -- and a divergence would not fail
         // anything visibly: the joiner would simply dial an identity nobody has
@@ -621,8 +622,8 @@ bool RunSelftest() {
               std::memcmp(parsed.m_genericBytes, g_pub.data(), kPubKeyBytes) == 0,
               "our rendered identity does not parse back to our own public key");
 
-        // 17-20: this account's key path resolves exactly when its SID does, is stable, and sits
-        // beside the install under a 16-hex id; 20 pins the name to the SID alone with a known
+        // 21-24: this account's key path resolves exactly when its SID does, is stable, and sits
+        // beside the install under a 16-hex id; 24 pins the name to the SID alone with a known
         // answer (the SYSTEM SID), since two accounts on one install are two players only while
         // the name is derived from the account and from nothing else.
         const std::wstring a = AccountKeyFilePath();
@@ -631,6 +632,8 @@ bool RunSelftest() {
         if (!a.empty()) {
             const std::wstring exe = ue_wrap::paths::ExeDir();
             check(a == AccountKeyFilePath() && a != InstallKeyFilePath() &&
+                  a == exe + L"\\" + AccountKeyFileName(KeyFileAcl().userSid.data(),
+                                                      KeyFileAcl().userSid.size()) &&
                   a.rfind(exe + L"\\multivoid_identity_", 0) == 0 &&
                   a.size() == exe.size() + 20 + 16 + 4 &&
                   a.compare(a.size() - 4, 4, L".key") == 0,
