@@ -463,17 +463,22 @@ void RenderFontPref() {
     // one-frame ~100 ms hitch).
     ImGui::Spacing();
     ImGui::SeparatorText("UI size");
-    static float sPending = -1.f;   // -1 = mirror the live value
-    if (sPending < 0.f) sPending = ui::scale::UserScale();
+    // sPending is the handle while it is dragged; sSeen is the applied value it last mirrored. The
+    // render thread applies the row on its next frame, so the slider follows the applied value.
+    static float sPending = 0.f;
+    static float sSeen = -1.f;      // never a valid scale -> the first frame syncs
     ImGui::SetNextItemWidth(S(260.f));
     ImGui::SliderFloat("##uiscale", &sPending, ui::scale::UserScaleMin(),
                        ui::scale::UserScaleMax(), "%.2fx");
+    if (!ImGui::IsItemActive() && ui::scale::UserScale() != sSeen)
+        sPending = sSeen = ui::scale::UserScale();
     if (ImGui::IsItemDeactivatedAfterEdit()) {
-        ui::scale::SetUserScale(sPending);
+        const auto& scaleRow = *::coop::config_registry::rows::ui_scale.row;
+        if (sPending < static_cast<float>(scaleRow.lo)) sPending = static_cast<float>(scaleRow.lo);
+        if (sPending > static_cast<float>(scaleRow.hi)) sPending = static_cast<float>(scaleRow.hi);
         char v[16];
-        std::snprintf(v, sizeof(v), "%.2f", ui::scale::UserScale());
-        coop::config::SetValue(coop::config_registry::rows::ui_scale, v);
-        sPending = ui::scale::UserScale();  // reflect the clamp
+        std::snprintf(v, sizeof(v), "%.2f", sPending);
+        coop::config::SetValue(::coop::config_registry::rows::ui_scale, v);
     }
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");

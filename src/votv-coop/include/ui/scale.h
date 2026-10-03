@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace ui::scale {
 
 // Feed the current client-area size (render thread, once per frame). Marks a
@@ -25,10 +27,21 @@ void NoteViewport(float width, float height);
 float Ui();
 
 // The player's "UI size" preference (multivoid.ini ui.scale, default 1.25). Multiplies the
-// resolution factor; the F1 > Cosmetics > Interface slider drives it live.
+// resolution factor; the F1 > Cosmetics > Interface slider sets the ui.scale row and the render
+// thread applies it (ApplyRowIfChanged).
 float UserScale();
-void  SetUserScale(float s);   // clamps to the ui.scale registry row's [lo, hi]
 void  LoadUserPrefOnce();      // read ui.scale from the ini (bring-up, latched)
+
+// Follow the `ui.scale` row: once, at boot.
+void SubscribeRow();
+
+// Render thread, once per frame: when the row changed since the last frame (one atomic exchange),
+// re-resolve it and apply.
+void ApplyRowIfChanged();
+
+// How many times the row was applied since boot; any thread. The settings drill's readiness.
+uint32_t RowApplies();
+
 // The pref clamp range -- owned by the ui.scale registry row (arc 2); the F1
 // slider consumes these so the slider and the clamp can never diverge.
 float UserScaleMin();

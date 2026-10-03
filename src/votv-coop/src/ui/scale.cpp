@@ -5,6 +5,9 @@
 #include "coop/config/config.h"
 #include "coop/config/config_registry.h"
 
+#include "ue_wrap/core/log.h"
+
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -39,6 +42,11 @@ float g_scale = 1.25f;   // published combined factor = min(res * user, cap)
 bool  g_rebuild = false;
 bool  g_prefLoaded = false;
 
+// Handed from the game thread (the row's subscriber stores true) to the render thread (the frame
+// consumes it); the render-thread data above is never written from the game thread.
+std::atomic<bool>     g_rowChanged{false};
+std::atomic<uint32_t> g_rowApplies{0};
+
 // VIEWPORT DEBOUNCE. The rebuild is edge-triggered off a CONTINUOUS signal, the live client height,
 // which was tolerable only while a bake cost 5-16 ms. It now costs 58-80 ms, on the RENDER THREAD
 // inside the Present detour, so the whole game stalls for each one.
@@ -65,6 +73,18 @@ void Recombine() {
         g_rebuild = true;
     }
 }
+
+// Render thread. Clamps to the row's [lo, hi]; its callers are ApplyRowIfChanged and the boot read.
+void SetUserScale(float s) {
+    if (s < UserMin()) s = UserMin();
+    if (s > UserMax()) s = UserMax();
+    if (s == g_user) return;
+    g_user = s;
+    Recombine();
+}
+
+// Game thread, through the config notifier: only the flag is stored.
+void OnScaleRowChanged() { g_rowChanged.store(true, std::memory_order_release); }
 
 }  // namespace
 
@@ -97,14 +117,6 @@ float UserScale() { return g_user; }
 float UserScaleMin() { return UserMin(); }
 float UserScaleMax() { return UserMax(); }
 
-void SetUserScale(float s) {
-    if (s < UserMin()) s = UserMin();
-    if (s > UserMax()) s = UserMax();
-    if (s == g_user) return;
-    g_user = s;
-    Recombine();
-}
-
 void LoadUserPrefOnce() {
     if (g_prefLoaded) return;
     g_prefLoaded = true;
@@ -113,6 +125,19 @@ void LoadUserPrefOnce() {
     // path fed 99 into the clamp and silently became 1.75, which nobody asked for.
     SetUserScale(coop::config::ResolveFloat(coop::config_registry::rows::ui_scale));
 }
+
+void SubscribeRow() {
+    coop::config::Subscribe(::coop::config_registry::rows::ui_scale, &OnScaleRowChanged);
+}
+
+void ApplyRowIfChanged() {
+    if (!g_rowChanged.exchange(false, std::memory_order_acquire)) return;
+    SetUserScale(coop::config::ResolveFloat(::coop::config_registry::rows::ui_scale));
+    g_rowApplies.fetch_add(1, std::memory_order_relaxed);
+    UE_LOGI("ui::scale: row applied (user %.2f)", g_user);
+}
+
+uint32_t RowApplies() { return g_rowApplies.load(std::memory_order_relaxed); }
 
 void RequestRebuild() { g_rebuild = true; }
 
