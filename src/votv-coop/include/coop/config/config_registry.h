@@ -117,6 +117,28 @@ const char* RetiredKeyNote(const char* key);
 bool IsCredentialKey(const char* key);
 const char* const* CredentialKeys(size_t& count);
 
+// A row's scope, declared with the row by CFG_ROWFLAGS in the row list: kRowServer = it belongs to
+// the server being hosted; kRowReplicated = its session value is sent to every client (Source's
+// FCVAR_REPLICATED, iconvar.h:55-62); replicated implies server. A replicated row is never a
+// credential and its key and value fit the wire: static_asserts in config_registry.cpp.
+enum RowFlag : unsigned {
+    kRowServer = 1u << 0,
+    kRowReplicated = 1u << 1,
+};
+
+// The wire's two limits for a replicated row, the registry's facts so that this file needs no
+// other header.
+// A replicated row's key, at most (bytes).
+inline constexpr size_t kServerSettingKeyMax = 24;
+// A replicated row's value, at most (bytes).
+inline constexpr size_t kServerSettingTextMax = 200;
+
+// The flags of `row` (a pointer into the row table; null or any other pointer: 0), and the two
+// questions asked of them. Reads of one constexpr array, no walk.
+unsigned RowFlags(const Row* row);
+bool IsServerScope(const Row* row);
+bool IsReplicated(const Row* row);
+
 // The typed handles.
 
 namespace detail {
@@ -176,7 +198,9 @@ namespace rows {
 #define CFG_STRING(ident, key, section, defS, envVar, seeded, desc) extern const StringRow ident;
 #define CFG_IDENTITY(ident, key, section, desc) extern const IdentityRow ident;
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) extern const EnumRow ident;
+#define CFG_ROWFLAGS(ident, flags)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
 #undef CFG_FLOAT
@@ -215,7 +239,9 @@ inline constexpr int kFontRoleDefaultFamily[] = {
 #define CFG_STRING(ident, key, section, defS, envVar, seeded, desc)
 #define CFG_IDENTITY(ident, key, section, desc)
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) defFam,
+#define CFG_ROWFLAGS(ident, flags)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
 #undef CFG_FLOAT

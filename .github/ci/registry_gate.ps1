@@ -76,7 +76,9 @@ $rowFiles = @($incPath)
 if (Test-Path $devIncPath) { $rowFiles += $devIncPath }
 foreach ($line in ($rowFiles | ForEach-Object { Get-Content $_ })) {
     if ($line -cmatch '^\s*CFG_(?<kind>[A-Z_]+)\(\s*(?<ident>[A-Za-z0-9_]+)\s*,') {
-        if ($Matches['kind'] -ceq 'FONTROLE') { $fontRoleIdents.Add($Matches['ident']) }
+        # ROWFLAGS marks a row declared above it (config_registry_rows.inc); it is not a row.
+        if ($Matches['kind'] -ceq 'ROWFLAGS') { }
+        elseif ($Matches['kind'] -ceq 'FONTROLE') { $fontRoleIdents.Add($Matches['ident']) }
         else { $rowIdents.Add($Matches['ident']) }
     }
 }

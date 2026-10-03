@@ -1,16 +1,20 @@
 // coop/config/config_registry.cpp -- the declarative per-key row table.
 //
 // See config_registry.h. The row LIST lives in config_registry_rows.inc (ONE
-// list); this TU expands it three times -- index enum, Row table, typed handle
-// definitions -- so the artifacts cannot drift. ValidateRows() is the
-// permanent constexpr compile gate on the table's own coherence (arc 3).
+// list); this TU expands it six times -- index enum, Row table, font-role row
+// indices, row flags, typed handle definitions, font-role handle array -- so
+// the artifacts cannot drift. ValidateRows() is the permanent constexpr
+// compile gate on the table's own coherence (arc 3); the flag asserts below
+// the credential list are the same gate for the rows' scope marks.
 
 #include "coop/config/config_registry.h"
 
 #include "coop/net/connect_history.h"  // History::kMaxStamps, the cap row's upper bound
 #include "coop/net/protocol.h"  // kDefaultPort (row defaults ALIAS the one owning constant)
 
+#include <array>
 #include <cstring>
+#include <functional>
 #include <string>
 
 namespace coop::config_registry {
@@ -41,7 +45,9 @@ enum RowIndex : size_t {
 #define CFG_STRING(ident, key, section, defS, envVar, seeded, desc) RowIndex_##ident,
 #define CFG_IDENTITY(ident, key, section, desc) RowIndex_##ident,
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) RowIndex_##ident,
+#define CFG_ROWFLAGS(ident, flags)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
 #undef CFG_FLOAT
@@ -72,7 +78,9 @@ constexpr Row kRows[] = {
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) \
     Row{key, "ui", Kind::Enum, kNoRange, kNoRange, kFontFamilyTokensJoined, nullptr, false, false, 0, 0.0f, \
         kFontFamilyTokens[defFam], desc},
+#define CFG_ROWFLAGS(ident, flags)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
 #undef CFG_FLOAT
@@ -84,6 +92,35 @@ constexpr Row kRows[] = {
 };
 constexpr size_t kRowCount = sizeof(kRows) / sizeof(kRows[0]);
 static_assert(kRowCount == kRowCountIndex, "index enum and row table drifted");
+
+// ---- the row flags (CFG_ROWFLAGS lines, by row identifier) -------------------
+// Zero for a row with no line. A line naming no row does not compile (RowIndex_<ident>), and a row
+// marked twice throws in constant evaluation, which is a compile error.
+constexpr std::array<unsigned, kRowCountIndex> BuildRowFlags() {
+    std::array<unsigned, kRowCountIndex> a{};
+#define CFG_FLAG(ident, key, section, defB, envVar, desc)
+#define CFG_INT(ident, key, section, defI, lo, hi, envVar, desc)
+#define CFG_FLOAT(ident, key, section, defF, lo, hi, envVar, desc)
+#define CFG_ENUM(ident, key, section, defS, tokens, envVar, desc)
+#define CFG_ENUM_FAILCLOSED(ident, key, section, defS, tokens, envVar, desc)
+#define CFG_STRING(ident, key, section, defS, envVar, seeded, desc)
+#define CFG_IDENTITY(ident, key, section, desc)
+#define CFG_FONTROLE(ident, key, suffix, defFam, desc)
+#define CFG_ROWFLAGS(ident, flags) \
+    a[RowIndex_##ident] = (a[RowIndex_##ident] != 0 ? throw "a row is marked twice" : (flags));
+#include "coop/config/config_registry_rows.inc"
+#undef CFG_ROWFLAGS
+#undef CFG_FLAG
+#undef CFG_INT
+#undef CFG_FLOAT
+#undef CFG_ENUM
+#undef CFG_ENUM_FAILCLOSED
+#undef CFG_STRING
+#undef CFG_IDENTITY
+#undef CFG_FONTROLE
+    return a;
+}
+constexpr auto kRowFlags = BuildRowFlags();
 
 // ---- the constexpr compile gate (arc 3) -------------------------------------
 constexpr bool CEq(const char* a, const char* b) {
@@ -126,7 +163,9 @@ constexpr size_t kFontRoleRowIndex[] = {
 #define CFG_STRING(ident, key, section, defS, envVar, seeded, desc)
 #define CFG_IDENTITY(ident, key, section, desc)
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) RowIndex_##ident,
+#define CFG_ROWFLAGS(ident, flags)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
 #undef CFG_FLOAT
@@ -227,7 +266,9 @@ namespace rows {
     const IdentityRow ident{&kRows[RowIndex_##ident], detail::RegistryDef::K()};
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) \
     const EnumRow ident{&kRows[RowIndex_##ident], detail::RegistryDef::K()};
+#define CFG_ROWFLAGS(ident, flags)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
 #undef CFG_FLOAT
@@ -249,7 +290,9 @@ const EnumRow* const kFontRoleRows[] = {
 #define CFG_STRING(ident, key, section, defS, envVar, seeded, desc)
 #define CFG_IDENTITY(ident, key, section, desc)
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) &rows::ident,
+#define CFG_ROWFLAGS(ident, flags)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
 #undef CFG_FLOAT
@@ -311,12 +354,46 @@ const char* RetiredKeyNote(const char* key) {
 // credential row renamed without touching this array stops matching and its value starts reaching
 // the log. CredentialKeys exposes the array so a caller can check each name still resolves to a
 // row, which is a louder failure than a silently unredacted password.
-static const char* const kCredentials[] = {
+constexpr const char* const kCredentials[] = {
     "net.lobby_password",    // the secret a locked lobby requires
     "net.join_password",     // the secret a joiner offers
     "net.signaling_token",   // the relay's bearer
     "net.turn_pass",         // the TURN credential
 };
+
+// The scope marks, checked by the compiler (Source declares FCVAR_REPLICATED and FCVAR_PROTECTED
+// on the cvar itself and keeps the two apart, iconvar.h:62, 46). Both lists are lowercase by the
+// registry's rule (Row::key), so the exact compare is IsCredentialKey's case-insensitive test.
+namespace {
+constexpr size_t CLen(const char* s) {
+    size_t n = 0;
+    while (s[n]) ++n;
+    return n;
+}
+constexpr bool ReplicatedImpliesServer() {
+    for (size_t i = 0; i < kRowCount; ++i)
+        if ((kRowFlags[i] & kRowReplicated) && !(kRowFlags[i] & kRowServer)) return false;
+    return true;
+}
+constexpr bool NoReplicatedCredential() {
+    for (size_t i = 0; i < kRowCount; ++i) {
+        if (!(kRowFlags[i] & kRowReplicated)) continue;
+        for (const char* c : kCredentials)
+            if (CEq(kRows[i].key, c)) return false;
+    }
+    return true;
+}
+constexpr bool ReplicatedKeysFitTheWire() {
+    for (size_t i = 0; i < kRowCount; ++i)
+        if ((kRowFlags[i] & kRowReplicated) && CLen(kRows[i].key) > kServerSettingKeyMax)
+            return false;
+    return true;
+}
+}  // namespace
+static_assert(ReplicatedImpliesServer(), "a kRowReplicated row must also be kRowServer");
+static_assert(NoReplicatedCredential(), "a credential row must never be kRowReplicated");
+static_assert(ReplicatedKeysFitTheWire(),
+              "a kRowReplicated row's key is longer than kServerSettingKeyMax");
 
 const char* const* CredentialKeys(size_t& count) {
     count = sizeof(kCredentials) / sizeof(kCredentials[0]);
@@ -329,6 +406,17 @@ bool IsCredentialKey(const char* key) {
         if (_stricmp(key, c) == 0) return true;
     return false;
 }
+
+unsigned RowFlags(const Row* row) {
+    // std::less: a total order over pointers, so a pointer outside the table is simply "outside".
+    const std::less<const Row*> before;
+    if (!row || before(row, kRows) || !before(row, kRows + kRowCount)) return 0;
+    return kRowFlags[static_cast<size_t>(row - kRows)];
+}
+
+bool IsServerScope(const Row* row) { return (RowFlags(row) & kRowServer) != 0; }
+
+bool IsReplicated(const Row* row) { return (RowFlags(row) & kRowReplicated) != 0; }
 
 bool IsKnownKey(const char* key) {
     // Since arc 3 the ui.font.<role> family are REAL rows -- one lookup.

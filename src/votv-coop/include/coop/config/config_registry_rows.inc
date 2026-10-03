@@ -1,6 +1,7 @@
 // coop/config/config_registry_rows.inc -- the one registry row list, X-macro'd:
-// config_registry.h expands it into the typed handle declarations, and config_registry.cpp
-// expands it three times (the index enum, the row table, the handle definitions), so every
+// config_registry.h expands it into the typed handle declarations and the font-role defaults,
+// and config_registry.cpp expands it six times (the index enum, the row table, the font-role
+// row indices, the row flags, the handle definitions, the font-role handle array), so every
 // artifact comes from one list with no transcription. The entry forms (ident is the C++ handle
 // name, key the canonical ini spelling, desc the catalog's human text, semantics only, since
 // the allowed tokens, ranges and env twin are generator-emitted from the columns): CFG_FLAG
@@ -9,6 +10,8 @@
 // and ICE rows; CFG_STRING adds the seeded flag; CFG_IDENTITY is minted with no default;
 // CFG_FONTROLE takes the role suffix and the default family index. A default is either the
 // value the code used before the registry or an alias of the one owning constant.
+// CFG_ROWFLAGS(ident, flags) marks the row `ident` with RowFlag bits, by convention directly
+// under it, as Source declares FCVAR_REPLICATED with the cvar (config_registry.h).
 
 // The [net] section.
 CFG_STRING(net_nick, "net.nick", "net", kMyNameDefault, "VOTVCOOP_NET_NICK", true,
@@ -209,6 +212,7 @@ CFG_FLOAT(voice_volume, "voice.volume", "voice", 1.0f, 0, 10, nullptr,
     "Master playback volume multiplier for incoming voice.")
 CFG_FLOAT(voice_distance_cm, "voice.distance_cm", "voice", 4800.0f, 100, 1000000, nullptr,
     "Maximum voice audibility distance in centimeters (4800 = 48 m).")
+CFG_ROWFLAGS(voice_distance_cm, kRowServer | kRowReplicated)
 CFG_INT(voice_jitter_threshold, "voice.jitter_threshold", "voice", 3, 0, 60, nullptr,
     "Jitter buffer: late-packet tolerance in frames before a reset.")
 CFG_INT(voice_prebuffer_frames, "voice.prebuffer_frames", "voice", 5, 0, 60, nullptr,
