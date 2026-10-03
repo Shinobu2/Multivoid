@@ -1,4 +1,4 @@
-// coop/server_profile/server_profile.cpp -- the hosted server's folder: the id rule, the latch, the
+// coop/server_profile/server_profile.cpp -- the hosted server's folder: the id rule and the
 // creation at a host session start. See server_profile.h.
 
 #include "coop/server_profile/server_profile.h"
@@ -10,7 +10,6 @@
 #include "ue_wrap/core/paths.h"
 
 #include <filesystem>
-#include <mutex>
 #include <system_error>
 
 namespace coop::server_profile {
@@ -18,9 +17,6 @@ namespace {
 
 constexpr size_t kMaxIdBytes = 24;
 constexpr const char* kFallbackId = "server";
-
-std::mutex g_mutex;
-std::wstring g_hostedDir;  // guarded by g_mutex
 
 // A Windows device name opens the device, whatever folder it is asked for in.
 bool IsDeviceName(std::string_view s) {
@@ -88,19 +84,7 @@ HostingId IdForHosting(std::string_view hostNickUtf8) {
     return h;
 }
 
-std::wstring HostedDir() {
-    std::lock_guard<std::mutex> lk(g_mutex);
-    return g_hostedDir;
-}
-
-void OnSessionEnd() {
-    std::lock_guard<std::mutex> lk(g_mutex);
-    g_hostedDir.clear();
-}
-
-std::wstring EnsureHosted(std::string_view hostNickUtf8) {
-    OnSessionEnd();  // a previous session's answer never survives into this one
-
+void EnsureHosted(std::string_view hostNickUtf8) {
     const HostingId h = IdForHosting(hostNickUtf8);
     const std::string& id = h.id;
 
@@ -116,7 +100,7 @@ std::wstring EnsureHosted(std::string_view hostNickUtf8) {
         case coop::config::SetResult::Refused:
             UE_LOGE("server: net.server='%s' was refused by the config -- no server folder this session",
                     id.c_str());
-            return {};
+            return;
         }
     }
     if (h.handTyped) {
@@ -130,7 +114,7 @@ std::wstring EnsureHosted(std::string_view hostNickUtf8) {
         UE_LOGE("server: could not create <exe dir unreadable>\\multivoid_servers\\%s -- this session's "
                 "server stores will not persist",
                 id.c_str());
-        return {};
+        return;
     }
 
     // The error_code overload: a refused write is a state to report, never an exception.
@@ -140,14 +124,9 @@ std::wstring EnsureHosted(std::string_view hostNickUtf8) {
     if (ec) {
         UE_LOGE("server: could not create %ls (%s) -- this session's server stores will not persist",
                 dir.c_str(), ec.message().c_str());
-        return {};
-    }
-    {
-        std::lock_guard<std::mutex> lk(g_mutex);
-        g_hostedDir = dir.wstring();
+        return;
     }
     UE_LOGI("server: hosting '%s' at %ls (%s)", id.c_str(), dir.c_str(), created ? "created" : "existing");
-    return dir.wstring();
 }
 
 }  // namespace coop::server_profile

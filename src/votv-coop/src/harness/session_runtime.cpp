@@ -260,10 +260,7 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     const bool ok = g_session.Start(netCfg, why);
     // A session that never ran never stops, so the stop listener will not end its layer; a Start
     // refused because a session already runs must not end that one's.
-    if (!ok && !g_session.running()) {
-        coop::server_settings_sync::OnSessionEnd();
-        coop::server_profile::OnSessionEnd();
-    }
+    if (!ok && !g_session.running()) coop::server_settings_sync::OnSessionEnd();
     UE_LOGI("harness: ==== COOP SESSION START (%s / %s)%s ====",
             netCfg.role == coop::net::Role::Host ? "host" : "client",
             netCfg.topology == coop::net::Topology::P2P ? "p2p" : "lan-direct",

@@ -39,7 +39,6 @@
 #include "coop/props/remote_prop.h"
 #include "coop/props/save_identity_bind.h"  // BindUnboundReCreates: re-bind on re-seed
 #include "coop/save/save_transfer.h"
-#include "coop/server_profile/server_profile.h"  // OnSessionEnd() on flee -- the hosted server's folder latch dies with the session
 #include "coop/session/subsystems.h"
 #include "coop/session/world_load_episode.h"  // the announce waits on the load-tail quiescence latch
 
@@ -120,9 +119,6 @@ void FleeToMainMenu(coop::net::Session& session, const char* why, bool travel = 
     g_fleeing = true;
     g_wasConnected = false;
     g_wasConnectedBySlot.fill(false);
-    // Cleared BEFORE Stop: Stop reports "not running" before it returns, so a clear after it could
-    // race a new session's latch.
-    coop::server_profile::OnSessionEnd();
     session.Stop();
     // Every session-scoped overlay dies at this funnel (every leave-world path comes through it):
     // the last lines would otherwise ride their 11 s TTL into the menu, and one stale nameplate

@@ -9,10 +9,6 @@
 // This module only names the folder and creates it at a host session start; nothing is stored in
 // it yet. The id of the server this install hosts is kept in multivoid.ini as `net.server`, set
 // from the host's nickname at the first host start.
-//
-// A store that lives under the server captures HostedDir() ONCE, when it loads at the host start,
-// and keeps that path for its writes: the answer is cleared when the session ends, so a deferred
-// write must never re-ask.
 
 #pragma once
 
@@ -48,18 +44,11 @@ struct HostingId {
 };
 HostingId IdForHosting(std::string_view hostNickUtf8);
 
-// The folder of the server this process hosts in its running session, as EnsureHosted latched it;
-// empty outside a hosted session, on a client, and after a failed creation. Any thread.
-std::wstring HostedDir();
-
 // Once per HOST session start, on the TimelineThread, before the config's session layer is
-// filled; never on a client. Clears the latch, resolves the hosted server (setting `net.server`
-// from the nickname at the first host start), creates its folder when absent and latches the path.
-// Returns the folder, or empty when it could not be made: the host session continues either way.
-std::wstring EnsureHosted(std::string_view hostNickUtf8);
-
-// Clears the latch. Any thread (the latch is mutex-guarded).
-void OnSessionEnd();
+// filled; never on a client. Resolves the hosted server (setting `net.server` from the nickname at
+// the first host start) and creates its folder when absent. The host session continues when the
+// folder could not be made: the failure is logged.
+void EnsureHosted(std::string_view hostNickUtf8);
 
 // The id rule's selftest, run at each session start; true when every case passes.
 bool RunSelftest();
