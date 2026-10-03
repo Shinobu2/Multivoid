@@ -3,6 +3,8 @@
 // The step is SET -> PROBE -> RESET -> PROBE, host only, started once the client's world is up: the
 // probe is posted to the game thread right after the set, the queue is FIFO and the set queued the
 // rows' subscribers first, so when the probe runs the subscribers have run -- no clock, no tick count.
+// The scale and font tokens follow their rows on the render thread instead: each reads its module's
+// apply counter before the set and the reset, and waits each Tick until the counter moved.
 // Tagged [SETTINGS-DRILL]; the [dev] settings_drill row.
 
 #pragma once

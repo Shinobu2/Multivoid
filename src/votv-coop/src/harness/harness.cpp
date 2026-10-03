@@ -519,7 +519,7 @@ void Start() {
     coop::nick_color::SetInitialLocalFromIniHex(cfg::ResolveString(coop::config_registry::rows::nick_color));
     // The modules that follow a config row subscribe once, here, before any pane draws; the nameplate
     // and nick-colour seeds above have read their rows, the two flag modules load theirs on first
-    // use, and every later set reaches all four through these subscriptions.
+    // use, and every later set reaches all six through these subscriptions.
     coop::nameplate::SubscribeRow();
     coop::nick_color::SubscribeRow();
     coop::peer_action_feed::SubscribeRow();

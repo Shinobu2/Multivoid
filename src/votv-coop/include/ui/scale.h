@@ -7,7 +7,9 @@
 // re-bake the font atlas every frame. ui::style::MaybeRescale() polls the client rect each
 // frame and performs the atlas/style rebuild when ConsumeRebuild() fires.
 //
-// All state is render-thread-only (the Present detour thread), like the rest of the overlay.
+// The scale data is render-thread-only (the Present detour thread), like the rest of the overlay.
+// The exception is two atomics: the row-changed flag (the row's subscriber stores it on the game
+// thread) and the apply counter (RowApplies reads it from any thread).
 
 #pragma once
 
@@ -50,8 +52,8 @@ float UserScaleMax();
 // Scale a 1080p-authored pixel constant to the live resolution.
 inline float S(float px) { return px * Ui(); }
 
-// A consumer other than the viewport (the F1 font-family switch) wants the
-// atlas/style rebuilt on the next frame.
+// A consumer other than the viewport (ui::fonts::ApplyRowsIfChanged) wants the atlas/style
+// rebuilt; it runs just before the per-frame ConsumeRebuild read, so the rebuild is that same frame.
 void RequestRebuild();
 
 // True exactly once after NoteViewport/RequestRebuild flagged a change; the

@@ -466,7 +466,7 @@ void RenderFontPref() {
     ImGui::SeparatorText("UI size");
     // sPending is the handle while it is dragged; sSeen is the applied value it last mirrored. The
     // render thread applies the row on its next frame, so the slider follows the applied value.
-    static float sPending = 0.f;
+    static float sPending = ui::scale::UserScale();
     static float sSeen = -1.f;      // never a valid scale -> the first frame syncs
     ImGui::SetNextItemWidth(S(260.f));
     ImGui::SliderFloat("##uiscale", &sPending, ui::scale::UserScaleMin(),
