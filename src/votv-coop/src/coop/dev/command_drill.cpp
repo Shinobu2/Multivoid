@@ -69,8 +69,13 @@ void OnPhaseA(std::string_view line) {
 }
 
 void OnPhaseB(std::string_view line) {
-    if (line == kUnknownLine) { ++g_accepted; return; }
-    if (line != kRateNotice) { Fail(3 + g_accepted + 1, line, kRateNotice); return; }
+    if (line == kUnknownLine) {
+        // All kBurstLines answered and none limited: the notice will never come, so end here.
+        if (++g_accepted < kBurstLines) return;
+    } else if (line != kRateNotice) {
+        Fail(3 + g_accepted + 1, line, kRateNotice);
+        return;
+    }
     if (g_accepted < 1 || g_accepted > kBurstLines - 1) {
         UE_LOGE("[CMD-DRILL] FAIL: %d of %d lines were answered before the rate notice, expected 1 to %d",
                 g_accepted, kBurstLines, kBurstLines - 1);
