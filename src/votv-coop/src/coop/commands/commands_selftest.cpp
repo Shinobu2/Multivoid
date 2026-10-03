@@ -315,8 +315,11 @@ void RegistryCases(Checker& check) {
     p = Probe();
     p.name = "Kick!";
     check(Refuses(reg, p), "registry: a name outside [a-z0-9] is refused");
+    // The duplicates below name an already-declared node, so the derived-node rule cannot refuse
+    // them: only the rule each case names can.
     p = Probe();
     p.name = "kick";
+    p.nodeOf = "multivoid.help";
     check(Refuses(reg, p), "registry: a second kick is refused");
     p = Probe();
     p.aliases = {{"tp", ""}};
@@ -325,7 +328,9 @@ void RegistryCases(Checker& check) {
     p.handler = nullptr;
     CommandSpec set = KickSpec();
     set.name = "set";
-    p.subVerbs = {set, set};
+    CommandSpec twin = set;
+    twin.nodeOf = "multivoid.help";
+    p.subVerbs = {twin, twin};
     check(Refuses(reg, p), "registry: two sub-verbs of one name are refused");
     p = Probe();
     p.args = {{"t", ArgKind::Rest, false}, {"w", ArgKind::Word, false}};

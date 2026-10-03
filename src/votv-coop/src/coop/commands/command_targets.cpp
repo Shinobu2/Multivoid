@@ -172,6 +172,7 @@ TargetResult ResolveTarget(std::string_view word, bool one, const Caller& caller
     }
 
     const std::u32string needle = Fold(word);
+    if (needle.empty()) return Fail(TargetError::NoMatch);  // a failed fold would match every nick
     std::vector<std::u32string> folded;
     folded.reserve(sorted.size());
     for (const PlayerView* p : sorted) folded.push_back(Fold(p->nick));
