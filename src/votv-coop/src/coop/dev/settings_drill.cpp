@@ -3,10 +3,13 @@
 #include "coop/dev/settings_drill.h"
 
 #include "coop/config/config.h"
+#include "coop/comms/peer_action_feed.h"
 #include "coop/config/config_registry.h"
 #include "coop/net/session.h"
 #include "coop/player/nameplate.h"
 #include "coop/player/nick_color.h"
+
+#include "ui/net_stats_panel.h"
 
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
@@ -18,8 +21,8 @@ namespace {
 
 constexpr int kSlot = 1;  // the pair's client
 
-// The step the row names, parsed once at the first Tick. Only Off, Nameplate, NickColor and Red
-// are parsed from the row; the other enumerators are not produced yet.
+// The step the row names, parsed once at the first Tick. Only Off, Nameplate, NickColor, Flags and
+// Red are parsed from the row; the other enumerators are not produced yet.
 enum class Token {
     Off, Nameplate, NickColor, Flags, Scale, Font, VoiceMode, VoiceVolume, Server, ServerJoin,
     ServerRed, Red
@@ -32,6 +35,7 @@ Token g_token = Token::Off;
 Token ParseToken(const std::string& mode) {
     if (mode == "nameplate") return Token::Nameplate;
     if (mode == "nickcolor") return Token::NickColor;
+    if (mode == "flags")     return Token::Flags;
     if (mode == "red")       return Token::Red;
     return Token::Off;
 }
@@ -52,7 +56,15 @@ void Done() {
 
 // Game thread, after the subscriber of the reset (FIFO).
 void ProbeAfterReset() {
-    if (g_token == Token::NickColor) {
+    if (g_token == Token::Flags) {
+        const bool peerActions = coop::peer_action_feed::Enabled();
+        const bool netstats    = ui::net_stats_panel::Enabled();
+        if (peerActions && !netstats)
+            UE_LOGI("[SETTINGS-DRILL] host: flags followed back (peer_actions=1 netstats=0)");
+        else
+            UE_LOGW("[SETTINGS-DRILL] FAIL: flags did not follow back (peer_actions=%d netstats=%d)",
+                    peerActions ? 1 : 0, netstats ? 1 : 0);
+    } else if (g_token == Token::NickColor) {
         const uint32_t packed = coop::nick_color::LocalPacked();
         if (packed == coop::nick_color::Pack(255, 255, 255))
             UE_LOGI("[SETTINGS-DRILL] host: nick_color followed back (packed=%08X)", packed);
@@ -67,7 +79,17 @@ void ProbeAfterReset() {
 }
 
 void Reset() {
-    if (g_token == Token::NickColor) {
+    if (g_token == Token::Flags) {
+        UE_LOGI("[SETTINGS-DRILL] host: ResetValue ui.chat.peer_actions");
+        const coop::config::SetResult r1 =
+            coop::config::ResetValue(::coop::config_registry::rows::ui_chat_peer_actions);
+        UE_LOGI("[SETTINGS-DRILL] host: ResetValue ui.chat.peer_actions returned %s",
+                SetResultName(r1));
+        UE_LOGI("[SETTINGS-DRILL] host: ResetValue ui.netstats");
+        const coop::config::SetResult r2 =
+            coop::config::ResetValue(::coop::config_registry::rows::ui_netstats);
+        UE_LOGI("[SETTINGS-DRILL] host: ResetValue ui.netstats returned %s", SetResultName(r2));
+    } else if (g_token == Token::NickColor) {
         UE_LOGI("[SETTINGS-DRILL] host: ResetValue nick_color");
         const coop::config::SetResult r =
             coop::config::ResetValue(::coop::config_registry::rows::nick_color);
@@ -85,7 +107,14 @@ void Reset() {
 // Game thread, after the subscriber of the set (FIFO). A failed probe ends the step.
 void ProbeAfterSet() {
     bool followed = false;
-    if (g_token == Token::NickColor) {
+    if (g_token == Token::Flags) {
+        const bool peerActions = coop::peer_action_feed::Enabled();
+        const bool netstats    = ui::net_stats_panel::Enabled();
+        followed = !peerActions && netstats;
+        if (followed) UE_LOGI("[SETTINGS-DRILL] host: flags followed (peer_actions=0 netstats=1)");
+        else UE_LOGW("[SETTINGS-DRILL] FAIL: flags did not follow (peer_actions=%d netstats=%d)",
+                     peerActions ? 1 : 0, netstats ? 1 : 0);
+    } else if (g_token == Token::NickColor) {
         const uint32_t packed = coop::nick_color::LocalPacked();
         followed = (packed == 0);
         if (followed) UE_LOGI("[SETTINGS-DRILL] host: nick_color followed (packed=%08X)", packed);
@@ -103,7 +132,17 @@ void ProbeAfterSet() {
 // The red arm is the nameplate step with its one call skipped.
 void Set() {
     const bool skipSet = (g_token == Token::Red);
-    if (g_token == Token::NickColor) {
+    if (g_token == Token::Flags) {
+        UE_LOGI("[SETTINGS-DRILL] host: SetValue ui.chat.peer_actions=0");
+        const coop::config::SetResult r1 =
+            coop::config::SetValue(::coop::config_registry::rows::ui_chat_peer_actions, "0");
+        UE_LOGI("[SETTINGS-DRILL] host: SetValue ui.chat.peer_actions=0 returned %s",
+                SetResultName(r1));
+        UE_LOGI("[SETTINGS-DRILL] host: SetValue ui.netstats=1");
+        const coop::config::SetResult r2 =
+            coop::config::SetValue(::coop::config_registry::rows::ui_netstats, "1");
+        UE_LOGI("[SETTINGS-DRILL] host: SetValue ui.netstats=1 returned %s", SetResultName(r2));
+    } else if (g_token == Token::NickColor) {
         UE_LOGI("[SETTINGS-DRILL] host: SetValue nick_color= (per-surface default)");
         const coop::config::SetResult r = coop::config::SetValue(
             ::coop::config_registry::rows::nick_color, coop::nick_color::IniTextFor(0).c_str());
