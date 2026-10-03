@@ -1,7 +1,8 @@
 // coop/config/config.h -- the env and ini configuration readers. multivoid.ini lives next to the
 // mod DLL; the LAN test framework overrides through environment variables, since one DLL location
-// serves two instances and per-file configs would alias. Precedence: a value set while the game
-// runs (the runtime layer), then the environment variable (set by the test launcher), then the ini
+// serves two instances and per-file configs would alias. Precedence: the session's value of a
+// server-scope row while a session runs (the session layer), then a value set while the game runs
+// (the runtime layer), then the environment variable (set by the test launcher), then the ini
 // value, then the row default.
 
 #pragma once
@@ -54,6 +55,11 @@ enum class SetResult : unsigned char { Refused, HeldNotSaved, Saved };
 // environment), written to multivoid.ini, logged, and announced to the row's subscribers. Held
 // means every later Resolve returns it; a reader that latched the row at its first use keeps what
 // it latched until the next launch. Any thread; two sets are serialised.
+// A server-scope row (config_registry::IsServerScope): on the host in a session the value also
+// goes into the session layer, inside the setter and before its one notification, so the session
+// sees it; on a client in a session the set changes the install's own hosting default and nothing
+// the session sees. A replicated row's value longer than config_registry::kServerSettingTextMax
+// is Refused.
 SetResult SetValue(const config_registry::FlagRow& row, const char* value);
 SetResult SetValue(const config_registry::IntRow& row, const char* value);
 SetResult SetValue(const config_registry::FloatRow& row, const char* value);
@@ -61,12 +67,13 @@ SetResult SetValue(const config_registry::EnumRow& row, const char* value);
 SetResult SetValue(const config_registry::StringRow& row, const char* value);
 
 // Return a row to its default while the game runs: the runtime layer forgets it, its line leaves
-// multivoid.ini (an environment twin, if set, answers again), the reset is logged, and the row's
-// subscribers are called -- what SetValue is to a chosen value, this is to the default. Refused
-// from inside a subscriber. HeldNotSaved: the runtime layer forgot it, but the ini could not be
-// rewritten, so the FILE's stored value answers again until it can (a reader sees the old value,
-// not the default -- the drill's probe then prints `did not follow back`). Saved: forgotten and
-// the line removed (or there was none). Any thread; serialised with SetValue.
+// multivoid.ini (an environment twin, if set, answers again; on the host in a session, a
+// server-scope row's session layer then holds what the layers below it answer), the reset is
+// logged, and the row's subscribers are called -- what SetValue is to a chosen value, this is to
+// the default. Refused from inside a subscriber. HeldNotSaved: the runtime layer forgot it, but
+// the ini could not be rewritten, so the FILE's stored value answers again until it can (a reader
+// sees the old value, not the default -- the drill's probe then prints `did not follow back`).
+// Saved: forgotten and the line removed (or there was none). Any thread; serialised with SetValue.
 SetResult ResetValue(const config_registry::FlagRow& row);
 SetResult ResetValue(const config_registry::IntRow& row);
 SetResult ResetValue(const config_registry::FloatRow& row);
@@ -79,7 +86,10 @@ SetResult ResetValue(const config_registry::StringRow& row);
 // the row; a set in between is then delivered. A subscriber never sets a row: a SetValue or
 // ResetValue made synchronously on its own stack is refused, but a set it defers
 // (game_thread::Post) or hands to another thread is not, and loops inside one drain, so a
-// subscriber never posts or hands off a set either.
+// subscriber never posts or hands off a set either. On a client in a session, a set or reset of a
+// server-scope row changes the install's own hosting default and nothing the session sees (its
+// subscribers are still called and re-resolve the session's value). They are also called after
+// each put into the session layer and when the layer is emptied.
 void Subscribe(const config_registry::FlagRow& row, void (*onChange)());
 void Subscribe(const config_registry::IntRow& row, void (*onChange)());
 void Subscribe(const config_registry::FloatRow& row, void (*onChange)());
@@ -150,8 +160,9 @@ FailClosedRead ResolveFailClosed(const config_registry::FailClosedEnumRow& row, 
                                  std::string* refusedOut = nullptr,
                                  std::string* originOut = nullptr,
                                  IniFault* faultOut = nullptr);
-// Free strings: a value set while the game runs (the runtime layer), then the environment variable,
-// then the ini value, then the row default; no validation.
+// Free strings: the session's value of a server-scope row while a session runs (the session layer),
+// then a value set while the game runs (the runtime layer), then the environment variable, then
+// the ini value, then the row default; no validation.
 std::string ResolveString(const config_registry::StringRow& row);
 // The text every Resolve of this row starts from: the top layer that answers, or the default as
 // text. Any thread.

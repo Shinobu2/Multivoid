@@ -1,9 +1,9 @@
 // coop/config/config_runtime.cpp -- a config row's value while the game runs: the runtime layer
-// every Resolve reads first (config.cpp, PickRawLayered), SetValue and ResetValue (hold or drop,
-// write or remove its ini line, notify) and the per-row subscribers. MTA's CMainConfig::SetSetting
-// is the shape: refuse, assign, save, call the row's callback. The divergence: in the game the
-// callback is posted to the game thread through the notifier the boot code wires, because a set
-// comes from the render thread; a process that wires none calls it inside the setter, as MTA does.
+// (under the session layer; config.cpp, PickRawLayered), SetValue and ResetValue (hold or drop,
+// write or remove its ini line, keep the host's session value, notify) and the per-row
+// subscribers. MTA's CMainConfig::SetSetting is the shape: refuse, assign, save, call the row's
+// callback. The divergence: in the game the callback is posted to the game thread through the
+// notifier the boot code wires (a set comes from the render thread); with none it runs inline.
 
 // Two rules a later caller must keep. The lock order is g_setMutex, then g_layerMutex or
 // IniMutex(), never the reverse; g_layerMutex is never held across a call out. A subscriber never
@@ -36,8 +36,8 @@ namespace {
 using Row = config_registry::Row;
 
 // Held by SetValueAt across its put and its ini write, so two sets cannot interleave them, by
-// ResetValueAt across its drop and its ini write, and by the keep-line across its rewrite and its
-// drop (SetMutex).
+// ResetValueAt across its drop and its ini write, by the keep-line across its rewrite and its
+// drop, and by the session layer's start and end (SetMutex).
 std::mutex g_setMutex;
 // The layer map, the subscriber list and the notifier pointer; also the session layer's map
 // (config_session.cpp, through internal::LayerMutex).
@@ -145,18 +145,34 @@ SetResult SetValueAt(const std::wstring& iniPath, const Row* row, const char* va
         UE_LOGW("config: SET %s REFUSED", row->key);
         return SetResult::Refused;
     }
+    if (config_registry::IsReplicated(row) && v.size() > config_registry::kServerSettingTextMax) {
+        UE_LOGW("config: SET %s REFUSED -- longer than the wire carries (%zu bytes)", row->key,
+                config_registry::kServerSettingTextMax);
+        return SetResult::Refused;
+    }
+    const bool serverScope = config_registry::IsServerScope(row);
     bool saved = false;
+    const char* sessionNote = "";
     {
         std::lock_guard<std::mutex> setLock(g_setMutex);
         RuntimeLayerPut(row, v);
+        // The host's session layer follows inside the set lock, which a session's start and end
+        // also hold; a client's set changes only the install's own hosting default.
+        const int role = SessionRole();
+        if (serverScope && role == 1) {
+            SessionLayerPutNoNotify(row, v);
+            sessionNote = ", session";
+        } else if (serverScope && role == 2) {
+            sessionNote = ", install default; the session's value stands";
+        }
         saved = WriteIniKeyAtPath(iniPath, row->key, v.c_str());
     }
     // The value is shown as the ini writer shows it: a credential is never printed.
     const char* shown = config_registry::IsCredentialKey(row->key) ? "<set>" : v.c_str();
     std::string over;
     if (row->envVar && !ReadEnv(row->envVar).empty()) over = std::string(", over ") + row->envVar;
-    UE_LOGI("config: SET %s=%s (runtime%s%s)", row->key, shown, saved ? "" : ", not saved",
-            over.c_str());
+    UE_LOGI("config: SET %s=%s (runtime%s%s%s)", row->key, shown, saved ? "" : ", not saved",
+            over.c_str(), sessionNote);
     PostNotify(row);
     return saved ? SetResult::Saved : SetResult::HeldNotSaved;
 }
@@ -179,13 +195,28 @@ SetResult ResetValueAt(const std::wstring& iniPath, const Row* row) {
     }
     int removed = 0;
     bool wrote = false;
+    const char* sessionNote = "";
     {
         std::lock_guard<std::mutex> setLock(g_setMutex);
         RuntimeLayerDrop(row);
         wrote = RemoveIniKeyAtPath(iniPath, row->key, removed);
+        // The host's session then holds what the layers below it now answer; a client's reset
+        // changes only its own default.
+        const bool serverScope = config_registry::IsServerScope(row);
+        const int role = SessionRole();
+        if (serverScope && role == 1) {
+            std::string below;
+            RawBelowSession(iniPath, row, below);
+            SessionLayerPutNoNotify(row, SessionSafe(row, below, "reset"));
+            sessionNote = ", session";
+        } else if (serverScope && role == 2) {
+            sessionNote = ", install default; the session's value stands";
+        }
     }
-    if (wrote) UE_LOGI("config: RESET %s (runtime, ini lines removed: %d)", row->key, removed);
-    else UE_LOGI("config: RESET %s (runtime, ini not rewritten)", row->key);
+    if (wrote)
+        UE_LOGI("config: RESET %s (runtime, ini lines removed: %d%s)", row->key, removed,
+                sessionNote);
+    else UE_LOGI("config: RESET %s (runtime, ini not rewritten%s)", row->key, sessionNote);
     PostNotify(row);
     return wrote ? SetResult::Saved : SetResult::HeldNotSaved;
 }

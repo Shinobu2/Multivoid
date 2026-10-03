@@ -1,6 +1,6 @@
 // coop/config/config_internal.h -- TU-private seams between the config reader core (config.cpp),
-// the ini mutation engine (config_ini_write.cpp), the runtime layer (config_runtime.cpp) and the
-// selftest TU.
+// the ini mutation engine (config_ini_write.cpp), the runtime layer (config_runtime.cpp), the
+// session layer (config_session.cpp) and the selftest TU.
 //
 // The internal-header pattern: shared primitives are declared here and defined in config.cpp,
 // and never exported to include/ -- product code uses the public coop/config/config.h API only.
@@ -70,10 +70,11 @@ FailClosedRead FailClosedFromPick(const config_registry::Row* row, bool have,
                                   IniFault fault, std::string& out, std::string* refusedOut,
                                   std::string* originOut, IniFault* faultOut);
 
-// The layered raw-value pick: a value set while the game runs (the runtime layer), then the
-// environment variable, then the ini value, then absent. A set env wins over the ini, valid or
-// not (garbage env shadows the ini). True with `raw` when a layer supplied a value, and
-// `fromEnvOut` says which layer won (false when the runtime layer answered). The census reports
+// The layered raw-value pick: the session's value of a server-scope row while a session runs (the
+// session layer), then a value set while the game runs (the runtime layer), then the environment
+// variable, then the ini value, then absent. A set env wins over the ini, valid or not (garbage
+// env shadows the ini). True with `raw` when a layer supplied a value, and `fromEnvOut` says
+// which layer won (false when the session or the runtime layer answered). The census reports
 // the layer, so it asks the precedence rule itself rather than re-reading the environment and
 // risking a second, disagreeing answer.
 // `scanOut` gets the ini scan's verdict (Ok when the env layer answered), because an absent
