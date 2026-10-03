@@ -136,7 +136,8 @@ SetResult SetValueAt(const std::wstring& iniPath, const Row* row, const char* va
                 "never sets a row", row->key);
         return SetResult::Refused;
     }
-    const std::string v = NormalizeValue(value);
+    const std::string v =
+        NormalizeValue(value, row->kind != config_registry::Kind::String);
     if (!ValueValidForKey(row->key, v, nullptr)) {
         UE_LOGW("config: SET %s REFUSED", row->key);
         return SetResult::Refused;

@@ -41,11 +41,11 @@ IniScan ScanIniFile(const std::wstring& path,
 
 // The shared lexer pieces: edge-trim; split "key=value" with an edge-trimmed key and the value
 // kept exactly as written between its edges, returning false for a line with no '=' and for an
-// empty key; and the inline-comment strip, where wsPrecededOnly is the string layer's
-// narrowing.
+// empty key; and the one cooker of a value's text (quoted values, the inline-comment cut), where
+// wsPrecededOnly is the string layer's narrowing. The grammar is written above its definition.
 std::string TrimEdgesStr(const std::string& s);
 bool ParseIniKeyValue(const std::string& line, std::string& key, std::string& value);
-std::string StripInlineCommentStr(const std::string& v, bool wsPrecededOnly);
+std::string CookIniValue(const std::string& v, bool wsPrecededOnly);
 
 // ---- seams for the selftest TU (config_selftest.cpp; arc-3 soft-cap cut) ----
 // The path-parameterized reader cores (no lock -- corpus paths only) + the
@@ -87,8 +87,14 @@ bool PickRawLayered(const config_registry::Row* row, std::string& raw,
 // resolved value are the same string on any machine. Defined in config_example.cpp.
 std::string FormatFloat(float v);
 
-// The writer's normalisation: CR and LF removed, edges trimmed (config_ini_write.cpp).
-std::string NormalizeValue(const char* value);
+// The writer's normalisation: CR and LF removed, and the edges trimmed when `trimEdges` (every
+// row but a String row; config_ini_write.cpp).
+std::string NormalizeValue(const char* value, bool trimEdges);
+// A String row's value as its ini line holds it: `safe` itself unless the reader could not return
+// it whole (it begins with '"' or ';', contains a space or tab before ';', or has an edge space or
+// tab), then quoted with '\' and '"' escaped. Any other row kind (`stringRow` false) is never
+// quoted.
+std::string QuoteIniValueIfNeeded(const std::string& safe, bool stringRow);
 // The one locked ini write: takes IniMutex, writes `key=value` into the ini at `path`.
 bool WriteIniKeyAtPath(const std::wstring& path, const char* key, const char* value);
 // The one locked line removal: takes IniMutex, drops every `key` line from the ini at `path`.

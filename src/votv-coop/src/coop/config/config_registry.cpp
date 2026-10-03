@@ -141,11 +141,12 @@ static_assert(sizeof(kFontRoleRowIndex) / sizeof(kFontRoleRowIndex[0]) == kFontR
 
 // The defS catalog-safety guard (arc 4): no ';' anywhere (the inline-comment
 // strip could truncate the value on read-back), no edge whitespace (the lexer
-// edge-trims -- the stored default would not round-trip), no CR/LF.
+// edge-trims -- the stored default would not round-trip), no leading '"' (the
+// reader would take it as a quoted value), no CR/LF.
 constexpr bool DefSCatalogSafe(const char* s) {
     if (!s || !*s) return true;  // empty defaults are legal (round-trip as present-empty)
     const char* p = s;
-    if (*p == ' ' || *p == '\t') return false;
+    if (*p == ' ' || *p == '\t' || *p == '"') return false;
     const char* last = p;
     while (*p) {
         if (*p == ';' || *p == '\r' || *p == '\n') return false;

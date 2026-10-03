@@ -87,7 +87,12 @@ const char* SectionForKey(const char* key) {
 // The path-parameterised writer core, no lock: internal::WriteIniKeyAtPath holds it, and the
 // selftest drives copies of corpus files, never the live ini.
 bool WriteIniValueAt(const std::wstring& path, const char* key, const char* value) {
-    const std::string safe = internal::NormalizeValue(value);
+    // The row kind decides both halves of the value's form: a String row keeps its edges and is
+    // quoted when the reader could not return it whole; every other row, and a key with no row (the
+    // string-keyed machinery), is trimmed and never quoted.
+    const config_registry::Row* r = config_registry::FindRow(key);
+    const bool stringRow = r && r->kind == config_registry::Kind::String;
+    const std::string safe = internal::NormalizeValue(value, !stringRow);
     // What this function may LOG. The value still goes to the file -- that is the whole job -- but
     // both lines below name the key and the outcome, and a lobby password printed beside them
     // outlives the session in every pasted log. Same registry predicate the census asks, so the
@@ -101,7 +106,8 @@ bool WriteIniValueAt(const std::wstring& path, const char* key, const char* valu
                 key, shown);
         return false;
     }
-    const std::string newLine = std::string(key) + "=" + safe + "\n";
+    const std::string newLine =
+        std::string(key) + "=" + internal::QuoteIniValueIfNeeded(safe, stringRow) + "\n";
     // Read the existing lines, replacing the key's line in place if present. The authoritative
     // line is the first case-insensitive key occurrence, edited in place with the canonical
     // spelling (distinct keys never collide case-insensitively). A case-sensitive writer missed
@@ -265,13 +271,32 @@ bool AtomicWriteAllLines(const std::wstring& path, const std::vector<std::string
 
 namespace internal {
 // Scrub CR and LF from the value (an embedded newline, pasted into a text field, would split the
-// key line and corrupt the next key on read-back), then edge-trim. Interior spaces are part of
-// the value (device names) and round-trip unchanged.
-std::string NormalizeValue(const char* value) {
+// key line and corrupt the next key on read-back), then edge-trim when `trimEdges`: the typed
+// rows' validators need the trim, a String row keeps its edges (the writer quotes them). Interior
+// spaces are part of the value (device names) and round-trip unchanged.
+std::string NormalizeValue(const char* value, bool trimEdges) {
     std::string safe;
     for (const char* p = value; *p; ++p)
         if (*p != '\n' && *p != '\r') safe.push_back(*p);
-    return TrimEdgesStr(safe);
+    return trimEdges ? TrimEdgesStr(safe) : safe;
+}
+
+// The writer's half of the quoted-value grammar (CookIniValue, config.cpp): quote exactly when
+// the reader could not return `safe` whole.
+std::string QuoteIniValueIfNeeded(const std::string& safe, bool stringRow) {
+    if (!stringRow || safe.empty()) return safe;
+    const auto isBlank = [](char c) { return c == ' ' || c == '\t'; };
+    const bool needed = safe.front() == '"' || safe.front() == ';' || isBlank(safe.front()) ||
+                        isBlank(safe.back()) || safe.find(" ;") != std::string::npos ||
+                        safe.find("\t;") != std::string::npos;
+    if (!needed) return safe;
+    std::string out = "\"";
+    for (const char c : safe) {
+        if (c == '"' || c == '\\') out.push_back('\\');
+        out.push_back(c);
+    }
+    out.push_back('"');
+    return out;
 }
 
 // The one locked ini write: the key and the path are the caller's (SetValue, the identity write
@@ -348,7 +373,7 @@ static bool RemoveDuplicateKeyLinesAt(const std::wstring& path, const char* key,
         return false;
     }
     auto displayValue = [](const std::string& v) {
-        return internal::StripInlineCommentStr(internal::TrimEdgesStr(v), true);
+        return internal::CookIniValue(v, true);
     };
     // Pass 1: does the clicked value still exist for this key?
     bool valuePresent = false;
