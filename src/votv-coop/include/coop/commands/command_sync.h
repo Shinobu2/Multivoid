@@ -56,10 +56,10 @@ void OnReply(const coop::net::CommandReplyPayload& p);
 // One observer of every delivered reply line, for the dev drill; nullptr clears. Game thread.
 void SetReplyObserver(void (*fn)(std::string_view line));
 
-// A slot's occupant left: its rate bucket and notice clocks start over.
+// A slot's occupant left: its rate bucket and notice clocks start over. Game thread.
 void OnSlotDisconnected(int slot);
 
-// The session ended: every bucket and clock starts over.
+// The session ended: every bucket and clock starts over. Game thread.
 void OnDisconnect();
 
 }  // namespace coop::command_sync

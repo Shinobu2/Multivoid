@@ -47,9 +47,15 @@ using coop::net::kMaxPeers;
 
 std::atomic<coop::net::Session*> g_session{nullptr};
 
-// A sender's budget: a burst of three for a typed correction, then two a second.
+// A sender's budget: a burst of three for a typed correction, then two a second. Deliberate
+// divergence: LuckPerms limits per sender with one 500 ms window
+// (reference/LuckPerms/common/src/main/java/me/lucko/luckperms/common/command/CommandManager.java:105)
+// and MTA's console has no limit (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:2406-2415);
+// the burst is ours.
 constexpr coop::net::IntentBudget kBudget{3.0f, 2.0f};
-// An over-budget or unreadable line is dropped; the sender is told at most this often.
+// An over-budget or unreadable line is dropped; the sender is told at most this often. Deliberate
+// divergence: LuckPerms tells the sender nothing, only the log
+// (CommandManager.java:158-160); ours tells a person typing, who otherwise sees nothing.
 constexpr uint64_t kSayEveryMs = 10000;
 // The longest command word a log line carries.
 constexpr size_t kLogWordMax = 32;
@@ -148,7 +154,10 @@ std::vector<PlayerView> BuildPlayers(coop::net::Session* s) {
     return out;
 }
 
-// The local operator's own line: the listen host, or solo play.
+// The local operator's own line: the listen host, or solo play. Deliberate divergence: it passes
+// every check because Source's listen host is the admin
+// (reference/source-sdk-2013/src/game/server/util.cpp:622-647); MTA has no listen host, its console
+// is an ACL account.
 void DispatchLocal(const std::string& line) {
     const Caller self{0, 0, true};
     const auto result = coop::commands::Dispatch(Commands(), self, line,
@@ -173,6 +182,9 @@ std::string LogWord(std::string_view line) {
 }
 
 // A request that cannot be read is dropped and told at most once per kSayEveryMs a sender.
+// Deliberate divergence: MTA drops an unreadable command packet silently
+// (reference/mtasa-blue/Server/mods/deathmatch/logic/packets/CCommandPacket.cpp:15-35,
+// CPacketTranslator.cpp:251-256); ours answers, as a person typing would otherwise see nothing.
 void BadRequest(const Caller& caller, uint64_t now) {
     const int slot = caller.slot;
     if (now < g_nextBadMs[slot]) return;
