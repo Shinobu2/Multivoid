@@ -339,7 +339,7 @@ DWORD WINAPI TimelineThread(LPVOID param) {
             };  // runAutotestTeleport
             // A client never teleports to a fixed checkpoint: it appears at the host's position,
             // which the world-ready connect replay sends (net_pump,
-            // teleport_client::TeleportSlotToHost).
+            // teleport_client::ApplyLocally).
             if (!saveTransferClient) {
                 runAutotestTeleport();
                 session_runtime::StartCoopSession(netCfg);

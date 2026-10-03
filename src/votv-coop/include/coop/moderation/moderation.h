@@ -55,8 +55,9 @@ inline PlayerToken TokenFor(int slot, uint16_t playerNo, uint32_t generation) {
 
 // What a verb did. Done: it acted. NoSession: no running hosted session. Gone: the token's player
 // is no longer in that seat. NoId: the target has no (valid) player id to key a ban on. NotBanned:
-// an unban of an id that was not banned.
-enum class ModResult : uint8_t { Done, NoSession, Gone, NoId, NotBanned };
+// an unban of an id that was not banned. Failed: the verb was refused by the engine side (a
+// teleport whose host pose could not be read).
+enum class ModResult : uint8_t { Done, NoSession, Gone, NoId, NotBanned, Failed };
 
 // Cache the Session pointer (used by the verbs). Called once at host boot, alongside the other
 // modules' SetSession.
@@ -105,7 +106,9 @@ ModResult Unban(const char* playerId);
 
 // Teleport the captured player to the host's current pose. Token-taking like the others:
 // teleporting the wrong person is not destructive, but a consistent rule is what keeps the check
-// from being forgotten where it matters.
+// from being forgotten where it matters. The token's generation rides the queued send too, so a
+// successor admitted after the call is never moved. Gone for a seat that changed hands; Failed
+// when the host's own pose could not be read.
 ModResult TeleportPlayerToMe(const PlayerToken& token);
 
 }  // namespace coop::moderation

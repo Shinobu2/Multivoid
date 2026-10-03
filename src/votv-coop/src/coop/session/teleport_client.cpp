@@ -6,6 +6,7 @@
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/core/game_thread.h"
+#include "ue_wrap/core/hot_path_guard.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"
@@ -136,9 +137,14 @@ void SnapshotAndSend(coop::net::Session* s) {
                        p.locX, p.locY, p.locZ);
 }
 
-void SnapshotAndSendToSlot(coop::net::Session* s, int slot) {
-    coop::net::TeleportClientPayload p{};
-    if (!SnapshotHostPose(p)) return;
+// The queued half of a single-target teleport: the slot must still be held by the occupancy the
+// pose was meant for, else a successor admitted in between would be moved.
+void SendPoseToSlotIfStillHeld(coop::net::Session* s, int slot, uint32_t generation,
+                               const coop::net::TeleportClientPayload& p) {
+    if (s->peerGenerationForSlot(slot) != generation) {
+        UE_LOGW("teleport_client: per-slot send to slot %d skipped -- the seat changed hands", slot);
+        return;
+    }
     // Single-target reliable (default senderSlot=0 -> the receiving client sees
     // senderPeerSlot==0 == host, passing event_feed's host-only TeleportClient
     // trust gate). Only this peer moves.
@@ -163,17 +169,28 @@ void TeleportClientsToHost() {
     GT::Post([s] { SnapshotAndSend(s); });
 }
 
-void TeleportSlotToHost(int peerSlot) {
+bool TeleportSlotToHostWithToken(int peerSlot, uint32_t generation) {
+    UE_ASSERT_GAME_THREAD("teleport_client::TeleportSlotToHostWithToken");
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || s->role() != coop::net::Role::Host) {
         UE_LOGI("teleport_client: per-slot ignored -- host-only (local role is not Host)");
-        return;
+        return false;
     }
     if (peerSlot < 1 || peerSlot >= static_cast<int>(coop::players::kMaxPeers)) {
         UE_LOGW("teleport_client: per-slot TP rejected -- slot %d out of range", peerSlot);
-        return;
+        return false;
     }
-    GT::Post([s, peerSlot] { SnapshotAndSendToSlot(s, peerSlot); });
+    if (generation == 0 || s->peerGenerationForSlot(peerSlot) != generation) {
+        UE_LOGW("teleport_client: per-slot TP refused -- slot %d no longer holds that player",
+                peerSlot);
+        return false;
+    }
+    coop::net::TeleportClientPayload p{};
+    if (!SnapshotHostPose(p)) return false;
+    GT::Post([s, peerSlot, generation, p] {
+        SendPoseToSlotIfStillHeld(s, peerSlot, generation, p);
+    });
+    return true;
 }
 
 }  // namespace coop::teleport_client

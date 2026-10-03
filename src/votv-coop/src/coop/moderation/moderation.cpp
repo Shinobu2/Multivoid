@@ -198,8 +198,14 @@ ModResult TeleportPlayerToMe(const PlayerToken& token) {
                 static_cast<unsigned>(token.playerNo), token.slot);
         return ModResult::Gone;
     }
-    // teleport_client self-gates on host and posts to the game thread itself.
-    coop::teleport_client::TeleportSlotToHost(token.slot);
+    if (!coop::teleport_client::TeleportSlotToHostWithToken(token.slot, token.generation)) {
+        // A seat that changed hands since the check above is Gone; otherwise the host's own pose
+        // could not be read, and nothing was sent.
+        if (s->peerGenerationForSlot(token.slot) != token.generation) return ModResult::Gone;
+        UE_LOGW("moderation: teleport of #%u failed -- the host's pose could not be read",
+                static_cast<unsigned>(token.playerNo));
+        return ModResult::Failed;
+    }
     return ModResult::Done;
 }
 

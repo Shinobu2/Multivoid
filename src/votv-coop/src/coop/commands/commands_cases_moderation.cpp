@@ -294,6 +294,8 @@ void TeleportCases(Checker& check, const Registry& reg, const Caller& console, c
           "moderation: /tphere brings the target with its token");
     check(Said(RunAs<1>(reg, console, "tphere Dee", ModResult::Gone), "Dee already left."),
           "moderation: /tphere of a player who left says so");
+    check(Said(RunAs<1>(reg, console, "tphere Dee", ModResult::Failed), "Could not teleport Dee (Failed)."),
+          "moderation: /tphere names a failed teleport through the generic line");
     check(Said(RunAs<1>(reg, console, "tphere Dee", ModResult::NoSession), "There is no hosted session."),
           "moderation: /tphere answers NoSession");
     check(Said(RunAs<1>(reg, console, "tphere Dee", ModResult::NoId), "Could not teleport Dee (NoId)."),

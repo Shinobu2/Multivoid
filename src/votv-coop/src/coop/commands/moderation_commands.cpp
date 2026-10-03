@@ -31,6 +31,7 @@ const char* ResultName(ModResult r) {
         case ModResult::Gone: return "Gone";
         case ModResult::NoId: return "NoId";
         case ModResult::NotBanned: return "NotBanned";
+        case ModResult::Failed: return "Failed";
     }
     return "?";
 }
