@@ -23,7 +23,8 @@ namespace {
 struct Published {
     Model model;
     ContextSet subject;
-    bool broken = false;  // the store had a problem: `model` is empty and every check is refused
+    // The store had a problem: `model` is empty and every check but the console's is refused.
+    bool broken = false;
 };
 
 // The hand-off slot: the pointer under the mutex, the flag set with release after it.

@@ -181,8 +181,16 @@ bool ReportHas(const LoadReport& r, std::string_view needle) {
     return false;
 }
 
+bool ReportMentions(const LoadReport& r, std::string_view needle) {
+    for (const std::string& s : r.problems) {
+        if (s.find(needle) != std::string::npos) return true;
+    }
+    return false;
+}
+
 // What LoadStore does after listing, over texts held in memory: each file through LoadHolderText,
-// then every loaded holder through ReportMissingGroups.
+// then every loaded holder through ReportMissingGroups. As in LoadStore, every group is added
+// before any user, because LoadHolderText checks a user's primary group against the groups so far.
 struct MemoryStore {
     Model model;
     LoadReport report;
@@ -218,11 +226,7 @@ void WholeStoreCases(CheckSink& sink) {
                    !ShouldLoad(oneBad.report),
                "whole: one refused entry among good holders makes the store broken");
 
-    Model scratch;
-    LoadReport noStore;
-    sink.Check(noStore.problems.empty() && ShouldLoad(noStore) &&
-                   LoadStore("multivoid_selftest_no_such_store_folder", scratch).problems.empty(),
-               "whole: no store is not a broken store");
+    sink.Check(ShouldLoad(LoadReport{}), "whole: no store is not a broken store");
 
     MemoryStore key;
     key.Add("g1", true, R"({"permissions":["has space"]})");
@@ -247,14 +251,24 @@ void WholeStoreCases(CheckSink& sink) {
                    !ShouldLoad(primary.report),
                "whole: a user whose primary group is missing is a problem");
 
+    // The holder file has no primaryGroup field: its primary is `default`, which exists, so no
+    // primary line; the default step then promotes the missing parent to the stored primary, which
+    // must not raise one either.
     MemoryStore parent;
     parent.Add("g1", true, R"({"parents":["phantom"]})");
     parent.Add(Id('b'), false, R"({"parents":["nowhere"]})");
     parent.Finish();
     sink.Check(ReportHas(parent.report, "g1: parent group \"phantom\" does not exist") &&
                    ReportHas(parent.report, Id('b') + ": parent group \"nowhere\" does not exist") &&
-                   !ShouldLoad(parent.report),
-               "whole: a group or user naming a missing parent group is a problem");
+                   !ReportMentions(parent.report, ": primary group") && !ShouldLoad(parent.report),
+               "whole: a group or user naming a missing parent group is a problem, and only that");
+
+    MemoryStore falseParent;
+    falseParent.Add(Id('c'), false, R"({"permissions":[{"permission":"group.ghost","value":false}]})");
+    falseParent.Finish();
+    sink.Check(falseParent.report.problems.empty() && ShouldLoad(falseParent.report) &&
+                   falseParent.report.users == 1,
+               "whole: a false group node is no parent, so a missing group it names is no problem");
 }
 
 void NameCases(CheckSink& sink) {

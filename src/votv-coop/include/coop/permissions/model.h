@@ -57,8 +57,9 @@ public:
     // normalisation, and the index in `nodes` of every node the key rules refuse is appended to
     // `refused`. False ONLY for the holder: an invalid name or id, or one that exists, and then
     // nothing of it loads. LoadUser then runs the default step, so a user with no stored global
-    // group gains `group.default`; a `primaryGroup` naming no group is kept as written (lower-cased)
-    // while the user holds a `group.` node for it, and the caller reports it.
+    // group gains `group.default`, and a stored primary that is not among the user's global groups
+    // becomes the first of them. The stored primary can so differ from `primaryGroup` passed in: a
+    // caller that checks the written primary does so on its own copy, not by reading it back.
     bool LoadGroup(std::string_view name, const std::vector<Node>& nodes, std::vector<size_t>* refused);
     bool LoadUser(std::string_view playerId, std::string_view primaryGroup, const std::vector<Node>& nodes,
                   std::vector<size_t>* refused);

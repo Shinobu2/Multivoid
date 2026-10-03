@@ -41,16 +41,19 @@ bool ParseHolderText(std::string_view text, std::string_view stem, std::string* 
 
 // Loads one holder file's text into `m` (a group when `group`, else the user named by `stem`): the
 // ParseHolderText, then Model::LoadGroup / LoadUser, a refused holder one problem `<stem>: refused`
-// and each refused node one problem `<stem>: key "<escaped key>" refused`. True when the holder
-// loaded (and is counted in `report`). It sees one file only: a group a holder names is checked by
+// and each refused node one problem `<stem>: key "<escaped key>" refused`. For a user that loaded,
+// the primary group AS WRITTEN (`default` when the field is absent) must name a group `m` has, else
+// one problem `<stem>: primary group "<g>" does not exist`; LoadUser's default step rewrites the
+// stored one, so only the parsed value can be checked. That needs every group already in `m`:
+// LoadStore loads every group file before any user file, and a caller must do the same. True when
+// the holder loaded (and is counted in `report`). A parent group a holder names is checked by
 // ReportMissingGroups once every file is in. Engine-free.
 bool LoadHolderText(std::string_view text, std::string_view stem, bool group, Model& m, LoadReport& report);
 
-// The checks that need the whole store, for the holder `stem` already loaded into `m`: a user's
-// stored primary group, and every `group.<g>` parent node of a user or group, must name a group `m`
-// has. Each miss is one problem, `<stem>: primary group "<g>" does not exist` or `<stem>: parent
-// group "<g>" does not exist`. Call it for every holder after the last file is loaded: a group may
-// name a parent that sorts after it.
+// The parent check that needs the whole store, for the holder `stem` already loaded into `m`: every
+// true `group.<g>` node of a user or group must name a group `m` has. A false node is no parent and
+// is not checked. Each miss is one problem, `<stem>: parent group "<g>" does not exist`. Call it for
+// every holder after the last file is loaded: a group may name a parent that sorts after it.
 void ReportMissingGroups(const Model& m, std::string_view stem, bool group, LoadReport& report);
 
 // Reads `dir` (`<server folder>\permissions`) into `m`: every groups\*.json first, sorted by name so

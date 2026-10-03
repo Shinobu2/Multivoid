@@ -317,6 +317,10 @@ bool LoadHolderText(std::string_view text, std::string_view stem, bool group, Mo
         ++report.groups;
     } else {
         ++report.users;
+        // The primary AS WRITTEN: LoadUser's default step has rewritten the stored one by now.
+        if (m.FindGroup(primary) == nullptr) {
+            report.problems.push_back(name + ": primary group " + QuotedKey(primary) + " does not exist");
+        }
     }
     return true;
 }
@@ -325,12 +329,10 @@ void ReportMissingGroups(const Model& m, std::string_view stem, bool group, Load
     const Holder* holder = group ? m.FindGroup(stem) : m.FindUser(stem);
     if (holder == nullptr) return;
     const std::string name(stem);
-    if (!group && m.FindGroup(holder->primaryGroup) == nullptr) {
-        report.problems.push_back(name + ": primary group " + QuotedKey(holder->primaryGroup) + " does not exist");
-    }
     static constexpr std::string_view kGroupPrefix = "group.";
     for (const Node& n : holder->nodes.Nodes()) {
-        if (n.key.compare(0, kGroupPrefix.size(), kGroupPrefix) != 0) continue;
+        // A false `group.<g>` node is no parent (Parents skips it), so a missing <g> is no problem.
+        if (!n.value || n.key.compare(0, kGroupPrefix.size(), kGroupPrefix) != 0) continue;
         const std::string parent = n.key.substr(kGroupPrefix.size());
         if (m.FindGroup(parent) == nullptr) {
             report.problems.push_back(name + ": parent group " + QuotedKey(parent) + " does not exist");
