@@ -214,9 +214,11 @@ void PrimaryCases(CheckSink& sink) {
     m.UnsetNode(HolderKind::User, u, N("group.default"));
     m.SetPrimaryGroup(u, "admin");
     sink.Check(EffectivePrimary(m, *m.FindUser(u), kNow) == "vip", "primary: a stored primary outside the groups gives the first group");
-    // A user whose only group node is a false group.default has no global group.
+    // A user whose only group node is a false group.default has no global group; its stored
+    // primary is another group, so `default` can only come from the no-global-group branch.
     const std::string v = Id('3');
     m.SetNode(HolderKind::User, v, N("test"));
+    m.SetPrimaryGroup(v, "admin");
     m.SetNode(HolderKind::User, v, N("group.default", false));
     sink.Check(EffectivePrimary(m, *m.FindUser(v), kNow) == "default", "primary: no global group gives default");
 }
@@ -237,10 +239,16 @@ void ModelCases(CheckSink& sink) {
     sink.Check(!m.SetPrimaryGroup(u, "nothere"), "model: SetPrimaryGroup to a missing group is refused");
     sink.Check(!m.DeleteGroup("default"), "model: the default group cannot be deleted");
 
-    sink.Check(!m.SetNode(HolderKind::Group, "vip", N("group.hello world")) &&
+    // A refused key is refused before the missing user is made; a name that is not 32 hex makes none.
+    const std::string fresh = Id('9');
+    sink.Check(!m.SetNode(HolderKind::User, fresh, N("group.hello world")) && m.FindUser(fresh) == nullptr &&
                    !m.SetNode(HolderKind::User, "not-hex", N("test")) && m.FindUser("not-hex") == nullptr,
-               "model: a refused key or user name changes nothing");
-    sink.Check(m.FindGroup("hello world") == nullptr, "model: no group was made of a refused key");
+               "model: a refused key or user name creates no user");
+    const uint64_t refusedRev = m.GroupsRevision();
+    const size_t vipNodes = m.FindGroup("vip")->nodes.Size();
+    sink.Check(!m.SetNode(HolderKind::Group, "vip", N("group.hello world")) && m.GroupsRevision() == refusedRev &&
+                   m.FindGroup("vip")->nodes.Size() == vipNodes,
+               "model: a refused key on a group changes nothing");
 
     // Revisions.
     const uint64_t g0 = m.GroupsRevision();
