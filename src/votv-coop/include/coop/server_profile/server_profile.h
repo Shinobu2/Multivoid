@@ -1,9 +1,10 @@
 // coop/server_profile/server_profile.h -- the server a host runs, as a folder beside the game.
 //
 // A server is one folder, `<exe dir>\multivoid_servers\<server id>\`, owned by the host: the stores
-// a server owns (its settings, permissions, bans, players' profiles) live under it. MTA's shape: a
-// server's files are one directory (Server/mods/deathmatch/mtaserver.conf beside acl.xml and
-// banlist.xml). The id rule is ours: a name a player types is never a path.
+// a server owns (its settings, permissions, bans, players' profiles) will live under it. MTA's
+// precedent is the one-folder layout of a server's files (mtaserver.conf beside acl.xml and
+// banlist.xml); keeping each server's stores in its own folder inside one install is our choice,
+// MTA keeps one set per install. The id rule is ours: a name a player types is never a path.
 //
 // This module only names the folder and creates it at a host session start; nothing is stored in
 // it yet. The id of the server this install hosts is kept in multivoid.ini as `net.server`, set
@@ -29,9 +30,9 @@ std::wstring ServersDir();
 bool IsValidId(std::string_view id);
 
 // A new server's id from its name: A-Z lowered, a-z and 0-9 kept, every maximal run of any other
-// byte (non-ASCII included) becomes one '-', the ends are trimmed, the result is cut to 24 bytes;
-// empty gives "server" and a device name gets "-server" appended. Always satisfies IsValidId.
-// Pure.
+// byte (non-ASCII included) becomes one '-', the ends are trimmed, the result is cut to 24 bytes
+// and a trailing '-' the cut leaves is removed; empty gives "server" and a device name gets
+// "-server" appended. Always satisfies IsValidId. Pure.
 std::string IdFromName(std::string_view nameUtf8);
 
 // WHICH server this install hosts, without making it real.
@@ -60,7 +61,7 @@ std::wstring EnsureHosted(std::string_view hostNickUtf8);
 // Clears the latch. Any thread (the latch is mutex-guarded).
 void OnSessionEnd();
 
-// The id rule's boot selftest; true when every case passes.
+// The id rule's selftest, run at each session start; true when every case passes.
 bool RunSelftest();
 
 }  // namespace coop::server_profile

@@ -79,6 +79,9 @@ HostingId IdForHosting(std::string_view hostNickUtf8) {
     } else if (IsValidId(h.rowText)) {
         h.id = h.rowText;
     } else {
+        // MTA refuses an invalid name or falls back to a default (CMainConfig.cpp global_databases_path,
+        // CResourceManager.cpp illegal resource names); we sanitise it for the session and still host:
+        // the player's text stays theirs.
         h.id = IdFromName(h.rowText);
         h.handTyped = true;
     }

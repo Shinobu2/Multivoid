@@ -3,7 +3,7 @@
 //
 // Every per-install runtime artifact (multivoid.log, multivoid.ini + .example,
 // multivoid-loaded.txt, multivoid-players.txt, multivoid-banlist.txt,
-// multivoid-compat-report.txt, coop-screenshots/, coop_players/) anchors on the
+// multivoid-compat-report.txt, coop-screenshots/, coop_players/, multivoid_servers/) anchors on the
 // GAME EXE's directory (...\VotV\Binaries\Win64), NOT on the mod DLL's own directory.
 // The module's location is loader-dependent: UE4SS maps us at Mods\Multivoid\dlls\, and
 // unreal_shimloader additionally virtualizes Mods\ into the r2modman profile, where
