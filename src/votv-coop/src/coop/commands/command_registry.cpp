@@ -39,7 +39,9 @@ using NodeMap = std::map<std::string, NodeDecl, std::less<>>;
 // One walk over a tree that is not yet taken: the first broken rule stops it with a reason.
 struct TreeCheck {
     const NodeMap& declared;
+    const std::set<std::string>& declaredQualifiers;  // the qualifier nodes among `declared`
     std::set<std::string> byThisTree;  // nodes declared by specs earlier in depth-first order
+    std::set<std::string> qualifiersByThisTree;  // the qualifier nodes among byThisTree
     std::string why;
 
     bool Fail(std::string reason) {
@@ -49,6 +51,36 @@ struct TreeCheck {
 
     bool IsDeclared(const std::string& node) const {
         return declared.find(node) != declared.end() || byThisTree.count(node) != 0;
+    }
+
+    bool IsQualifierNode(const std::string& node) const {
+        return declaredQualifiers.count(node) != 0 || qualifiersByThisTree.count(node) != 0;
+    }
+
+    // The qualifiers of one spec against its arguments: a valid name each, one qualifier per kind,
+    // and the target-argument rules the dispatcher relies on.
+    bool Qualifiers(const CommandSpec& s) {
+        size_t targets = 0;
+        bool orId = false;
+        for (const ArgSpec& a : s.args) {
+            if (a.kind == ArgKind::Player || a.kind == ArgKind::PlayerOrId) ++targets;
+            orId = orId || a.kind == ArgKind::PlayerOrId;
+        }
+        bool seen[3] = {false, false, false};
+        for (const Qualifier& q : s.qualifiers) {
+            if (!ValidName(q.name))
+                return Fail("'" + s.name + "': the qualifier '" + q.name + "' is not 1..32 of [a-z0-9]");
+            const size_t kind = static_cast<size_t>(q.kind);
+            if (seen[kind]) return Fail("'" + s.name + "': two qualifiers of one kind");
+            seen[kind] = true;
+            const bool needsTarget = q.kind == QualKind::GateOffline || q.kind == QualKind::Exempt;
+            if (needsTarget && targets != 1)
+                return Fail("'" + s.name + "': the qualifier '" + q.name +
+                            "' needs exactly one Player or PlayerOrId argument");
+        }
+        if (orId && !seen[static_cast<size_t>(QualKind::GateOffline)])
+            return Fail("'" + s.name + "': a PlayerOrId argument needs a GateOffline qualifier");
+        return true;
     }
 
     bool Spec(const CommandSpec& s, const std::string& parentNode, bool isRoot) {
@@ -88,6 +120,8 @@ struct TreeCheck {
                             "': a notHost argument or an Exempt qualifier needs a pastTense");
         }
 
+        if (!Qualifiers(s)) return false;
+
         std::string node;
         if (!s.nodeOf.empty()) {
             if (!IsDeclared(s.nodeOf))
@@ -98,11 +132,19 @@ struct TreeCheck {
             if (IsDeclared(node)) return Fail("the node '" + node + "' is already declared");
             byThisTree.insert(node);
         }
-        // A qualifier node another spec already declared is not declared twice; a command node
-        // later derived onto one is refused as already declared.
+        // A qualifier node another spec already declared is not declared twice; a node that is not
+        // a qualifier node is never taken over, and a command node later derived onto a qualifier
+        // node is refused as already declared.
         for (const Qualifier& q : s.qualifiers) {
             const std::string qualNode = node + "." + q.name;
-            if (!IsDeclared(qualNode)) byThisTree.insert(qualNode);
+            if (IsDeclared(qualNode)) {
+                if (!IsQualifierNode(qualNode))
+                    return Fail("'" + s.name + "': the qualifier node '" + qualNode +
+                                "' is already declared and is not a qualifier node");
+                continue;
+            }
+            byThisTree.insert(qualNode);
+            qualifiersByThisTree.insert(qualNode);
         }
 
         std::set<std::string> subNames;
@@ -135,7 +177,7 @@ bool Registry::Register(CommandSpec spec, std::string* why) {
         if (!own.insert(a.name).second) return refuse("alias '" + a.name + "' is named twice");
     }
 
-    TreeCheck check{nodes_, {}, {}};
+    TreeCheck check{nodes_, qualifierNodes_, {}, {}, {}};
     if (!check.Spec(spec, std::string(), true)) return refuse(check.why);
 
     auto owned = std::make_unique<CommandSpec>(std::move(spec));
@@ -157,6 +199,7 @@ void Registry::Record(const CommandSpec& c, const std::string& parentPath,
     for (const Qualifier& q : c.qualifiers) {
         const std::string qualNode = info.node + "." + q.name;
         nodes_.emplace(qualNode, NodeDecl{qualNode, false, c.description + " -- " + q.name});
+        qualifierNodes_.insert(qualNode);
     }
     const std::string path = info.path;
     const std::string node = info.node;

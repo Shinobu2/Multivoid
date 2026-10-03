@@ -16,6 +16,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <set>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -104,7 +105,11 @@ public:
     // parent with one name; a root named printer, content, admin, command or dev (those words
     // belong to nodes that are not commands); a Rest argument that is not last; a required
     // argument after an optional one; a spec with neither a handler nor sub-verbs; a spec with a
-    // notHost argument or an Exempt qualifier and no pastTense. On success every spec without a
+    // notHost argument or an Exempt qualifier and no pastTense; a qualifier whose name is not
+    // 1..32 of [a-z0-9]; two qualifiers of one kind on a spec; a GateOffline or Exempt qualifier on
+    // a spec that has not exactly one Player or PlayerOrId argument; a PlayerOrId argument on a spec
+    // with no GateOffline qualifier; a qualifier node that is already declared as something other
+    // than a qualifier node. On success every spec without a
     // nodeOf is declared as a node (derived, its default and description), and every qualifier's
     // node `<the spec's node>.<name>` that is not declared yet (default false, described as
     // "<the spec's description> -- <name>").
@@ -142,6 +147,7 @@ private:
 
     std::vector<std::unique_ptr<CommandSpec>> roots_;  // never moved or changed after Register
     std::map<std::string, NodeDecl, std::less<>> nodes_;
+    std::set<std::string> qualifierNodes_;  // the nodes of nodes_ that a qualifier declared
     std::unordered_map<const CommandSpec*, SpecInfo> info_;
 };
 

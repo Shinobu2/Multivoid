@@ -290,6 +290,12 @@ bool Refuses(Registry& reg, const CommandSpec& c) {
     return !reg.Register(c, &why) && !why.empty();
 }
 
+// Refused, and the reason names the rule the case is about.
+bool RefusesFor(Registry& reg, const CommandSpec& c, const char* reasonPart) {
+    std::string why;
+    return !reg.Register(c, &why) && why.find(reasonPart) != std::string::npos;
+}
+
 bool StartsWith(const std::string& s, const char* prefix) { return s.rfind(prefix, 0) == 0; }
 
 bool SaidOnly(const DispatchResult& r, const char* line) {
@@ -627,6 +633,68 @@ void QualifierCases(Checker& check) {
         Registry bare;
         check(Refuses(bare, c),
               "qualifier: a command node derived onto a qualifier node is refused");
+    }
+
+    {
+        Registry bare;
+        CommandSpec c = ZapSpec();
+        c.args = {{"who", ArgKind::Players, false}};
+        c.qualifiers = {{"exempt", QualKind::Exempt}};
+        check(RefusesFor(bare, c, "needs exactly one Player or PlayerOrId"),
+              "qualifier: an Exempt qualifier on a Players target is refused");
+        c.args.clear();
+        c.qualifiers = {{"offline", QualKind::GateOffline}};
+        check(RefusesFor(bare, c, "needs exactly one Player or PlayerOrId"),
+              "qualifier: a GateOffline qualifier on a spec with no target is refused");
+        c.args = {{"a", ArgKind::Player, false}, {"b", ArgKind::PlayerOrId, false}};
+        c.qualifiers = {{"offline", QualKind::GateOffline}, {"exempt", QualKind::Exempt}};
+        check(RefusesFor(bare, c, "needs exactly one Player or PlayerOrId"),
+              "qualifier: an Exempt qualifier on a spec with two targets is refused");
+        c.args = {{"who", ArgKind::PlayerOrId, false}};
+        c.qualifiers = {{"exempt", QualKind::Exempt}, {"notify", QualKind::Notify}};
+        check(RefusesFor(bare, c, "needs a GateOffline"),
+              "qualifier: a PlayerOrId argument without a GateOffline qualifier is refused");
+        c.qualifiers = {{"offline", QualKind::GateOffline}};
+        check(bare.Register(c, nullptr), "qualifier: a PlayerOrId argument with GateOffline registers");
+    }
+    {
+        Registry bare;
+        CommandSpec c = ZapSpec();
+        c.qualifiers = {{"offline", QualKind::GateOffline}, {"Exempt", QualKind::Exempt}};
+        check(RefusesFor(bare, c, "is not 1..32 of [a-z0-9]"),
+              "qualifier: a qualifier name outside [a-z0-9] is refused");
+        c.qualifiers = {{"offline", QualKind::GateOffline}, {"", QualKind::Notify}};
+        check(RefusesFor(bare, c, "is not 1..32 of [a-z0-9]"), "qualifier: an empty qualifier name is refused");
+        c.qualifiers = {{"offline", QualKind::GateOffline}, {"notify", QualKind::Notify},
+                        {"tell", QualKind::Notify}};
+        check(RefusesFor(bare, c, "two qualifiers of one kind"),
+              "qualifier: two qualifiers of one kind are refused");
+    }
+    {
+        // A node that is not a qualifier node is never taken over by a qualifier.
+        Registry bare;
+        CommandSpec ban = Probe();
+        ban.name = "ban";
+        CommandSpec sub = Probe();
+        sub.name = "notify";
+        sub.defaultGranted = true;
+        ban.subVerbs = {sub};
+        check(bare.Register(ban, nullptr), "qualifier: a command with a notify sub-verb registers");
+        CommandSpec banid = Probe();
+        banid.name = "banid";
+        banid.nodeOf = "multivoid.ban";
+        banid.qualifiers = {{"notify", QualKind::Notify}};
+        check(RefusesFor(bare, banid, "is not a qualifier node"),
+              "qualifier: a qualifier node that is a command node is refused");
+        check(!bare.FindNode("multivoid.ban.notify")->description.empty() &&
+                  bare.FindNode("multivoid.ban.notify")->defaultGranted,
+              "qualifier: the refused qualifier leaves the command node as it was");
+
+        CommandSpec zap = ZapSpec();
+        check(bare.DeclareNode({"multivoid.zap.notify", true, "A declared node."}, nullptr),
+              "qualifier: a plain node declares");
+        check(RefusesFor(bare, zap, "is not a qualifier node"),
+              "qualifier: a qualifier node that is a DeclareNode node is refused");
     }
 
     {

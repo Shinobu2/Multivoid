@@ -142,20 +142,19 @@ std::string ShortId(const std::string& id) { return id.substr(0, 8); }
 // The qualifier steps over the resolved targets, before the handler: the host as a target, an
 // offline target, an exempt target, then who is told. Returns the refusal line, or empty when the
 // handler may run (`ctx.notifySlots` is then filled). The offline, exempt and identity steps judge
-// the spec's one Player / PlayerOrId argument.
+// the spec's one Player / PlayerOrId argument, when it was given.
 std::string ApplyQualifiers(Context& ctx) {
     const CommandSpec& spec = ctx.spec;
     const Caller& caller = ctx.caller;
     const Policy& policy = ctx.policy;
     const std::string node = ctx.registry.NodeOf(spec);
 
+    // Register refuses a GateOffline or Exempt qualifier on a spec without exactly one such
+    // argument, and a PlayerOrId argument on a spec without GateOffline.
     size_t at = spec.args.size();
     for (size_t i = 0; i < spec.args.size(); ++i) {
         const ArgKind kind = spec.args[i].kind;
-        if (ctx.given[i] && (kind == ArgKind::Player || kind == ArgKind::PlayerOrId)) {
-            at = i;
-            break;
-        }
+        if (kind == ArgKind::Player || kind == ArgKind::PlayerOrId) at = i;
     }
 
     for (size_t i = 0; i < spec.args.size(); ++i) {
@@ -164,13 +163,15 @@ std::string ApplyQualifiers(Context& ctx) {
             if (slot == 0) return "That is the host -- it cannot be " + spec.pastTense + ".";
     }
 
-    if (at != spec.args.size()) {
+    if (at != spec.args.size() && ctx.given[at]) {
         const TargetResult& t = ctx.targets[at];
         const Qualifier* gate = FindQualifier(spec, QualKind::GateOffline);
-        const std::string offlineNode = node + "." + (gate != nullptr ? gate->name : "offline");
-        if (t.offline && !Passes(ctx.registry, policy, caller, offlineNode))
-            return "You do not have permission for /" + ctx.registry.PathOf(spec) +
-                   " on an offline player (" + offlineNode + ").";
+        if (gate != nullptr && t.offline) {
+            const std::string offlineNode = node + "." + gate->name;
+            if (!Passes(ctx.registry, policy, caller, offlineNode))
+                return "You do not have permission for /" + ctx.registry.PathOf(spec) +
+                       " on an offline player (" + offlineNode + ").";
+        }
 
         const Qualifier* exempt = FindQualifier(spec, QualKind::Exempt);
         if (exempt != nullptr && !caller.isOperator) {
