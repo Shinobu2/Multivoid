@@ -260,6 +260,21 @@ bool Session::SendEntityDestroy(uint32_t elementId) {
     return SendReliable(ReliableKind::EntityDestroy, &p, sizeof(p));
 }
 
+bool Session::SlotReliableIdle(int slot) {
+    if (slot < 0 || slot >= kMaxPeers) return false;
+    const uint32_t hConn = peerConns_[slot].load();
+    if (hConn == 0) return false;
+    auto* sockets = SteamNetworkingSockets();
+    if (!sockets) return false;
+    // The backlog first: a message moving from it into the transport between the two reads is
+    // then seen as pending, never as neither. Read directly, not through admission_.Anchor, which
+    // changes state.
+    if (backlog_.DepthBytes(slot) != 0) return false;
+    SteamNetConnectionRealTimeStatus_t st{};
+    if (sockets->GetConnectionRealTimeStatus(hConn, &st, 0, nullptr) != k_EResultOK) return false;
+    return st.m_cbPendingReliable == 0 && st.m_cbSentUnackedReliable == 0;
+}
+
 void Session::SampleLinkRates(uint64_t nowMs) {
     auto* sockets = SteamNetworkingSockets();
     if (!sockets) return;

@@ -357,6 +357,11 @@ public:
         return peerLanesConfigured_[peerSlot].load(std::memory_order_acquire);
     }
 
+    // Every reliable byte sent to this slot has been acknowledged: a kick now drops nothing queued
+    // for it. False for an out-of-range slot, a slot with no connection, or a failed read. Game
+    // thread. Not const: SendBacklog::DepthBytes is not.
+    bool SlotReliableIdle(int slot);
+
     // The slot's occupancy generation: a host-minted, never reused, non-zero token naming who holds
     // the slot; 0 = empty. A change between reads is a replacement, which lowest-free slot reuse
     // hides from a connected boolean. Never on the wire; kick and ban validate a captured token
