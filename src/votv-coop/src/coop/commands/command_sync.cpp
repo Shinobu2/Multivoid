@@ -214,17 +214,19 @@ void Submit(std::string line) {
         }
         // A client never dispatches: its line runs where its authority is, on the host. A bare `/`
         // has nothing to send; the hint is local text.
-        const Caller self{0, 0, true};
         if (line.empty()) {
-            ReplyTo(self, coop::commands::kHelpHint);
+            const std::string_view hint = coop::commands::kHelpHint;
+            Deliver(hint, coop::text::FromUtf8Lossy(hint.data(), hint.size()));
             return;
         }
         coop::net::CommandRequestPayload p{};
         const std::string cut = coop::text::CapUtf8Bytes(line, sizeof(p.text));
         p.len = static_cast<uint8_t>(cut.size());
         std::memcpy(p.text, cut.data(), cut.size());
-        if (!s->SendReliable(coop::net::ReliableKind::CommandRequest, &p, sizeof(p)))
-            ReplyTo(self, "Could not send the command.");
+        if (!s->SendReliable(coop::net::ReliableKind::CommandRequest, &p, sizeof(p))) {
+            const std::string_view failed = "Could not send the command.";
+            Deliver(failed, coop::text::FromUtf8Lossy(failed.data(), failed.size()));
+        }
     });
 }
 
@@ -295,7 +297,11 @@ void OnReply(const coop::net::CommandReplyPayload& p) {
         }
         return;
     }
-    Deliver(std::string_view(p.text, p.len), wide);
+    // MTA's client strips control codes from every echo it shows
+    // (reference/mtasa-blue/Client/mods/deathmatch/logic/CPacketHandler.cpp:1443), as our chat receiver
+    // does (coop/comms/chat_sync.cpp:316).
+    const std::string line = coop::text::SanitizeUtf8(p.text, p.len);
+    Deliver(line, coop::text::FromUtf8Lossy(line.data(), line.size()));
 }
 
 void SetReplyObserver(void (*fn)(std::string_view line)) { g_observer = fn; }
