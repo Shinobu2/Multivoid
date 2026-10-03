@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace coop::dev::ban_drill {
 namespace {
@@ -57,8 +58,16 @@ void Tick(coop::net::Session* s) {
     // FIFO: this runs after the ban's own task, in the same drain. The kick's teardown is
     // synchronous (KickClaimed), so the generation is already cleared when the ban took.
     GT::Post([s, id, gen] {
-        char why[96] = {};
-        const bool stored = coop::ban_list::IsBanned(id, "", why, sizeof(why));
+        // The store is read as a list, not asked "is this banned?": that question logs a refusal.
+        std::vector<coop::ban_list::Entry> bans;
+        coop::ban_list::GetSnapshot(bans);
+        bool stored = false;
+        for (const auto& e : bans) {
+            if (id == e.id) {
+                stored = true;
+                break;
+            }
+        }
         const bool closed = s->peerGenerationForSlot(kSlot) != gen;
         if (stored && closed)
             UE_LOGI("[BAN-DRILL] PASS %.8s... is banned and its seat closed", id.c_str());
