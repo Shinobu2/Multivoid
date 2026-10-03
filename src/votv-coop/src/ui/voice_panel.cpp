@@ -38,9 +38,11 @@ char g_micCurrent[160] = {};
 char g_outCurrent[160] = {};
 char g_pttKey[32] = {};
 
-// Each slider's handle value while it is held, and whether it is held. Written by Render and read
-// by CommitAbandonedDrag, both on the render thread; Close(), which runs on three threads, never
-// touches them. A drag the panel's closing abandons is committed from these.
+// Each slider's handle value -- stored on every frame the handle is held, and on the frame a typed
+// value (Ctrl+click, Enter) applies, when the item is already inactive -- and whether a drag is open.
+// Written by Render and read by the release branch and by CommitAbandonedDrag, all on the render
+// thread; Close(), which runs on three threads, never touches them. The release branch commits the
+// handle's own value from these, and a drag the panel's closing abandons is committed from these.
 std::atomic<float> g_pendingThreshold{0.0f};
 std::atomic<float> g_pendingGain{0.0f};
 std::atomic<float> g_pendingVolume{0.0f};

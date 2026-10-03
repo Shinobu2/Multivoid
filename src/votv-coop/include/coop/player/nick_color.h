@@ -39,10 +39,11 @@ inline uint8_t B(uint32_t p) { return static_cast<uint8_t>(p); }
 void SetInitialLocal(uint32_t packed);
 
 // Boot-time init from the resolved nick_color row (the harness passes ResolveString).
-// Three cases: the key ABSENT (a new identity, or a reset),
-// means custom WHITE; an explicitly EMPTY value, which is what unchecking the custom colour
-// writes, means the per-surface defaults (chat palette, role colours); and RRGGBB hex means that
-// colour. This owns the parse so the harness boot glue stays parse-free.
+// Three cases: the key ABSENT (a new identity, or a reset), which the row's default text
+// "unset" stands for, means custom WHITE; an explicitly EMPTY value, which is what unchecking the
+// custom colour writes, means the per-surface defaults (chat palette, role colours); and RRGGBB hex
+// means that colour (a malformed hex falls back to white, as absent). This owns the parse so the
+// harness boot glue stays parse-free.
 void SetInitialLocalFromIniHex(const std::string& hex);
 
 // The local pref (0 = default). Any thread (atomic) -- the F1 picker reads it.

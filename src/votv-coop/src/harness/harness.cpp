@@ -518,11 +518,12 @@ void Start() {
     coop::nameplate::SetInitialLocalVisible(cfg::ResolveFlag(coop::config_registry::rows::nameplate));
     // The persisted nick colour (ini nick_color=RRGGBB); nick_color owns the parse.
     coop::nick_color::SetInitialLocalFromIniHex(cfg::ResolveString(coop::config_registry::rows::nick_color));
-    // The modules that follow a config row subscribe once, here, before any pane draws; the nameplate
-    // and nick-colour seeds above have read their rows, the two flag modules load theirs on first
-    // use, the scale and font modules load theirs on the render thread's first frame
-    // (LoadUserPrefOnce, ReadRoleFamiliesOnce), the voice module reads its rows when a session's
-    // Install opens the devices, and every later set reaches all seven through these subscriptions.
+    // The modules that follow a config row subscribe once, here, before any pane draws; the
+    // nameplate and nick-colour seeds above have read their rows, the two flag modules load theirs
+    // on first use, the scale and font modules load theirs in the overlay's bring-up, which retries
+    // on a later frame if it fails (LoadUserPrefOnce, ReadRoleFamiliesOnce), the voice module reads
+    // its rows when a session's Install opens the devices, and every later set reaches all seven
+    // through these subscriptions.
     coop::nameplate::SubscribeRow();
     coop::nick_color::SubscribeRow();
     coop::peer_action_feed::SubscribeRow();
