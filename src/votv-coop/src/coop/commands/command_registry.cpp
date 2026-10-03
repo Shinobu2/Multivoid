@@ -35,13 +35,14 @@ bool Reserved(std::string_view name) {
 }
 
 using NodeMap = std::map<std::string, NodeDecl, std::less<>>;
+using QualifierNodeMap = std::map<std::string, QualKind>;
 
 // One walk over a tree that is not yet taken: the first broken rule stops it with a reason.
 struct TreeCheck {
     const NodeMap& declared;
-    const std::set<std::string>& declaredQualifiers;  // the qualifier nodes among `declared`
+    const QualifierNodeMap& declaredQualifiers;  // the qualifier nodes among `declared`
     std::set<std::string> byThisTree;  // nodes declared by specs earlier in depth-first order
-    std::set<std::string> qualifiersByThisTree;  // the qualifier nodes among byThisTree
+    QualifierNodeMap qualifiersByThisTree;  // the qualifier nodes among byThisTree
     std::string why;
 
     bool Fail(std::string reason) {
@@ -53,32 +54,52 @@ struct TreeCheck {
         return declared.find(node) != declared.end() || byThisTree.count(node) != 0;
     }
 
-    bool IsQualifierNode(const std::string& node) const {
-        return declaredQualifiers.count(node) != 0 || qualifiersByThisTree.count(node) != 0;
+    // The kind that declared a qualifier node, or null when the node is not a qualifier node.
+    const QualKind* QualifierKindOf(const std::string& node) const {
+        const auto d = declaredQualifiers.find(node);
+        if (d != declaredQualifiers.end()) return &d->second;
+        const auto t = qualifiersByThisTree.find(node);
+        return t != qualifiersByThisTree.end() ? &t->second : nullptr;
     }
 
-    // The qualifiers of one spec against its arguments: a valid name each, one qualifier per kind,
-    // and the target-argument rules the dispatcher relies on.
+    // The qualifiers of one spec against its arguments: a valid name each, one qualifier per kind
+    // and per name, and the target-argument rules the dispatcher relies on. Exempt and GateOffline
+    // are judged on the one Player / PlayerOrId argument; GateOffline gates only a PlayerOrId.
     bool Qualifiers(const CommandSpec& s) {
         size_t targets = 0;
+        ArgKind targetKind = ArgKind::Word;
         bool orId = false;
         for (const ArgSpec& a : s.args) {
-            if (a.kind == ArgKind::Player || a.kind == ArgKind::PlayerOrId) ++targets;
+            if (a.kind == ArgKind::Player || a.kind == ArgKind::PlayerOrId ||
+                a.kind == ArgKind::Players) {
+                ++targets;
+                targetKind = a.kind;
+            }
             orId = orId || a.kind == ArgKind::PlayerOrId;
         }
-        bool seen[3] = {false, false, false};
-        for (const Qualifier& q : s.qualifiers) {
+        bool gates = false;
+        for (size_t i = 0; i < s.qualifiers.size(); ++i) {
+            const Qualifier& q = s.qualifiers[i];
             if (!ValidName(q.name))
                 return Fail("'" + s.name + "': the qualifier '" + q.name + "' is not 1..32 of [a-z0-9]");
-            const size_t kind = static_cast<size_t>(q.kind);
-            if (seen[kind]) return Fail("'" + s.name + "': two qualifiers of one kind");
-            seen[kind] = true;
-            const bool needsTarget = q.kind == QualKind::GateOffline || q.kind == QualKind::Exempt;
-            if (needsTarget && targets != 1)
+            for (size_t j = 0; j < i; ++j) {
+                if (s.qualifiers[j].kind == q.kind)
+                    return Fail("'" + s.name + "': two qualifiers of one kind");
+                if (s.qualifiers[j].name == q.name)
+                    return Fail("'" + s.name + "': two qualifiers named '" + q.name + "'");
+            }
+            if (q.kind != QualKind::GateOffline && q.kind != QualKind::Exempt) continue;
+            if (targets != 1 || targetKind == ArgKind::Players)
                 return Fail("'" + s.name + "': the qualifier '" + q.name +
                             "' needs exactly one Player or PlayerOrId argument");
+            if (q.kind == QualKind::GateOffline) {
+                if (targetKind != ArgKind::PlayerOrId)
+                    return Fail("'" + s.name + "': the qualifier '" + q.name +
+                                "' needs a PlayerOrId argument, a Player is never offline");
+                gates = true;
+            }
         }
-        if (orId && !seen[static_cast<size_t>(QualKind::GateOffline)])
+        if (orId && !gates)
             return Fail("'" + s.name + "': a PlayerOrId argument needs a GateOffline qualifier");
         return true;
     }
@@ -126,25 +147,32 @@ struct TreeCheck {
         if (!s.nodeOf.empty()) {
             if (!IsDeclared(s.nodeOf))
                 return Fail("'" + s.name + "': nodeOf names the undeclared node '" + s.nodeOf + "'");
+            if (QualifierKindOf(s.nodeOf) != nullptr)
+                return Fail("'" + s.name + "': nodeOf names the qualifier node '" + s.nodeOf + "'");
             node = s.nodeOf;
         } else {
             node = (isRoot ? std::string("multivoid") : parentNode) + "." + s.name;
             if (IsDeclared(node)) return Fail("the node '" + node + "' is already declared");
             byThisTree.insert(node);
         }
-        // A qualifier node another spec already declared is not declared twice; a node that is not
-        // a qualifier node is never taken over, and a command node later derived onto a qualifier
-        // node is refused as already declared.
+        // A qualifier node another spec already declared is not declared twice, and only a
+        // qualifier of the same kind reuses it; a node that is not a qualifier node is never taken
+        // over, and a command node later derived onto a qualifier node is refused as already
+        // declared.
         for (const Qualifier& q : s.qualifiers) {
             const std::string qualNode = node + "." + q.name;
             if (IsDeclared(qualNode)) {
-                if (!IsQualifierNode(qualNode))
+                const QualKind* declaredKind = QualifierKindOf(qualNode);
+                if (declaredKind == nullptr)
                     return Fail("'" + s.name + "': the qualifier node '" + qualNode +
                                 "' is already declared and is not a qualifier node");
+                if (*declaredKind != q.kind)
+                    return Fail("'" + s.name + "': the qualifier node '" + qualNode +
+                                "' is already declared by a qualifier of another kind");
                 continue;
             }
             byThisTree.insert(qualNode);
-            qualifiersByThisTree.insert(qualNode);
+            qualifiersByThisTree.emplace(qualNode, q.kind);
         }
 
         std::set<std::string> subNames;
@@ -199,7 +227,7 @@ void Registry::Record(const CommandSpec& c, const std::string& parentPath,
     for (const Qualifier& q : c.qualifiers) {
         const std::string qualNode = info.node + "." + q.name;
         nodes_.emplace(qualNode, NodeDecl{qualNode, false, c.description + " -- " + q.name});
-        qualifierNodes_.insert(qualNode);
+        qualifierNodes_.emplace(qualNode, q.kind);
     }
     const std::string path = info.path;
     const std::string node = info.node;

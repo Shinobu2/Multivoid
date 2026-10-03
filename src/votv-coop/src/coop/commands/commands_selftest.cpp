@@ -603,10 +603,14 @@ void QualifierCases(Checker& check) {
         c.name = "zapped";
         c.pastTense.clear();
         Registry bare;
-        check(Refuses(bare, c), "qualifier: a notHost argument without a pastTense is refused");
+        c.qualifiers = {{"notify", QualKind::Notify}};
+        check(RefusesFor(bare, c, "needs a pastTense"),
+              "qualifier: a notHost argument without a pastTense is refused");
         c.args = {{"who", ArgKind::Player, false}};
-        check(Refuses(bare, c), "qualifier: an Exempt qualifier without a pastTense is refused");
-        c.qualifiers = {{"offline", QualKind::GateOffline}, {"notify", QualKind::Notify}};
+        c.qualifiers = {{"exempt", QualKind::Exempt}};
+        check(RefusesFor(bare, c, "needs a pastTense"),
+              "qualifier: an Exempt qualifier without a pastTense is refused");
+        c.qualifiers = {{"notify", QualKind::Notify}};
         check(bare.Register(c, nullptr),
               "qualifier: a spec with neither needs no pastTense");
     }
@@ -646,10 +650,17 @@ void QualifierCases(Checker& check) {
         c.qualifiers = {{"offline", QualKind::GateOffline}};
         check(RefusesFor(bare, c, "needs exactly one Player or PlayerOrId"),
               "qualifier: a GateOffline qualifier on a spec with no target is refused");
-        c.args = {{"a", ArgKind::Player, false}, {"b", ArgKind::PlayerOrId, false}};
-        c.qualifiers = {{"offline", QualKind::GateOffline}, {"exempt", QualKind::Exempt}};
+        c.args = {{"a", ArgKind::Player, false}, {"b", ArgKind::Player, false}};
+        c.qualifiers = {{"exempt", QualKind::Exempt}};
         check(RefusesFor(bare, c, "needs exactly one Player or PlayerOrId"),
               "qualifier: an Exempt qualifier on a spec with two targets is refused");
+        c.args = {{"a", ArgKind::Players, false}, {"b", ArgKind::Player, false}};
+        check(RefusesFor(bare, c, "needs exactly one Player or PlayerOrId"),
+              "qualifier: an Exempt qualifier beside a Players and a Player argument is refused");
+        c.args = {{"who", ArgKind::Player, false}};
+        c.qualifiers = {{"offline", QualKind::GateOffline}};
+        check(RefusesFor(bare, c, "needs a PlayerOrId argument"),
+              "qualifier: a GateOffline qualifier on a Player target is refused");
         c.args = {{"who", ArgKind::PlayerOrId, false}};
         c.qualifiers = {{"exempt", QualKind::Exempt}, {"notify", QualKind::Notify}};
         check(RefusesFor(bare, c, "needs a GateOffline"),
@@ -669,6 +680,25 @@ void QualifierCases(Checker& check) {
                         {"tell", QualKind::Notify}};
         check(RefusesFor(bare, c, "two qualifiers of one kind"),
               "qualifier: two qualifiers of one kind are refused");
+        c.qualifiers = {{"offline", QualKind::GateOffline}, {"offline", QualKind::Exempt}};
+        check(RefusesFor(bare, c, "two qualifiers named"),
+              "qualifier: two qualifiers of different kinds with one name are refused");
+    }
+    {
+        // A qualifier node is shared only by qualifiers of one kind, and no command takes one.
+        Registry bare;
+        check(bare.Register(ZapSpec(), nullptr), "qualifier: the zap tree registers on its own");
+        CommandSpec other = ZapSpec();
+        other.name = "zapother";
+        other.nodeOf = "multivoid.zap";
+        other.args = {{"who", ArgKind::Player, false}};
+        other.qualifiers = {{"offline", QualKind::Exempt}};
+        check(RefusesFor(bare, other, "qualifier of another kind"),
+              "qualifier: a qualifier node reused with a different kind is refused");
+        other.qualifiers.clear();
+        other.nodeOf = "multivoid.zap.exempt";
+        check(RefusesFor(bare, other, "names the qualifier node"),
+              "qualifier: a nodeOf that names a qualifier node is refused");
     }
     {
         // A node that is not a qualifier node is never taken over by a qualifier.

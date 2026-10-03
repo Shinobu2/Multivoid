@@ -147,7 +147,7 @@ private:
 
     std::vector<std::unique_ptr<CommandSpec>> roots_;  // never moved or changed after Register
     std::map<std::string, NodeDecl, std::less<>> nodes_;
-    std::set<std::string> qualifierNodes_;  // the nodes of nodes_ that a qualifier declared
+    std::map<std::string, QualKind> qualifierNodes_;  // the nodes of nodes_ a qualifier declared
     std::unordered_map<const CommandSpec*, SpecInfo> info_;
 };
 
