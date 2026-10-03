@@ -177,8 +177,10 @@ std::string TrimNickEdges(const std::string& s) {
 bool SetNickname(const std::string& nick) {
     const std::string t = TrimNickEdges(nick);
     if (t.empty()) return false;  // empty or all spaces: keep the last good name
-    std::lock_guard<std::mutex> lk(g_cfgMu);
-    g_nickname = t;
+    {
+        std::lock_guard<std::mutex> lk(g_cfgMu);
+        g_nickname = t;
+    }
     UE_LOGI("session_manager: nickname '%s'", t.c_str());
     return true;
 }

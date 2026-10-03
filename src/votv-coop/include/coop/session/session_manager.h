@@ -110,8 +110,8 @@ struct SaveChoice {
 // port, and when unlisted nothing leaves the machine (IsMasterFree). There is no LAN-only
 // choice: an accept filter refusing non-private remotes did the router's job, and the password
 // and the admission challenge are the controls on every lane. `password` and `masterUrl` are what
-// the window showed, passed rather than re-read: a password keeps its bytes (WP-S1c), and
-// the announce, whose master is then the lobby's relay, must go where it said.
+// the window showed, passed rather than re-read: the password row is written only while the lobby
+// is locked, and the announce, whose master is then the lobby's relay, must go where it said.
 bool HostWithSave(const SaveChoice& choice, const std::string& name, bool locked,
                   const std::string& password, int playersMax, const std::string& masterUrl,
                   coop::session::HostMode mode = {});
