@@ -135,7 +135,7 @@ CFG_FLAG(event_drill, "event_drill", "dev", false, "VOTVCOOP_EVENT_DRILL",
     "fires it replayed. MUTATES the world (the clock, the events), so it is armed per run.")
 CFG_ENUM(settings_drill, "settings_drill", "dev", "off", "off|nameplate|nickcolor|flags|scale|font|voicemode|voicevolume|red", "VOTVCOOP_SETTINGS_DRILL",
     "Drill (host): once the client's world is up, the host sets the named row or rows through SetValue, "
-    "probes that their modules followed, resets them through ResetValue and probes again. nameplate: the "
+    "checks that their modules followed (a posted probe, or a counter), resets them through ResetValue and checks again. nameplate: the "
     "nameplate row to hidden (the client logs both announces). nickcolor: the nick colour to the "
     "per-surface default. flags: the chat peer-actions flag off and the netstats flag on. "
     "scale: ui.scale to 1.50. font: the first font role's family. "
