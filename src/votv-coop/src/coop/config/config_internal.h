@@ -87,6 +87,18 @@ bool PickRawLayered(const config_registry::Row* row, std::string& raw,
 // resolved value are the same string on any machine. Defined in config_example.cpp.
 std::string FormatFloat(float v);
 
+// A row's default as the text its kind prints -- what the catalog writes and what a layer holds
+// when nothing is configured: `defS`; a flag as `1`/`0`; an int with `%ld`; a float through
+// FormatFloat. Defined in config_example.cpp.
+std::string DefaultText(const config_registry::Row& r);
+
+// What the row resolves to with no session layer: the runtime layer's entry if held, else the
+// environment twin if set, else the ini's cooked value at `iniPath` if the line is there (read
+// under IniMutex, so never call it under the layer lock), else DefaultText. What a session opens
+// with on the host, and what a host-side reset leaves in force.
+void RawBelowSession(const std::wstring& iniPath, const config_registry::Row* row,
+                     std::string& raw);
+
 // The writer's normalisation: CR and LF removed, and the edges trimmed when `trimEdges` (every
 // row but a String row; config_ini_write.cpp).
 std::string NormalizeValue(const char* value, bool trimEdges);

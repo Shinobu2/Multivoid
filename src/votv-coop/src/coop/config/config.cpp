@@ -598,6 +598,9 @@ bool MasterEnabled() {
 // product semantics: one core for the live resolve and its instrument.
 namespace internal {
 
+// The default a read of the ini is given when a line's absence must be told from any real value.
+static const char* const kIniAbsent = "\x01<absent>";
+
 // The layered raw-value pick (config_internal.h). The row comes from the caller's typed handle,
 // so no lookup and no unregistered key; the census passes a row straight off the table, which is
 // the one caller that has no handle and needs none.
@@ -615,11 +618,31 @@ bool PickRawLayered(const config_registry::Row* row, std::string& raw, bool* fro
             return true;
         }
     }
-    static const char* kAbsent = "\x01<absent>";
-    const std::string v = ReadIniValue(row->key, kAbsent, scanOut, faultOut);
-    if (v == kAbsent) return false;
+    const std::string v = ReadIniValue(row->key, kIniAbsent, scanOut, faultOut);
+    if (v == kIniAbsent) return false;
     raw = v;
     return true;
+}
+
+// The same layers without the session (config_internal.h), over the ini at `iniPath`. The ini is
+// read under IniMutex, as ReadIniValue reads it, and the scan's verdict is not recorded: an
+// unreadable file answers like an absent line, the default.
+void RawBelowSession(const std::wstring& iniPath, const config_registry::Row* row,
+                     std::string& raw) {
+    if (RuntimeLayerGet(row, raw)) return;
+    if (row->envVar) {
+        const std::string e = ReadEnv(row->envVar);
+        if (!e.empty()) {
+            raw = e;
+            return;
+        }
+    }
+    std::string v;
+    {
+        std::lock_guard<std::mutex> lk(g_iniMutex);
+        v = ReadIniValueAt(iniPath, row->key, kIniAbsent, nullptr, nullptr);
+    }
+    raw = (v == kIniAbsent) ? DefaultText(*row) : v;
 }
 
 bool FlagFromRaw(const config_registry::Row* row, bool have, const std::string& raw) {
