@@ -9,11 +9,15 @@
 #include "coop/player/nameplate.h"
 #include "coop/player/nick_color.h"
 
+#include "ui/fonts.h"
+#include "ui/hud.h"
 #include "ui/net_stats_panel.h"
+#include "ui/scale.h"
 
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 
+#include <cstdint>
 #include <string>
 
 namespace coop::dev::settings_drill {
@@ -21,23 +25,44 @@ namespace {
 
 constexpr int kSlot = 1;  // the pair's client
 
-// The step the row names, parsed once at the first Tick. Only Off, Nameplate, NickColor, Flags and
-// Red are parsed from the row; the other enumerators are not produced yet.
+// The step the row names, parsed once at the first Tick. Only Off, Nameplate, NickColor, Flags,
+// Scale, Font and Red are parsed from the row; the other enumerators are not produced yet.
 enum class Token {
     Off, Nameplate, NickColor, Flags, Scale, Font, VoiceMode, VoiceVolume, Server, ServerJoin,
     ServerRed, Red
 };
 
-// 0 idle; 1 SET done, the probe posted; 2 RESET done, the probe posted; 3 DONE.
-int   g_phase = 0;
-Token g_token = Token::Off;
+// 0 idle; 1 SET done, waiting (the probe posted, or for a counter token the counter to move);
+// 2 RESET done, waiting likewise; 3 DONE.
+int      g_phase = 0;
+Token    g_token = Token::Off;
+// A counter token's counter, read immediately before the SET and again before the RESET.
+uint32_t g_baseline = 0;
 
 Token ParseToken(const std::string& mode) {
     if (mode == "nameplate") return Token::Nameplate;
     if (mode == "nickcolor") return Token::NickColor;
     if (mode == "flags")     return Token::Flags;
+    if (mode == "scale")     return Token::Scale;
+    if (mode == "font")      return Token::Font;
     if (mode == "red")       return Token::Red;
     return Token::Off;
+}
+
+// The render thread applies a scale or a font row at a later drawn frame, so these two tokens
+// wait on the module's own counter instead of a posted probe.
+bool IsCounterToken() { return g_token == Token::Scale || g_token == Token::Font; }
+
+uint32_t Counter() {
+    return g_token == Token::Scale ? ui::scale::RowApplies() : ui::fonts::RowsApplies();
+}
+
+// The role's row: the first font role is ui.font.menu.
+const coop::config_registry::EnumRow& FontRow() { return coop::config_registry::FontRoleRow(0); }
+
+const char* CounterKey() {
+    return g_token == Token::Scale ? ::coop::config_registry::rows::ui_scale.row->key
+                                   : FontRow().row->key;
 }
 
 const char* SetResultName(coop::config::SetResult r) {
@@ -78,7 +103,23 @@ void ProbeAfterReset() {
     Done();
 }
 
+// A counter token's RESET: no probe is posted; Tick waits for the counter to move.
+void ResetCounterRow() {
+    const char* key = CounterKey();
+    g_baseline = Counter();
+    UE_LOGI("[SETTINGS-DRILL] host: ResetValue %s", key);
+    const coop::config::SetResult r =
+        g_token == Token::Scale ? coop::config::ResetValue(::coop::config_registry::rows::ui_scale)
+                                : coop::config::ResetValue(FontRow());
+    UE_LOGI("[SETTINGS-DRILL] host: ResetValue %s returned %s", key, SetResultName(r));
+    g_phase = 2;
+}
+
 void Reset() {
+    if (IsCounterToken()) {
+        ResetCounterRow();
+        return;
+    }
     if (g_token == Token::Flags) {
         UE_LOGI("[SETTINGS-DRILL] host: ResetValue ui.chat.peer_actions");
         const coop::config::SetResult r1 =
@@ -129,8 +170,59 @@ void ProbeAfterSet() {
     else Done();
 }
 
+// The first token of the font row's list that is not the family it holds now.
+std::string OtherFontToken() {
+    const std::string cur = coop::config::ResolveEnum(FontRow());
+    const std::string list = FontRow().row->tokens;
+    size_t pos = 0;
+    while (pos <= list.size()) {
+        size_t bar = list.find('|', pos);
+        if (bar == std::string::npos) bar = list.size();
+        std::string tok = list.substr(pos, bar - pos);
+        if (tok != cur) return tok;
+        pos = bar + 1;
+    }
+    return std::string();
+}
+
+// A counter token's SET. The baseline is read before the set; the drawn-frame line says whether
+// the HUD keeps the overlay drawing, because the render thread applies only on a drawn frame.
+void SetCounterRow() {
+    const char* key = CounterKey();
+    const std::string value =
+        g_token == Token::Scale ? std::string("1.50") : OtherFontToken();
+    g_baseline = Counter();
+    UE_LOGI("[SETTINGS-DRILL] host: SetValue %s=%s", key, value.c_str());
+    const coop::config::SetResult r =
+        g_token == Token::Scale
+            ? coop::config::SetValue(::coop::config_registry::rows::ui_scale, value.c_str())
+            : coop::config::SetValue(FontRow(), value.c_str());
+    UE_LOGI("[SETTINGS-DRILL] host: SetValue %s=%s returned %s", key, value.c_str(),
+            SetResultName(r));
+    UE_LOGI("[SETTINGS-DRILL] host: waiting for a drawn frame (hud=%d)",
+            ui::hud::IsActive() ? 1 : 0);
+    g_phase = 1;
+}
+
+// Game thread, each Tick while a counter token waits.
+void PollCounter() {
+    const uint32_t now = Counter();
+    if (now == g_baseline) return;
+    if (g_phase == 1) {
+        UE_LOGI("[SETTINGS-DRILL] host: %s followed (applies=%u)", CounterKey(), now);
+        Reset();
+    } else {
+        UE_LOGI("[SETTINGS-DRILL] host: %s followed back (applies=%u)", CounterKey(), now);
+        Done();
+    }
+}
+
 // The red arm is the nameplate step with its one call skipped.
 void Set() {
+    if (IsCounterToken()) {
+        SetCounterRow();
+        return;
+    }
     const bool skipSet = (g_token == Token::Red);
     if (g_token == Token::Flags) {
         UE_LOGI("[SETTINGS-DRILL] host: SetValue ui.chat.peer_actions=0");
@@ -171,6 +263,10 @@ void Tick(coop::net::Session* session) {
     (void)s_parsed;
     if (g_token == Token::Off) return;
     if (!session || !session->running() || session->role() != coop::net::Role::Host) return;
+    if (IsCounterToken() && (g_phase == 1 || g_phase == 2)) {
+        PollCounter();
+        return;
+    }
     if (g_phase != 0 || !session->IsSlotWorldReady(kSlot)) return;
     Set();
 }
