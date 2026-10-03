@@ -81,8 +81,7 @@ void SetInitialLocalVisible(bool visible);
 // The local pref. Any thread (atomic) -- the F1 checkbox reads it.
 bool LocalVisible();
 
-// Follow the `nameplate` row: once, at boot. A change of the row (the F1 checkbox's SetValue, a
-// reset) is applied locally and announced to the session on the game thread.
+// Follow the `nameplate` row: once, at boot.
 void SubscribeRow();
 
 // Wire store: peer `slot` announced its pref. Update() skips hidden slots from

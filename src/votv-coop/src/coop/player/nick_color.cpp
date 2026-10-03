@@ -27,18 +27,18 @@ std::array<std::atomic<uint32_t>, coop::players::kMaxPeers> g_bySlot{};
 // from the per-tick subsystem installer). 0xFF = unknown (no session).
 std::atomic<uint8_t> g_localSlot{0xFF};
 
-// The `nick_color` row's text, as the row stores it. "unset" (the key is
-// ABSENT, so a new identity) = custom WHITE; an explicitly EMPTY value = the
+// The `nick_color` row's text, as the row stores it. "unset" (the key ABSENT:
+// a new identity, or a reset) = custom WHITE; an explicitly EMPTY value = the
 // per-surface defaults; a 6-digit RRGGBB hex = that colour, and a malformed one
 // falls back to the defaults.
-uint32_t PackedFromIniText(const std::string& hex) {
+uint32_t PackedFromIniText(const std::string& text) {
     uint32_t packed = 0;
-    if (hex == "unset") {
+    if (text == "unset") {
         packed = Pack(255, 255, 255);
-    } else if (hex.size() == 6) {
+    } else if (text.size() == 6) {
         unsigned rgb = 0;
         bool ok = true;
-        for (char c : hex) {
+        for (char c : text) {
             rgb <<= 4;
             if (c >= '0' && c <= '9')      rgb |= static_cast<unsigned>(c - '0');
             else if (c >= 'a' && c <= 'f') rgb |= static_cast<unsigned>(c - 'a' + 10);

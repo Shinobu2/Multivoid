@@ -39,7 +39,7 @@ inline uint8_t B(uint32_t p) { return static_cast<uint8_t>(p); }
 void SetInitialLocal(uint32_t packed);
 
 // Boot-time init from the RAW multivoid.ini nick_color= value (the harness passes
-// ReadIniValue("nick_color", "unset")). Three cases: the key ABSENT, which is a new identity,
+// the resolved row (ResolveString)). Three cases: the key ABSENT, which is a new identity,
 // means custom WHITE; an explicitly EMPTY value, which is what unchecking the custom colour
 // writes, means the per-surface defaults (chat palette, role colours); and RRGGBB hex means that
 // colour. This owns the parse so the harness boot glue stays parse-free.
@@ -53,8 +53,7 @@ uint32_t LocalPacked();
 // white.
 std::string IniTextFor(uint32_t packed);
 
-// Follow the `nick_color` row: once, at boot. A change of the row (the F1 picker's SetValue, a
-// reset) is applied locally and announced to the session on the game thread.
+// Follow the `nick_color` row: once, at boot.
 void SubscribeRow();
 
 // Wire store: peer `slot` announced its color. Any thread (atomic slots).
