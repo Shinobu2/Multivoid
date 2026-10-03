@@ -111,6 +111,9 @@ std::vector<std::string> BuildExampleLines() {
                    "settings belong in multivoid.ini (same folder). To use a setting: remove the "
                    "leading semicolon-space from its line and move it into multivoid.ini under "
                    "the same section. Flags take 1 or 0.");
+    EmitProse(out, "A text value may be quoted: \" like this \" -- inside the quotes \\\" is a "
+                   "quote, \\\\ is a backslash, a ; is part of the value, and spaces at the ends "
+                   "are kept.");
     EmitProse(out, "Most keys have a VOTVCOOP env twin that OVERRIDES the ini value; other "
                    "VOTVCOOP env variables are dev/test harness switches, not user settings.");
     size_t count = 0;
