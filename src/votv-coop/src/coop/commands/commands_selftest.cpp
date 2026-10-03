@@ -594,7 +594,9 @@ void QualifierCases(Checker& check) {
         const DispatchResult s = Run(reg, console, "zap bobby", players, full);
         check(s.ran && g_cap.notifySlots == std::vector<int>{1, 2, 3},
               "qualifier: the console's notifySlots excludes slot 0 only");
-        const DispatchResult n = Run(reg, who, "zap bobby", players, everything);
+        Policy noHolds = full;
+        noHolds.holds = nullptr;
+        const DispatchResult n = Run(reg, who, "zap bobby", players, noHolds);
         check(n.ran && g_cap.notifySlots.empty(), "qualifier: a null holds notifies nobody");
     }
 
@@ -618,6 +620,7 @@ void QualifierCases(Checker& check) {
     {
         CommandSpec c = ZapSpec();
         c.name = "zapid";
+        c.description = "Zaps a player by id.";
         c.nodeOf = "multivoid.zap";
         check(reg.Register(c, nullptr), "qualifier: a second spec naming the node registers");
         const NodeDecl* again = reg.FindNode("multivoid.zap.exempt");
