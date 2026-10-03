@@ -51,6 +51,7 @@ bool NormalizeKey(std::string_view in, std::string* out) {
     return true;
 }
 
+// Ported from LuckPerms common/src/main/java/me/lucko/luckperms/common/node/types/Weight.java:72-83 (MIT, THIRD-PARTY-NOTICES.md).
 bool WeightValue(std::string_view weightKey, int* out) {
     if (weightKey.substr(0, kWeightPrefix.size()) != kWeightPrefix) return false;
     std::string_view num = weightKey.substr(kWeightPrefix.size());

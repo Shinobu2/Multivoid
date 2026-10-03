@@ -32,6 +32,7 @@ Node DefaultGroupNode() {
 
 }  // namespace
 
+// Ported from LuckPerms common/src/main/java/me/lucko/luckperms/common/tasks/SyncTask.java:59-62 (MIT, THIRD-PARTY-NOTICES.md).
 Model::Model() {
     groups_.emplace(std::string(kDefaultGroup),
                     Holder{HolderKind::Group, std::string(kDefaultGroup), std::string(), NodeMap()});
@@ -66,7 +67,7 @@ bool Model::CreateGroup(std::string_view name) {
     return true;
 }
 
-// Ported from LuckPerms common/src/main/java/me/lucko/luckperms/common/model/manager/group/GroupManager.java:37 (MIT, THIRD-PARTY-NOTICES.md).
+// Ported from LuckPerms common/src/main/java/me/lucko/luckperms/common/commands/group/DeleteGroup.java:78 (MIT, THIRD-PARTY-NOTICES.md).
 bool Model::DeleteGroup(std::string_view name) {
     const std::string lowered = Lowered(name);
     if (lowered == kDefaultGroup) return false;
