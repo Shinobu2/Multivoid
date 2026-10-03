@@ -5,7 +5,7 @@
 // caller's Policy, parses and resolves the arguments, calls the handler and collects its reply
 // lines. A handler checks nothing itself (the one exception is /help, which lists what the caller
 // may use). MTA's shape: one command table, checked once at dispatch, the command's default
-// passed into the check (CConsole.cpp:68-69).
+// passed into the check (reference/mtasa-blue/Server/mods/deathmatch/logic/CConsole.cpp:68-69).
 
 #pragma once
 

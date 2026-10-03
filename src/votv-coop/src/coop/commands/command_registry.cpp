@@ -3,8 +3,9 @@
 //
 // Shapes: LuckPerms' command tree with a node per sub-command (`/lp user <p> permission set`) and
 // EssentialsX's base node derived from the command's name, `essentials.<name>`
-// (E/User.java:133-135); MTA keeps one command table whose entries carry their default into the
-// single check (reference/mtasa-blue/Server/mods/deathmatch/logic/CConsoleCommand.h:16-35).
+// (reference/EssentialsX/Essentials/src/main/java/com/earth2me/essentials/User.java:133-135);
+// MTA keeps one command table whose entries carry their default into the single check
+// (reference/mtasa-blue/Server/mods/deathmatch/logic/CConsoleCommand.h:16-35).
 
 #include "coop/commands/command_registry.h"
 

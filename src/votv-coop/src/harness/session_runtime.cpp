@@ -196,8 +196,8 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // And the per-source history behind the connection cap and the password-guess bound: a count
     // that refuses, a refusal that lifts, a window that slides, a full table that refuses nobody.
     coop::net::connect_history::RunSelftest();
-    // And the commands' line splitter and target resolver: a resolver that picks the wrong player
-    // kicks the wrong player, and a wrong pick reads as working until it does.
+    // And the commands' line splitter, target resolver, registry and dispatcher: a resolver that
+    // picks the wrong player kicks the wrong player, and a wrong pick reads as working until then.
     coop::commands::RunSelftest();
     // And the newest-wins latch every received stream keeps: no LAN run reorders a datagram, so the
     // batch that arrives behind one already taken is refused here, on pinned sequences.
