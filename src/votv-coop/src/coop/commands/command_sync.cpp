@@ -102,8 +102,11 @@ void ReadPosition(PlayerView& v, void* actor) {
 }
 
 // The player record a command sees, built when the command runs, on the game thread: who sits in
-// each slot from the roster ledger, each position read now. Nothing is cached. It runs only for a
-// line this process dispatches itself, so in a session this process is the host and slot 0 is it.
+// each slot from the roster ledger, each position read now. Nothing is cached. It runs for a line
+// this process dispatches itself: the host's own or a client's request on the host, and a bare `/`
+// on either role. This process's own slot is the host's 0 or a client's assigned peer id, the way
+// the roster derives it; that slot reads the local nickname, guid and player, every other slot the
+// ledger and its puppet.
 std::vector<PlayerView> BuildPlayers(coop::net::Session* s) {
     std::vector<PlayerView> out;
     coop::players::Registry& reg = coop::players::Registry::Get();
@@ -117,13 +120,14 @@ std::vector<PlayerView> BuildPlayers(coop::net::Session* s) {
         out.push_back(std::move(v));
         return out;
     }
+    const int ownSlot = s->role() == coop::net::Role::Host ? 0 : static_cast<int>(reg.LocalPeerId());
     for (int slot = 0; slot < kMaxPeers; ++slot) {
         const coop::roster_ledger::Row& row = coop::roster_ledger::Get(slot);
         if (!row.occupied()) continue;
         PlayerView v;
         v.slot = slot;
         v.playerNo = row.playerNo;
-        if (slot == 0) {
+        if (slot == ownSlot) {
             v.nick = coop::text::ToUtf8(coop::player_handshake::LocalNickname());
             v.playerId = coop::net::peer_identity::LocalGuid();
             ReadPosition(v, reg.Local());
@@ -153,14 +157,18 @@ void DispatchLocal(const std::string& line) {
     for (const std::string& reply : result.replies) ReplyTo(self, reply);
 }
 
-// The command word of a line for the log, never its arguments (a /msg carries private text), with
-// every byte below 0x20 or 0x7F written as '?' so a client's word cannot forge a log line.
+// The command word of a line for the log, never its arguments (a /msg carries private text). A
+// command name is [a-z0-9], so every byte outside 0x21..0x7E is written as '?': a quoted word may
+// hold spaces (they would forge the "-> ran" marker) and U+0085 / U+2028 / U+2029 are multi-byte
+// line breaks a reader splits on, none of which a client's word may put in a log line.
 std::string LogWord(std::string_view line) {
     const coop::commands::ParsedLine parsed = coop::commands::SplitLine(line);
     std::string word = parsed.words.empty() ? std::string() : parsed.words[0];
     word = coop::text::CapUtf8Bytes(std::move(word), kLogWordMax);
-    for (char& c : word)
-        if (static_cast<unsigned char>(c) < 0x20 || static_cast<unsigned char>(c) == 0x7F) c = '?';
+    for (char& c : word) {
+        const unsigned char u = static_cast<unsigned char>(c);
+        if (u < 0x21 || u > 0x7E) c = '?';
+    }
     return word;
 }
 
@@ -226,7 +234,9 @@ void OnRequest(const uint8_t* bytes, size_t len, int slot) {
         return;
     }
 
-    const std::string line(p.text, p.len);
+    // MTA strips control codes where a command enters the console, as chat_sync does at its boundary
+    // (reference/mtasa-blue/Server/mods/deathmatch/logic/CConsole.cpp:43).
+    const std::string line = coop::text::SanitizeUtf8(p.text, p.len);
     const auto result = coop::commands::Dispatch(Commands(), caller, line, BuildPlayers(s), g_policy);
     UE_LOGI("command_sync: slot %d /%s -> %s", slot, LogWord(line).c_str(),
             result.ran ? "ran" : "refused");
