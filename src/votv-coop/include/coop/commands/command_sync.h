@@ -36,8 +36,8 @@ coop::commands::Registry& Commands();
 
 // The text after a chat line's `/`. Any thread (the chat input calls it on the render thread); it
 // posts to the game thread, where a process with no running session or a host runs the line itself
-// and a client in a running session sends it to the host as a CommandRequest. An empty line (a
-// bare `/`) runs locally on either role: its answer, the help hint, is local text.
+// and a client in a running session sends it to the host as a CommandRequest. A client never
+// dispatches: its bare `/` shows the help hint itself, with nothing sent.
 void Submit(std::string line);
 
 // HOST: a client's CommandRequest, called by the world dispatcher for the transport slot `slot`.

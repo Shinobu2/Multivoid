@@ -108,11 +108,10 @@ void ReadPosition(PlayerView& v, void* actor) {
 }
 
 // The player record a command sees, built when the command runs, on the game thread: who sits in
-// each slot from the roster ledger, each position read now. Nothing is cached. It runs for a line
-// this process dispatches itself: the host's own or a client's request on the host, and a bare `/`
-// on either role. This process's own slot is the host's 0 or a client's assigned peer id, the way
-// the roster derives it; that slot reads the local nickname, guid and player, every other slot the
-// ledger and its puppet.
+// each slot from the roster ledger, each position read now. Nothing is cached. It runs only for a
+// line this process dispatches itself, and only a server dispatches: the host's own line or a
+// client's request on the host, or solo play. That slot reads the local nickname, guid and player,
+// every other slot the ledger and its puppet.
 std::vector<PlayerView> BuildPlayers(coop::net::Session* s) {
     std::vector<PlayerView> out;
     coop::players::Registry& reg = coop::players::Registry::Get();
@@ -126,7 +125,9 @@ std::vector<PlayerView> BuildPlayers(coop::net::Session* s) {
         out.push_back(std::move(v));
         return out;
     }
-    const int ownSlot = s->role() == coop::net::Role::Host ? 0 : static_cast<int>(reg.LocalPeerId());
+    // DispatchLocal and OnRequest run only on their own server, the listen host or solo, whose
+    // slot is 0.
+    constexpr int ownSlot = 0;
     for (int slot = 0; slot < kMaxPeers; ++slot) {
         const coop::roster_ledger::Row& row = coop::roster_ledger::Get(slot);
         if (!row.occupied()) continue;
@@ -207,8 +208,15 @@ void Submit(std::string line) {
     GT::Post([line = std::move(line)] {
         coop::net::Session* s = g_session.load(std::memory_order_acquire);
         const bool inSession = s && s->running();
-        if (!inSession || s->role() == coop::net::Role::Host || line.empty()) {
+        if (!inSession || s->role() == coop::net::Role::Host) {
             DispatchLocal(line);
+            return;
+        }
+        // A client never dispatches: its line runs where its authority is, on the host. A bare `/`
+        // has nothing to send; the hint is local text.
+        const Caller self{0, 0, true};
+        if (line.empty()) {
+            ReplyTo(self, coop::commands::kHelpHint);
             return;
         }
         coop::net::CommandRequestPayload p{};
@@ -216,7 +224,7 @@ void Submit(std::string line) {
         p.len = static_cast<uint8_t>(cut.size());
         std::memcpy(p.text, cut.data(), cut.size());
         if (!s->SendReliable(coop::net::ReliableKind::CommandRequest, &p, sizeof(p)))
-            ReplyTo(Caller{0, 0, true}, "Could not send the command.");
+            ReplyTo(self, "Could not send the command.");
     });
 }
 

@@ -55,6 +55,10 @@ struct DispatchResult {
     std::vector<std::string> replies;
 };
 
+// What an empty line (a bare `/`) is answered with: by Dispatch, and by a client, which never
+// dispatches and shows it itself.
+inline constexpr std::string_view kHelpHint = "Type /help for the commands.";
+
 // `line` is the text after the `/`. Game thread on the host (its callers); pure here.
 DispatchResult Dispatch(const Registry& reg, const Caller& caller, std::string_view line,
                         const std::vector<PlayerView>& players, const Policy& policy);

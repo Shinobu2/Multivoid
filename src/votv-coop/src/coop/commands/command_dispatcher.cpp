@@ -148,7 +148,7 @@ DispatchResult Dispatch(const Registry& reg, const Caller& caller, std::string_v
                         const std::vector<PlayerView>& players, const Policy& policy) {
     Expanded ex;
     const CommandSpec* root = Expand(reg, line, ex);
-    if (ex.typed.words.empty()) return Said("Type /help for the commands.");
+    if (ex.typed.words.empty()) return Said(std::string(kHelpHint));
     if (root == nullptr)
         return Said("Unknown command '/" + ex.typed.words[0] + "'. Type /help for the commands.");
 
