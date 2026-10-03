@@ -18,9 +18,23 @@ namespace {
 
 constexpr int kSlot = 1;  // the pair's client
 
+// The step the row names, parsed once at the first Tick. Only Off, Nameplate, NickColor and Red
+// are produced yet; each later sheet adds its row-string case and its branches.
+enum class Token {
+    Off, Nameplate, NickColor, Flags, Scale, Font, VoiceMode, VoiceVolume, Server, ServerJoin,
+    ServerRed, Red
+};
+
 // 0 idle; 1 SET done, the probe posted; 2 RESET done, the probe posted; 3 DONE.
-int  g_phase = 0;
-bool g_colorStep = false;  // the step in flight is nickcolor (else nameplate)
+int   g_phase = 0;
+Token g_token = Token::Off;
+
+Token ParseToken(const std::string& mode) {
+    if (mode == "nameplate") return Token::Nameplate;
+    if (mode == "nickcolor") return Token::NickColor;
+    if (mode == "red")       return Token::Red;
+    return Token::Off;
+}
 
 const char* SetResultName(coop::config::SetResult r) {
     switch (r) {
@@ -38,7 +52,7 @@ void Done() {
 
 // Game thread, after the subscriber of the reset (FIFO).
 void ProbeAfterReset() {
-    if (g_colorStep) {
+    if (g_token == Token::NickColor) {
         const uint32_t packed = coop::nick_color::LocalPacked();
         if (packed == coop::nick_color::Pack(255, 255, 255))
             UE_LOGI("[SETTINGS-DRILL] host: nick_color followed back (packed=%08X)", packed);
@@ -53,7 +67,7 @@ void ProbeAfterReset() {
 }
 
 void Reset() {
-    if (g_colorStep) {
+    if (g_token == Token::NickColor) {
         UE_LOGI("[SETTINGS-DRILL] host: ResetValue nick_color");
         const coop::config::SetResult r =
             coop::config::ResetValue(::coop::config_registry::rows::nick_color);
@@ -71,7 +85,7 @@ void Reset() {
 // Game thread, after the subscriber of the set (FIFO). A failed probe ends the step.
 void ProbeAfterSet() {
     bool followed = false;
-    if (g_colorStep) {
+    if (g_token == Token::NickColor) {
         const uint32_t packed = coop::nick_color::LocalPacked();
         followed = (packed == 0);
         if (followed) UE_LOGI("[SETTINGS-DRILL] host: nick_color followed (packed=%08X)", packed);
@@ -87,9 +101,9 @@ void ProbeAfterSet() {
 }
 
 // The red arm is the nameplate step with its one call skipped.
-void Set(bool colorStep, bool skipSet) {
-    g_colorStep = colorStep;
-    if (colorStep) {
+void Set() {
+    const bool skipSet = (g_token == Token::Red);
+    if (g_token == Token::NickColor) {
         UE_LOGI("[SETTINGS-DRILL] host: SetValue nick_color= (per-surface default)");
         const coop::config::SetResult r = coop::config::SetValue(
             ::coop::config_registry::rows::nick_color, coop::nick_color::IniTextFor(0).c_str());
@@ -110,12 +124,16 @@ void Set(bool colorStep, bool skipSet) {
 }  // namespace
 
 void Tick(coop::net::Session* session) {
-    static const std::string s_mode =
-        coop::config::ResolveEnum(::coop::config_registry::rows::settings_drill);
-    if (s_mode == "off") return;
+    static const bool s_parsed = [] {
+        g_token = ParseToken(
+            coop::config::ResolveEnum(::coop::config_registry::rows::settings_drill));
+        return true;
+    }();
+    (void)s_parsed;
+    if (g_token == Token::Off) return;
     if (!session || !session->running() || session->role() != coop::net::Role::Host) return;
     if (g_phase != 0 || !session->IsSlotWorldReady(kSlot)) return;
-    Set(s_mode == "nickcolor", s_mode == "red");
+    Set();
 }
 
 void OnDisconnect() {
