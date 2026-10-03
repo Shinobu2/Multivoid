@@ -48,6 +48,11 @@ void SetSession(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
 }
 
+bool HostedSessionRunning() {
+    const auto* s = g_session.load(std::memory_order_acquire);
+    return s != nullptr && s->running() && s->role() == coop::net::Role::Host;
+}
+
 std::string EnforceableAddress(const coop::net::Session& s, int slot, uint32_t generation) {
     char a[64] = {};
     if (!s.GetPeerAddressWithToken(slot, generation, a, sizeof(a))) return {};

@@ -14,10 +14,12 @@
 #include "coop/commands/command_line.h"
 
 #include "coop/comms/chat_feed.h"
+#include "coop/moderation/moderation.h"
 #include "coop/net/intent_bucket.h"
 #include "coop/net/peer_identity.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
+#include "coop/permissions/permission_host.h"
 #include "coop/player/players_registry.h"
 #include "coop/player/remote_player.h"
 #include "coop/player/roster_ledger.h"
@@ -67,11 +69,20 @@ uint64_t g_nextBadMs[kMaxPeers] = {};
 bool g_warnedUnreadableReply = false;
 void (*g_observer)(std::string_view line) = nullptr;
 
-// The check until the permission system installs its own: what it answers a player with nothing
-// granted (the declared default) and an operator (everything).
-// The permission system's check replaces this one when it lands; until then no explicit false exists.
-bool InterimCheck(const Caller& caller, std::string_view /*node*/, bool defaultGranted) {
-    return caller.isOperator || defaultGranted;
+// The permission system's check. Outside a running hosted session the store is not consulted: the
+// console passes every node and nobody else exists. Inside one, the caller's proved id is checked
+// over its own resolved nodes, and the console's owner step answers last: what the chain leaves
+// undefined is true for it, an explicit false still denies it. A caller with no proved id gets the
+// node's declared default.
+bool PermissionCheck(const Caller& caller, std::string_view node, bool defaultGranted) {
+    if (!coop::moderation::HostedSessionRunning()) return caller.isOperator ? true : defaultGranted;
+    if (caller.playerId.empty()) return defaultGranted;
+    return coop::permissions::host::Allows(caller.playerId, node, defaultGranted, caller.isOperator);
+}
+
+// A third party's answer, for the notify qualifier: no owner step, only what the chain says.
+bool HoldsNode(std::string_view playerId, std::string_view node, bool defaultGranted) {
+    return coop::permissions::host::Allows(playerId, node, defaultGranted, false);
 }
 
 // The one source of chance (`@r`). Game thread only.
@@ -81,7 +92,8 @@ int Pick(int count) {
     return std::uniform_int_distribution<int>(0, count - 1)(rng);
 }
 
-const coop::commands::Policy g_policy{&InterimCheck, &Pick};
+const coop::commands::Policy g_policy{&PermissionCheck, &Pick, &HoldsNode,
+                                      &coop::permissions::host::HoldsExplicitly};
 
 struct RegistryHolder {
     coop::commands::Registry registry;
@@ -111,7 +123,8 @@ void ReadPosition(PlayerView& v, void* actor) {
 // each slot from the roster ledger, each position read now. Nothing is cached. It runs only for a
 // line this process dispatches itself, and only a server dispatches: the host's own line or a
 // client's request on the host, or solo play. That slot reads the local nickname, guid and player,
-// every other slot the ledger and its puppet.
+// every other slot the ledger and its puppet; a client's player id is the session's proof for the
+// ledger row's generation, which exists from admission, before the Join fills the row's guid.
 std::vector<PlayerView> BuildPlayers(coop::net::Session* s) {
     std::vector<PlayerView> out;
     coop::players::Registry& reg = coop::players::Registry::Get();
@@ -121,6 +134,7 @@ std::vector<PlayerView> BuildPlayers(coop::net::Session* s) {
         v.slot = 0;
         v.nick = coop::text::ToUtf8(coop::player_handshake::LocalNickname());
         v.playerId = coop::net::peer_identity::LocalGuid();
+        v.worldReady = true;
         ReadPosition(v, reg.Local());
         out.push_back(std::move(v));
         return out;
@@ -137,10 +151,13 @@ std::vector<PlayerView> BuildPlayers(coop::net::Session* s) {
         if (slot == ownSlot) {
             v.nick = coop::text::ToUtf8(coop::player_handshake::LocalNickname());
             v.playerId = coop::net::peer_identity::LocalGuid();
+            v.worldReady = true;
             ReadPosition(v, reg.Local());
         } else {
+            v.generation = row.bornGeneration;
+            v.worldReady = s->IsSlotWorldReady(slot);
             v.nick = coop::text::ToUtf8(coop::roster_ledger::DisplayName(slot));
-            v.playerId = row.guid;
+            v.playerId = s->ProvedGuidForSlotWithToken(slot, v.generation);
             coop::RemotePlayer* puppet = reg.Puppet(static_cast<uint8_t>(slot));
             ue_wrap::FVector p{};
             if (puppet && puppet->TryGetLocation(p)) {
@@ -155,12 +172,14 @@ std::vector<PlayerView> BuildPlayers(coop::net::Session* s) {
     return out;
 }
 
-// The local operator's own line: the listen host, or solo play. Deliberate divergence: it passes
-// every check because Source's listen host is the admin
-// (reference/source-sdk-2013/src/game/server/util.cpp:622-647); MTA has no listen host, its console
+// The local operator's own line: the listen host, or solo play. It is the console: the owner step
+// answers last, so what the permission chain leaves undefined passes and an explicit false still
+// denies it. Deliberate divergence: Source's listen host is the admin and passes every check
+// (reference/source-sdk-2013/src/game/server/util.cpp:622-648); MTA has no listen host, its console
 // is an ACL account.
 void DispatchLocal(const std::string& line) {
-    const Caller self{0, 0, true};
+    Caller self{0, 0, true};
+    self.playerId = coop::net::peer_identity::LocalGuid();
     const auto result = coop::commands::Dispatch(Commands(), self, line,
                                                  BuildPlayers(g_session.load(std::memory_order_acquire)),
                                                  g_policy);
@@ -240,7 +259,14 @@ void OnRequest(const uint8_t* bytes, size_t len, int slot) {
     // (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:2410, IsJoined); an unmodified
     // client sends its Join one tick after its slot arrives, so no typed line is lost.
     if (coop::roster_ledger::Get(slot).guid.empty()) return;
-    const Caller caller{slot, s->peerGenerationForSlot(slot), false};
+    // The generation of the ledger row the game thread reconciled, not the slot's live one: a line
+    // its predecessor queued before leaving reads the predecessor's token, finds no proved id for
+    // it and is dropped, so it never runs with the successor's grants.
+    const uint32_t gen = coop::roster_ledger::Get(slot).bornGeneration;
+    const std::string proved = s->ProvedGuidForSlotWithToken(slot, gen);
+    if (proved.empty()) return;
+    Caller caller{slot, gen, false};
+    caller.playerId = proved;
 
     const uint64_t now = ::GetTickCount64();
     if (!g_bucket[slot].Take(kBudget, now)) {

@@ -62,6 +62,11 @@ inline PlayerToken TokenFor(int slot, uint16_t playerNo, uint32_t generation) {
 // boot, alongside the other modules' SetSession.
 void SetSession(coop::net::Session* session);
 
+// True while a hosted session runs in this process: the session pointer is set, the session is
+// running and its role is Host. The one answer to "is there a running hosted session". Game
+// thread; logs nothing.
+bool HostedSessionRunning();
+
 // The slot's remote address as a ban key, or empty. An address is a ban key only when it is the
 // player's own, on a direct path: GNS clears the address of an ICE-relayed path
 // (p2p_ice.cpp:621-623) and an unknown path has none. The read is gated on `generation`, so it

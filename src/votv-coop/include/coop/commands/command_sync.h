@@ -1,6 +1,6 @@
 // coop/commands/command_sync.h -- the in-game transport of the commands folder: the chat input's
 // `/` route, the two wire kinds (CommandRequest, CommandReply), the player record a command sees,
-// the per-sender rate limit and the interim permission check.
+// the per-sender rate limit and the permission system's check.
 //
 // The folder's model files (command_line, command_targets, command_registry, command_dispatcher)
 // stay engine-free; this one reaches the session, the roster ledger, the players registry and the
