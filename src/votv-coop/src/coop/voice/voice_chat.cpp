@@ -121,7 +121,7 @@ void StartDevices() {
     coop::voice::PlaybackConfig pc;
     pc.device = CFG::ResolveString(coop::config_registry::rows::voice_output_device);
     pc.volume = CFG::ResolveFloat(coop::config_registry::rows::voice_volume);
-    // The host's value in a session (the row's session layer, WP-S2); the subscriber below keeps
+    // The host's value in a session (the row's session layer); the subscriber below keeps
     // it applied live, so this read is only the initial value.
     pc.distanceCm = CFG::ResolveFloat(coop::config_registry::rows::voice_distance_cm);
     pc.jitterThreshold = static_cast<int>(CFG::ResolveInt(coop::config_registry::rows::voice_jitter_threshold));
@@ -188,8 +188,8 @@ void OnVoiceVolumeRowChanged() {
     g_playback.SetMasterVolume(CFG::ResolveFloat(coop::config_registry::rows::voice_volume));
 }
 
-// The range row is the host's in a session (WP-S2): its subscriber hands the effective value to
-// the mixer's atomic, with no device restart. 0 = unlimited.
+// The range row is the host's in a session (its session layer carries the host's value): its
+// subscriber hands the effective value to the mixer's atomic, with no device restart. 0 = unlimited.
 void OnVoiceRangeRowChanged() {
     const float cm = CFG::ResolveFloat(coop::config_registry::rows::voice_distance_cm);
     g_playback.SetDistanceCm(cm);

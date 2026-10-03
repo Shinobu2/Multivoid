@@ -8,11 +8,10 @@
 // distance gain of 1 - d/maxDist (a whisper halves the radius; the range is the session's
 // voice.distance_cm, 0 = unlimited), a vertical fade of 1 - |dz|/(range * kVerticalFadeRatio), the
 // REDUCED-mode pan in [-0.5,0.5] (volume clamp(1 -+ pan*1.4, 0.3, 1)), talking = decoded <250 ms.
-//
 // Threading: OnFrame, TickDecode, SetListener and SetSpeaker are GAME THREAD; the miniaudio
-// callback touches only the PCM rings (SPSC -- the game thread produces, the callback consumes) and
-// the position atomics. No engine access anywhere, and no allocation after Start beyond the lazily
-// created per-slot opus decoders.
+// callback touches only the PCM rings (SPSC), the position atomics, the range atomic (distanceCm_)
+// and the row's default (DefaultRangeCm(), a constant read). No engine access anywhere, and no
+// allocation after Start beyond the lazily created per-slot opus decoders.
 
 #pragma once
 
