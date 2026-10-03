@@ -146,10 +146,6 @@ DWORD WINAPI TimelineThread(LPVOID param) {
     }
     // The persisted body skin; local_body owns it and the Join reads it from there.
     coop::local_body::SetInitialSkin(cfg::ReadPlayerSkin());
-    // The persisted nameplate pref (absent = visible), read by the Join's prefs byte.
-    coop::nameplate::SetInitialLocalVisible(cfg::ResolveFlag(coop::config_registry::rows::nameplate));
-    // The persisted nick colour (ini nick_color=RRGGBB); nick_color owns the parse.
-    coop::nick_color::SetInitialLocalFromIniHex(cfg::ResolveString(coop::config_registry::rows::nick_color));
     // The boot file-versus-schema sweep, after the mints above so the post-mint file is what is
     // reviewed; it arms the settings-check panel at the main menu and never rewrites.
     coop::config_review::RunBootSweep();
@@ -513,8 +509,12 @@ void Start() {
     pump::SetSession(&session_runtime::Session());
     // A config change's subscribers run on the game thread.
     cfg::SetNotifier([](std::function<void()> task) { GT::Post(std::move(task)); });
-    // The modules that follow a config row subscribe once, here, before any pane draws; the boot
-    // seeds in the timeline thread read the rows, and a later set reaches the modules through these.
+    // The persisted nameplate pref (absent = visible), read by the Join's prefs byte.
+    coop::nameplate::SetInitialLocalVisible(cfg::ResolveFlag(coop::config_registry::rows::nameplate));
+    // The persisted nick colour (ini nick_color=RRGGBB); nick_color owns the parse.
+    coop::nick_color::SetInitialLocalFromIniHex(cfg::ResolveString(coop::config_registry::rows::nick_color));
+    // The modules that follow a config row subscribe once, here, before any pane draws; the seeds
+    // above have read the rows, and every later set reaches the modules through these.
     coop::nameplate::SubscribeRow();
     coop::nick_color::SubscribeRow();
     if (!ui::imgui_overlay::Init()) {
