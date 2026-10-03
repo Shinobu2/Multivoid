@@ -39,7 +39,7 @@ namespace coop::moderation {
 // The captured identity of a moderation target. Build it with TokenFor from the ledger row.
 struct PlayerToken {
     int      slot = -1;
-    uint16_t playerNo = 0;   // for the log line + the confirm dialog
+    uint16_t playerNo = 0;   // for the log lines and the ledger check
     uint32_t generation = 0; // what the net layer validates against
     bool valid() const { return slot >= 1 && playerNo != 0 && generation != 0; }
 };

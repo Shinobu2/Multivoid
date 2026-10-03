@@ -74,6 +74,13 @@ ModResult KickPlayer(const PlayerToken& token, const char* reason) {
     auto* s = HostSession("kick");
     if (!s) return ModResult::NoSession;
     if (!token.valid()) return ModResult::Gone;
+    // The ledger's player number, as in the ban and the teleport: a slot whose roster row moved on
+    // while the net layer's generation still matches is another player's seat.
+    if (coop::roster_ledger::Get(token.slot).playerNo != token.playerNo) {
+        UE_LOGW("moderation: kick of #%u skipped -- slot %d changed hands",
+                static_cast<unsigned>(token.playerNo), token.slot);
+        return ModResult::Gone;
+    }
     const std::string why = ReasonOr(reason, "kicked by host");
     if (!s->KickWithToken(token.slot, token.generation, coop::net::EndReason::KickedByHost,
                           why.c_str())) {
