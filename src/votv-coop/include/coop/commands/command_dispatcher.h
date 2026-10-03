@@ -39,7 +39,8 @@ struct Policy {
 // and the policy outlive no further than the call; a handler that defers work copies what it
 // needs (slots, player ids, texts, the caller's slot and generation). One entry per `spec.args`
 // index in each vector: `given[i]` is false for an absent optional argument; `targets[i]` is
-// filled for Player / Players, `integers[i]` for Integer, `texts[i]` is the word (the raw
+// filled for Player / PlayerOrId / Players (an offline PlayerOrId target has `offline` set,
+// `offlineId`, and no slots), `integers[i]` for Integer, `texts[i]` is the word (the raw
 // remainder for Rest) for every kind. `notifySlots` is filled for a spec with a Notify qualifier:
 // the seated slots, other than the caller's and the host's, that hold its node.
 struct Context {
