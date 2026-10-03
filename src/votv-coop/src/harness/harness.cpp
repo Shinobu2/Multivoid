@@ -38,6 +38,7 @@
 #include "coop/session/session_manager.h"
 #include "coop/player/nameplate.h"
 #include "coop/player/nick_color.h"
+#include "coop/comms/peer_action_feed.h"
 #include "coop/player/roster.h"
 #include "coop/net/session.h"
 #include "coop/player/puppet_drive.h"
@@ -517,6 +518,7 @@ void Start() {
     // above have read the rows, and every later set reaches the modules through these.
     coop::nameplate::SubscribeRow();
     coop::nick_color::SubscribeRow();
+    coop::peer_action_feed::SubscribeRow();
     if (!ui::imgui_overlay::Init()) {
         UE_LOGW("harness: imgui_overlay::Init failed -- F1 menu unavailable this run");
     }

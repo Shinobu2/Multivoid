@@ -354,12 +354,14 @@ void RenderNetStats() { ui::net_stats_panel::RenderMenuPref(); }
 // Peer action notifications: show a chat/feed line when another player does a shared
 // action everyone should see (first: deleting an email). A LOCAL view preference
 // (each peer decides whether IT sees these lines), persisted (multivoid.ini
-// ui.chat.peer_actions). Rendered locally from the existing wire event -- no extra
-// traffic; see coop::peer_action_feed.
+// ui.chat.peer_actions); the checkbox sets the row and peer_action_feed follows it.
+// Rendered locally from the existing wire event -- no extra traffic; see
+// coop::peer_action_feed.
 void RenderChatPref() {
     bool on = coop::peer_action_feed::Enabled();
     if (ImGui::Checkbox("Peer action notifications", &on))
-        coop::peer_action_feed::SetEnabled(on);
+        coop::config::SetValue(::coop::config_registry::rows::ui_chat_peer_actions,
+                               on ? "1" : "0");
     ImGui::TextDisabled("Show a chat line when another player does a shared action");
     ImGui::TextDisabled("(e.g. deletes an email). Local preference; persists across");
     ImGui::TextDisabled("sessions (ui.chat.peer_actions).");
