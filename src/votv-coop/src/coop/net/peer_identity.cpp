@@ -21,7 +21,6 @@
 
 #include <cstdio>
 #include <cstring>
-#include <cwctype>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -102,10 +101,11 @@ bool FromHex(const std::string& hex, uint8_t* out, size_t n) {
 // it -- so an update changes nobody's identity, a Steam library move carries it, and a tester's
 // two installs are two players. It is created under a private access list (this account and the
 // system, nothing inherited), re-applied at every load, so another account on the same PC cannot
-// read it. An account that cannot own the install's file -- it belongs to another account, or the
-// install folder refuses the write -- keeps its own key for that install under its profile
-// (%LOCALAPPDATA%\Multivoid\installs\<install id>\), the install id naming the executable's folder,
-// so two installs stay two players there too. Never in the ini: inis get pasted into bug reports.
+// read it. An account that cannot read the install's file -- another account holds it -- or finds
+// none keeps its own key for this install beside it (`multivoid_identity_<account>.key`), so two
+// accounts stay two players; a folder that refuses the write leaves the session on a temporary
+// identity, as it leaves every file the mod writes. Never in the ini: inis get pasted into bug
+// reports.
 
 const char* kKeyFileName = "multivoid_identity.key";
 
@@ -120,36 +120,6 @@ std::wstring InstallKeyFilePath() {
     const std::wstring dir = ue_wrap::paths::ExeDir();
     if (dir.empty()) return {};
     return dir + L"\\" + KeyFileName();
-}
-
-// This account's file for this install, under the profile: the install id is the first eight
-// bytes of SHA-256 over the executable folder's path, lower-cased, so a copy in another folder is
-// another install and the same folder is the same one. Empty when nothing resolves; the folders
-// are created only when the file is written.
-std::wstring ProfileKeyFilePath() {
-    std::wstring dir = ue_wrap::paths::ExeDir();
-    const std::wstring base = ue_wrap::paths::ProfileDir();
-    if (dir.empty() || base.empty()) return {};
-    for (auto& c : dir) c = static_cast<wchar_t>(std::towlower(c));
-    uint8_t digest[32];
-    if (!Sha256(dir.data(), dir.size() * sizeof(wchar_t), digest)) return {};
-    std::wstring id;
-    for (char c : ToHex(digest, 8)) id.push_back(static_cast<wchar_t>(c));
-    return base + L"\\installs\\" + id + L"\\" + KeyFileName();
-}
-
-// The parent folders of a profile key file, created on the way to the first write.
-bool EnsureParentDirs(const std::wstring& path) {
-    size_t pos = 0;
-    const std::wstring base = ue_wrap::paths::ProfileDir();
-    if (base.empty() || path.compare(0, base.size(), base) != 0) return false;
-    pos = base.size();
-    while ((pos = path.find(L'\\', pos + 1)) != std::wstring::npos) {
-        const std::wstring dir = path.substr(0, pos);
-        if (!::CreateDirectoryW(dir.c_str(), nullptr) && ::GetLastError() != ERROR_ALREADY_EXISTS)
-            return false;
-    }
-    return true;
 }
 
 // The file's own access list: this account and the system, full control, nothing inherited, so
@@ -201,6 +171,21 @@ const PrivateAcl& KeyFileAcl() {
         return a;
     }();
     return acl;
+}
+
+// This account's key for an install whose own key file another account holds, or that has none:
+// beside it, named by a hash of this account's SID, so two accounts on one install stay two
+// players and the game folder holds everything the mod writes (D14). Empty when nothing
+// resolves.
+std::wstring AccountKeyFilePath() {
+    const std::wstring dir = ue_wrap::paths::ExeDir();
+    const std::vector<uint8_t>& sid = KeyFileAcl().userSid;
+    if (dir.empty() || sid.empty()) return {};
+    uint8_t digest[32];
+    if (!Sha256(sid.data(), sid.size(), digest)) return {};
+    std::wstring id;
+    for (char c : ToHex(digest, 8)) id.push_back(static_cast<wchar_t>(c));
+    return dir + L"\\multivoid_identity_" + id + L".key";
 }
 
 // Sets the private list on the file; reports a volume that keeps none. False says only that the
@@ -287,7 +272,8 @@ bool WriteKeyFile(const std::wstring& path, const uint8_t priv[kPrivKeyBytes], D
         "# Multivoid durable player identity -- KEEP THIS FILE SECRET.\n"
         "# Anyone who has this key can play as you: it is what proves your identity\n"
         "# to every host you join, and it is what your stored inventory is named by.\n"
-        "# Copy it to another PC to take your identity with you; never paste it into\n"
+        "# Copy it to another PC, named\n"
+        "# multivoid_identity.key, to take your identity with you; never paste it into\n"
         "# a bug report, a screenshot or a Discord message.\n"
         "key=";
     text += ToHex(priv, kPrivKeyBytes);
@@ -330,36 +316,59 @@ bool RandomBytes(void* out, size_t len) {
 bool Load() {
     if (g_loaded) return true;
     const std::wstring installPath = InstallKeyFilePath();
+    const std::wstring account = AccountKeyFilePath();
     std::wstring loadedFrom;   // the file the key was read from
     std::wstring target;       // where a minted key is written; empty = temporary
     bool minted = false;
     bool temporary = false;    // a file that may exist could not be read: nothing is written
     DWORD readErr = 0;
+    // This account's own file: used when it loads; an unreadable one ends TEMPORARY with nothing
+    // written (never mint over a durable key a transient error hid); a malformed or missing one
+    // is minted over, into `mintTarget`.
+    auto readAccountKey = [&](const std::wstring& mintTarget) {
+        switch (ReadKeyFile(account, g_priv, &readErr)) {
+        case ReadResult::Loaded:
+            loadedFrom = account;
+            break;
+        case ReadResult::Unreadable:
+        case ReadResult::Denied:
+            UE_LOGW("peer_identity: could not read this account's key file %ls (error %lu) -- "
+                    "a TEMPORARY identity for this session, the file left untouched",
+                    account.c_str(), static_cast<unsigned long>(readErr));
+            minted = true;
+            temporary = true;
+            break;
+        case ReadResult::Malformed:
+            UE_LOGW("peer_identity: %ls is not a key file this build can read -- minting a new "
+                    "identity over it", account.c_str());
+            minted = true;
+            target = mintTarget;
+            break;
+        case ReadResult::Missing:
+            minted = true;
+            target = mintTarget;
+            break;
+        }
+    };
     switch (ReadKeyFile(installPath, g_priv, &readErr)) {
     case ReadResult::Loaded:
         loadedFrom = installPath;
         break;
-    case ReadResult::Denied: {
-        // Another account's file: this account keeps its own key for this install.
-        const std::wstring mine = ProfileKeyFilePath();
-        UE_LOGI("peer_identity: the install's key file (%ls) belongs to another account on this "
-                "PC -- using this account's own key for this install (%ls)",
-                installPath.c_str(), mine.c_str());
-        const ReadResult r2 = ReadKeyFile(mine, g_priv, &readErr);
-        if (r2 == ReadResult::Loaded) {
-            loadedFrom = mine;
-        } else if (r2 == ReadResult::Unreadable) {
-            UE_LOGW("peer_identity: could not read this account's key file %ls (error %lu) -- "
-                    "a TEMPORARY identity for this session, the file left untouched",
-                    mine.c_str(), static_cast<unsigned long>(readErr));
+    case ReadResult::Denied:
+        // Another account's file: this account keeps its own key beside it.
+        if (account.empty()) {
+            UE_LOGW("peer_identity: the install's key file (%ls) belongs to another account and "
+                    "this account's own key file cannot be named -- a TEMPORARY identity for this "
+                    "session", installPath.c_str());
             minted = true;
             temporary = true;
-        } else {
-            minted = true;
-            target = mine;
+            break;
         }
+        UE_LOGI("peer_identity: the install's key file (%ls) belongs to another account on this "
+                "PC -- using this account's own key beside it (%ls)",
+                installPath.c_str(), account.c_str());
+        readAccountKey(account);
         break;
-    }
     case ReadResult::Unreadable:
         UE_LOGW("peer_identity: could not read the key file %ls (error %lu; a scanner holding it, "
                 "or a device error) -- a TEMPORARY identity for this session, the file left "
@@ -375,8 +384,8 @@ bool Load() {
         target = installPath;
         break;
     case ReadResult::Missing:
-        minted = true;
-        target = installPath;
+        // No install key: an account whose owner deleted it keeps the identity it already has.
+        readAccountKey(installPath);
         break;
     }
     if (minted) {
@@ -408,18 +417,7 @@ bool Load() {
                 "not be read, see above) -- dial=%s", g_guid.c_str(), g_identityString.c_str());
     } else if (minted) {
         DWORD err = 0;
-        if (target == installPath && !WriteKeyFile(target, g_priv, &err)) {
-            // The install folder refused the write (an install under a folder this account may
-            // only read): the key goes under the profile, for this install.
-            const std::wstring mine = ProfileKeyFilePath();
-            UE_LOGI("peer_identity: the install folder refused the key file (%ls, error %lu) -- "
-                    "saving this account's key for this install under the profile (%ls)",
-                    installPath.c_str(), static_cast<unsigned long>(err), mine.c_str());
-            target = mine;
-        }
-        // The install's file was written above; a profile file is written here, its folders first.
-        if (target != installPath) EnsureParentDirs(target);
-        if (!target.empty() && (target == installPath || WriteKeyFile(target, g_priv, &err))) {
+        if (!target.empty() && WriteKeyFile(target, g_priv, &err)) {
             ApplyKeyFileAcl(target);
             UE_LOGI("peer_identity: minted a new durable identity %s (saved to %ls) -- dial=%s",
                     g_guid.c_str(), target.c_str(), g_identityString.c_str());
@@ -612,6 +610,27 @@ bool RunSelftest() {
               parsed.m_cbSize == kPubKeyBytes &&
               std::memcmp(parsed.m_genericBytes, g_pub.data(), kPubKeyBytes) == 0,
               "our rendered identity does not parse back to our own public key");
+
+        // 17-19: this account's key path resolves exactly when its SID does, is stable, and sits
+        // beside the install under a 16-hex id -- two accounts on one install are two players only
+        // while the name is derived from the account and from nothing else.
+        const std::wstring a = AccountKeyFilePath();
+        check(KeyFileAcl().userSid.empty() == a.empty(),
+              "the account key path resolves exactly when the SID does");
+        if (!a.empty()) {
+            const std::wstring exe = ue_wrap::paths::ExeDir();
+            check(a == AccountKeyFilePath() && a != InstallKeyFilePath() &&
+                  a.rfind(exe + L"\\multivoid_identity_", 0) == 0 &&
+                  a.size() == exe.size() + 20 + 16 + 4 &&
+                  a.compare(a.size() - 4, 4, L".key") == 0,
+                  "the account key path is stable and beside the install");
+            bool hex = true;
+            for (size_t i = a.size() - 4 - 16; i < a.size() - 4; ++i) {
+                const wchar_t c = a[i];
+                if (!((c >= L'0' && c <= L'9') || (c >= L'a' && c <= L'f'))) hex = false;
+            }
+            check(hex, "the account key path's id is not 16 lower-case hex");
+        }
     }
 
     if (pass == total) {

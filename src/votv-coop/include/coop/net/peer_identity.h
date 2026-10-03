@@ -11,8 +11,8 @@
 // immutable key loaded at boot. The key file is the install's, beside the ini but never in it
 // (inis get pasted into bug reports), under a private access list of its own (this account and
 // the system, nothing inherited) re-applied at every load, since anyone holding it can be you;
-// an account that cannot own the install's file keeps its own key for that install under its
-// profile. A Steam library move carries it, and a tester's two installs are two players.
+// an account that cannot read the install's file, or finds none, keeps its own key for that
+// install beside it. A Steam library move carries it, and a tester's two installs are two players.
 
 #pragma once
 
@@ -32,7 +32,8 @@ using PubKey = std::array<uint8_t, kPubKeyBytes>;
 using Sig    = std::array<uint8_t, kSigBytes>;
 
 // Load the durable keypair, generating and persisting one on first launch; an account that
-// cannot read or write the install's file gets its own under its profile. False only when no
+// cannot read the install's file, or finds none, gets its own beside it, and a folder that
+// refuses the write leaves a temporary one. False only when no
 // key could be established at all, in which case the session must not start, since an
 // identity-less peer cannot be admitted anywhere; a key that could not be persisted still
 // works for this session and says so in the log.

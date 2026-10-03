@@ -1,5 +1,4 @@
-// ue_wrap/core/paths.h -- the ONE owner of the two directory anchors: the install, and the
-// player's profile.
+// ue_wrap/core/paths.h -- the ONE owner of the install's directory anchor.
 //
 // Every per-install runtime artifact (multivoid.log, multivoid.ini + .example,
 // multivoid-loaded.txt, multivoid-players.txt, multivoid-banlist.txt,
@@ -9,8 +8,7 @@
 // unreal_shimloader additionally virtualizes Mods\ into the r2modman profile, where
 // module-dir writes were measured landing. The exe dir is the one real, loader-independent
 // home of the install, so every artifact above resolves its directory through this one
-// helper rather than computing it per file. The profile anchor below is the fallback for an
-// account that cannot own an install's own key file.
+// helper rather than computing it per file.
 
 #pragma once
 
@@ -21,11 +19,5 @@ namespace ue_wrap::paths {
 // Directory containing the game executable (no trailing slash). Empty only on
 // a GetModuleFileNameW failure (callers treat empty as "skip the write").
 std::wstring ExeDir();
-
-// The Multivoid folder under this Windows account's local application data, created on
-// first use (no trailing slash): the home of an account's own key for an install whose file
-// it cannot own. Empty when the folder can be neither found nor created (callers treat empty
-// as "skip the write").
-std::wstring ProfileDir();
 
 }  // namespace ue_wrap::paths
