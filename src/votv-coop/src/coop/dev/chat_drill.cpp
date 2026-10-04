@@ -325,7 +325,9 @@ bool Begin(coop::net::Session* session) {
     g_windowN = 0;
     g_lastScanMs = 0;
     if (g_role >= kRoles || (!g_isHost && g_role < 1)) {
-        UE_LOGW("[CHAT-DRILL] slot %d ABORT: this slot has no role in the drill", g_role);
+        // Only a client reaches this (the host's role is 0), and a slot past the cast has no
+        // kRoleName entry: its line is the normal "c<slot>" shape.
+        UE_LOGW("[CHAT-DRILL] c%d ABORT: this slot has no role in the drill", g_role);
         g_phase = Phase::Done;
         return false;
     }
