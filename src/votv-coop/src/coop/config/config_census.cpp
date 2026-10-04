@@ -165,7 +165,9 @@ IniReport IniTextForReport(std::string& out) {
     }
     std::vector<std::string> lines;
     IniFault fault = IniFault::None;
-    if (ListLiveIniLines(lines, &fault) != 0) return IniReport::Unreadable;
+    const int scan = ListLiveIniLines(lines, &fault);
+    if (scan == 1) return IniReport::NotPresent;
+    if (scan != 0) return IniReport::Unreadable;
     std::string text;
     for (const std::string& line : IniLinesForReport(lines)) {
         if (!text.empty()) text += '\n';
