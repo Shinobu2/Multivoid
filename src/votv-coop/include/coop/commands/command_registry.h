@@ -104,8 +104,8 @@ struct CommandSpec {
     // A targeted parent: no handler, one argument taken between its name and its sub-verb,
     // `/mv user <who> permission`. Its argument is the first of each leaf's effective arguments
     // (Registry::ArgsOf), so the leaf's qualifiers judge it. Register requires that argument to be
-    // one required Word, Player or PlayerOrId, and refuses an alias or a qualifier on any spec
-    // without a handler. A leaf's argument rules (a Rest last, no required argument after an
+    // one required Word, Player or PlayerOrId, and refuses an alias on a targeted parent and a
+    // qualifier on any spec without a handler. A leaf's argument rules (a Rest last, no required argument after an
     // optional one, a notHost argument needs a pastTense) and its qualifiers' target rules are
     // judged over that effective list.
     bool Targeted() const { return handler == nullptr && !args.empty(); }
