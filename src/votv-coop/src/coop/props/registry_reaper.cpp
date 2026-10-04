@@ -96,7 +96,7 @@ bool Tick(coop::net::Session& session) {
         // wake signal deferred joiners wait on) never bumped.
         coop::prop_element_tracker::SetReaperInGameplayWorld(inGameplayWorld);
         // The one case this reader is worse than the walk: an unresolvable world is Unknown, not
-        // Gameplay, so five things stop (the purge reap, the world-change re-seed, the steady
+        // Gameplay, so four things stop (the purge reap, the world-change re-seed, the steady
         // re-seed and with it SeedGeneration, and the reaper's flee for a menu arrival that did not
         // pass the quit decision). Treating Unknown as gameplay would resume the reap at the menu;
         // leaving it keeps such a peer's session running at the menu, the same balloon by another
@@ -115,7 +115,7 @@ bool Tick(coop::net::Session& session) {
             } else if (sEverKnown && !sSaid && ++sUnknownScans >= kUnknownScansBeforeAlarm) {
                 sSaid = true;
                 UE_LOGE("reaper: the current world has been UNRESOLVABLE for ~%d s "
-                        "(world_identity degraded=%d). While it stays that way FIVE things are "
+                        "(world_identity degraded=%d). While it stays that way FOUR things are "
                         "off: the dead-Prop-Element reap, the world-change re-seed, the steady "
                         "re-seed (so SeedGeneration is FROZEN and deferred joiners never wake), "
                         "and the reaper's flee for a menu arrival that did not pass the quit "
