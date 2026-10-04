@@ -166,8 +166,10 @@ void Write(Level level, const char* fmt, ...) {
 
     // Format the message body once into a local buffer, so it can go to the file and to the sink
     // without re-running the formatter. A line under 1 KB (the common case) takes one stack
-    // format; a longer one is measured and formatted whole into `whole`, so a long line is never
-    // cut and its address mark is never split.
+    // format; a longer one the formatter can finish is measured and written whole from `whole`,
+    // so its address mark is never split. A line the formatter cannot finish (a conversion
+    // stop), or whose whole buffer the heap refuses, is still cut to the stack buffer by the
+    // trim below.
     char msg[1024];
     // Write never throws, so the whole-line buffer is a nothrow allocation: a refusal leaves
     // `whole` empty and the line takes the stack buffer and the trim.

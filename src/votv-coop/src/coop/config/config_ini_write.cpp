@@ -95,8 +95,8 @@ bool WriteIniValueAt(const std::wstring& path, const char* key, const char* valu
     const std::string safe = internal::NormalizeValue(value, !stringRow);
     // What this function may LOG. The value still goes to the file -- that is the whole job -- but
     // both lines below name the key and the outcome, and a lobby password printed beside them
-    // outlives the session in every pasted log. Same registry predicate the census asks, so the
-    // tree cannot redact a value in one writer and print it in the other.
+    // outlives the session in every pasted log. ValueForLog is the one printed form every config
+    // printer uses, so the tree cannot redact a value in one writer and print it in the other.
     const std::string shown = config_registry::ValueForLog(r, safe);
     const char* wantSec = SectionForKey(key);
     if (!ValueValidForKey(key, safe, nullptr)) {

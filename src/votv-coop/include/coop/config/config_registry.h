@@ -112,11 +112,11 @@ const char* RetiredKeyNote(const char* key);
 
 // True if this key's VALUE is a credential and must never reach a log. Named rows, not a guess at
 // the spelling: a substring rule reads `perf_probe_bypass` and `roster_token_selftest` as secrets
-// and would hide two dev settings a drill has to be able to confirm. One predicate for every
-// writer of a value -- the effective-config census and the ini persist log both ask it, so the
-// tree cannot redact in one place and print in the other. CredentialKeys hands out the same list
-// so a caller can check every name still resolves to a row; a rename that misses this array
-// unredacts a password, so the staleness is worth one pass at boot.
+// and would hide two dev settings a drill has to be able to confirm. One predicate: ValueForLog
+// asks it, and every config printer prints through ValueForLog, so the tree cannot redact in one
+// place and print in the other. CredentialKeys hands out the same list so a caller can check
+// every name still resolves to a row; a rename that misses this array unredacts a password, so
+// the staleness is worth one pass at boot.
 bool IsCredentialKey(const char* key);
 const char* const* CredentialKeys(size_t& count);
 
@@ -127,12 +127,13 @@ const char* const* CredentialKeys(size_t& count);
 // in config_registry.cpp); a value longer than kServerSettingTextMax is refused by SetValue at run
 // time. kRowLive = every reader of the row follows a set (subscribed, or re-resolving at each use):
 // a pane draws it without "Takes effect at the next session" (a server row) or "... next launch"
-// (a local row).
+// (a local row). kRowAddress = its value can name a peer or a server: ValueForLog marks it unless
+// it equals the row's compiled default.
 enum RowFlag : unsigned {
     kRowServer = 1u << 0,
     kRowReplicated = 1u << 1,
     kRowLive = 1u << 2,
-    kRowAddress = 1u << 3,  // the value is a peer's or a dialled address: a log marks it
+    kRowAddress = 1u << 3,
 };
 
 // The limits of a replicated row, the registry's facts so that this file needs no other header.
