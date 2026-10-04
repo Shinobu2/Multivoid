@@ -51,9 +51,9 @@ bool BadNick() {
 constexpr int kSampleCount = 4;
 constexpr const char* kSamples[kSampleCount] = {
     "hello everyone \U0001F600",
-    "привет всем",
-    "你好世界",
-    "שָׁלוֹם עולם",
+    "\u043F\u0440\u0438\u0432\u0435\u0442 \u0432\u0441\u0435\u043C",
+    "\u4F60\u597D\u4E16\u754C",
+    "\u05E9\u05B8\u05C1\u05DC\u05D5\u05B9\u05DD \u05E2\u05D5\u05DC\u05DD",
 };
 
 constexpr std::string_view kTag = "[chat-drill] ";
