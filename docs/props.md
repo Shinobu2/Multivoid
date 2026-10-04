@@ -43,6 +43,12 @@ the destroy-and-recreate that made the record need to travel in the first place.
 for the same key replaces the waiting one whether it applies at once or waits too, so an older
 record never lands on top of a newer one.
 
+On the host, a prop born during play -- a device's eject, a drop, a place -- gets its record from
+the finish-spawning drain a tick after the birth, because the Blueprint that spawned it fills its
+state in after the finish call returns: a disc's eject loads it from the slot's JSON there. The
+birth's own initialisation is too early for a record, and without the drain a disc the host
+ejected reached every client blank.
+
 ### How a birth finds its local actor
 
 A birth names a key, so the receiver looks that key up first and, finding it, converges the actor
