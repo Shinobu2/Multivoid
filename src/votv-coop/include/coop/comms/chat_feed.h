@@ -15,7 +15,9 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <string_view>
 
 namespace coop::chat_feed {
 
@@ -130,6 +132,24 @@ bool GetSnapshotIfNewer(Snapshot& out, uint32_t& gen);
 // published row: a retained history line is no reason to keep the passive HUD, and so the
 // whole overlay frame, alive.
 bool HasAny();
+
+// One row of the store as a reader walking it sees it. `nick` is the speaker's name when the row
+// has one (nickLen above 0), and `line` is the row's text after the nick and its ": " separator
+// (a row with no nick has no prefix: `nick` is empty and `line` is all of it). Both views borrow
+// the store's strings and end with the callback; `retained` says which tier the row sits in.
+struct RowView {
+    unsigned long long key;
+    std::string_view   nick;
+    std::string_view   line;
+    bool               retained;
+};
+
+// Call `fn` for every row the store holds: the live tier, then the retained tier, each in store
+// order. A reader judges presence, count and text, never arrival order: the retained tier sorts
+// on insert and the two tiers are walked one after the other. This reads the store itself, not the
+// published snapshot, so the retained tier is visible whether or not the reveal is up. Game
+// thread only, the store's only thread; `fn` must not push to, tick or reset the feed.
+void ForEachRow(const std::function<void(const RowView&)>& fn);
 
 // The chat surface's open and close edge, pushed in by the chat input from whichever thread
 // closed it (the window-procedure Escape path, the render-thread submit, the fault unlatch).

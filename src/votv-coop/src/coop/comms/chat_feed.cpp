@@ -3,6 +3,7 @@
 #include "coop/config/config.h"
 #include "coop/text/utf8_codec.h"
 
+#include "ue_wrap/core/hot_path_guard.h"
 #include "ue_wrap/core/log.h"
 
 #include <atomic>
@@ -491,6 +492,21 @@ bool GetSnapshotIfNewer(Snapshot& out, uint32_t& gen) {
 
 bool HasAny() {
     return g_count.load(std::memory_order_relaxed) > 0;
+}
+
+void ForEachRow(const std::function<void(const RowView&)>& fn) {
+    UE_ASSERT_GAME_THREAD("g_store (chat_feed::ForEachRow)");
+    auto walk = [&fn](const std::deque<Entry>& tier, bool retained) {
+        for (const Entry& e : tier) {
+            const std::string_view text = e.text;
+            size_t cut = e.nickLen;  // the pushers keep nickLen <= text.size()
+            const std::string_view nick = text.substr(0, cut);
+            if (cut != 0 && text.compare(cut, 2, ": ") == 0) cut += 2;
+            fn(RowView{e.key, nick, text.substr(cut), retained});
+        }
+    };
+    walk(g_store.live(), false);
+    walk(g_store.retained(), true);
 }
 
 void SetChatOpen(bool open) {
