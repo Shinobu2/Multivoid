@@ -169,7 +169,7 @@ void KickCases(Checker& check, const Registry& reg, const Caller& console, const
           "moderation: /kick tells the players holding notify, with a reason, at their generation");
     check(Said(Run<1>(reg, console, "kick Cy"), "Kicked Cy.") && F::R().reason.empty() &&
               F::R().told == std::vector<Told>{{3, "Host kicked Cy"}},
-          "moderation: /kick without a reason passes none and tells none");
+          "moderation: /kick without a reason passes no reason and tells the holders without one");
     check(Said(RunAs<1>(reg, console, "kick Cy", ModResult::Gone), "Cy already left.") &&
               F::R().told.empty(),
           "moderation: /kick of a player who left says so and tells nobody");

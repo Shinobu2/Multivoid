@@ -34,7 +34,7 @@ void TeleportClientsToHost();
 // THREAD. The pose is read now and sent by a queued task that checks the generation
 // again. Returns false, sending nothing, when this is not the host, the slot is out
 // of range, the generation is not the slot's, or the host's pose cannot be read; the
-// caller tells the first three from the last by reading the slot's generation again.
+// caller tells a changed seat from the rest by reading the slot's generation again.
 bool TeleportSlotToHostWithToken(int peerSlot, uint32_t generation);
 
 // Receiver: apply the teleport on the local mainPlayer (K2_TeleportTo).

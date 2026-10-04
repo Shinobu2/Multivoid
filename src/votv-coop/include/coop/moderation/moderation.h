@@ -100,7 +100,8 @@ ModResult BanPlayer(const PlayerToken& token, const char* reason, bool byAddress
 // else. The nick and last enforceable address come from coop::seen_players when it has a record
 // (the address only when `byAddress`), else the ban has an empty nick. A matching player still
 // seated is kicked (by id only; see the BanPlayer note on MTA's wider IP kick). Who may ban an
-// id with no record is the command handler's rule (the console only), not this verb's.
+// id with no record is the dispatcher's rule (its GateOffline step: the console only), not this
+// verb's.
 ModResult BanOffline(const char* id, const char* reason, bool byAddress);
 
 // Remove a ban. NotBanned for an id that was not banned.

@@ -1,8 +1,8 @@
 // coop/commands/moderation_commands.cpp -- see coop/commands/moderation_commands.h.
 //
 // Every handler answers "There is no hosted session." first when the ports say none runs. A
-// result a root does not map to a line of its own (it cannot happen on the path the dispatcher
-// guards) is answered "Could not <verb> <who> (<result>)." so a report can be read.
+// result a root does not map to a line of its own (a result the guarded path does not expect, or
+// /tphere's Failed) is answered "Could not <verb> <who> (<result>)." so a report can be read.
 
 #include "coop/commands/moderation_commands.h"
 
