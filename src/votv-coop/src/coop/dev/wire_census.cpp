@@ -45,9 +45,9 @@ void Tick() {
         }
     }
     g_lastFlushTick = now;
-    // Census lines are INFO and INFO rides the ~4 KB CRT buffer (flushed only on
-    // WARN/ERROR); a killed process discards that tail -- which here would be the
-    // wire window itself. 1 Hz explicit flush bounds the loss to <1 s.
+    // Census lines are INFO, and INFO is flushed only when a second has passed since the last
+    // flush; a killed process discards the tail -- which here would be the wire window itself.
+    // The explicit 1 Hz flush bounds the loss to under 1 s.
     ue_wrap::log::Flush();
 }
 

@@ -149,8 +149,9 @@ bool NoRetain() {
 // fade-out tail, the cannot-happen detector. The probe keys on the key, not the birth stamp:
 // two lines promoted in one tick carry the same birth stamp. A retired line is not noted as
 // expired, since it still exists and a legitimate re-push must not read as a resurrection.
-// No feed log line carries a line's text: each names the entry's key and its byte count, and the
-// record keeps the destroyed entry's key so a RESURRECT line pairs with that entry's retire line.
+// No feed log line carries a line's text: each names the entry's key and, except ALPHA-JUMP, its
+// byte count, and the record keeps the destroyed entry's key so a RESURRECT line pairs with that
+// entry's retire line.
 struct Expired {
     char               text[64] = {};
     uint64_t           atMs = 0;
