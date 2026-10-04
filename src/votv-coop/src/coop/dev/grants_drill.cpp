@@ -50,7 +50,9 @@ bool Expects(Arm arm, bool host, G::Projected n) {
     return arm == Arm::Grant && n == G::Projected::Hud;
 }
 
+// The serial last judged (0 = none), and whether the host saw a client on its last tick.
 uint32_t g_judgedSerial = 0;
+bool g_wasPaired = false;
 
 void Judge(bool host, uint8_t peerId) {
     const Arm expect = ExpectNow();
@@ -77,19 +79,28 @@ void Judge(bool host, uint8_t peerId) {
 
 void Tick(coop::net::Session* s) {
     if (ArmNow() == Arm::Off) return;
-    if (!s || !s->running()) return;
+    if (!s || !s->running()) {
+        // A session that ended re-arms the host's pairing edge for the next one.
+        g_wasPaired = false;
+        return;
+    }
     const uint32_t serial = coop::net::session_serial::Current();
-    if (serial == 0 || g_judgedSerial == serial) return;
-    // This session's bits are in: judged by the serial, never by a count of messages.
-    if (LG::AppliedSerial() != serial) return;
+    if (serial == 0) return;
     const bool host = s->role() == coop::net::Role::Host;
     if (host) {
-        // The joiner's boot re-marks the host's log, so the verdict is printed only once a client
-        // is in (bug_report_drill's rule).
+        // The host judges once a client is in, and again each time one joins anew: a joiner the rig
+        // relaunched after a boot flake re-marks the host's log, and the verdict must come after the
+        // mark (bug_report_drill's rule). The edge is read before the judged-serial latch.
         coop::roster::Snapshot roster;
         coop::roster::GetSnapshot(roster);
-        if (roster.count < 2) return;
+        const bool paired = roster.count >= 2;
+        if (paired && !g_wasPaired) g_judgedSerial = 0;
+        g_wasPaired = paired;
+        if (!paired) return;
     }
+    if (g_judgedSerial == serial) return;
+    // This session's bits are in: judged by the serial, never by a count of messages.
+    if (LG::AppliedSerial() != serial) return;
     const uint8_t peerId = coop::players::Registry::Get().LocalPeerId();
     if (peerId >= coop::players::kMaxPeers) return;  // the slot is not assigned yet
     g_judgedSerial = serial;
