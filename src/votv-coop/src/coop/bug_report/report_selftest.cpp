@@ -143,6 +143,9 @@ void IdCases(Checker& check) {
         check(r.Apply("hash deadbeef.") == "hash deadbeef.", "an 8-hex of no held id stays");
         check(r.Apply("me 11111111.") == "me player#self.", "the reporter's own id counts as held");
     }
+    Case(check, "a ShortId is a player id whether or not the bundle holds it", "id deadbeef...",
+         "id player#1...", fx);
+    Case(check, "an 8-hex of no held id, with one dot, stays", "hash deadbeef.", "hash deadbeef.", fx);
     Case(check, "the reporter's own id", "id 11111111222222223333333344444444", "id player#self", fx);
     Case(check, "a key", "gen:" + std::string(64, 'a') + " and gen:aaaaaaaa...", "key#1 and key#1...", fx);
     Case(check, "the reporter's own key", "gen:" + std::string(64, 'b'), "key#self", fx);
@@ -175,10 +178,12 @@ void ConfigCases(Checker& check) {
 
     const std::vector<std::string> in = {"[net]", "; peer=203.0.113.5", "net.lobby_password=hunter2",
                                          "net.peer=203.0.113.5", "net.peer=127.0.0.1",
-                                         "net.lobby_pasword=hunter2", "=x", "voice.mode=activation"};
+                                         "net.lobby_pasword=hunter2", "=x", "voice.mode=activation",
+                                         "[net] ; free text 203.0.113.5"};
     const std::vector<std::string> want = {"[net]", "net.lobby_password=<set>",
                                            "net.peer=" + A("203.0.113.5"), "net.peer=127.0.0.1",
-                                           "net.lobby_pasword=<not shown>", "voice.mode=activation"};
+                                           "net.lobby_pasword=<not shown>", "voice.mode=activation",
+                                           "[net]"};
     check(coop::config::IniLinesForReport(in) == want, "the ini's report form");
 }
 

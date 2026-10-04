@@ -8,7 +8,8 @@
 //   3. this machine's folders: local app data first -> %LOCALAPPDATA%, then the profile ->
 //      %USERPROFILE%, each only at a name's end
 //   4. `gen:` + lowercase hex of 8 or more -> key#N, keyed by its first 8
-//   5. a lowercase hex run of 32 (a player id) or of 8 (the ShortId of one the bundle holds) ->
+//   5. a lowercase hex run of 32 (a player id), of 8 followed by `...` (a ShortId, which every
+//      `%.8s...` log format prints), or of 8 that is the first 8 of an id the bundle holds ->
 //      player#N, keyed by the first 8
 // The reporter's own id and key print as player#self and key#self. The address token is
 // addr#N(<class>), N counting distinct host parts (coop::net::endpoint_log::HostPart).
@@ -292,7 +293,8 @@ std::string Redactor::Apply(std::string_view line) {
             const size_t len = e - i;
             if (lower && (len == 32 || len == 8)) {
                 const std::string_view first8 = line.substr(i, 8);
-                if (len == 32 || (!selfPlayer8_.empty() && first8 == selfPlayer8_) ||
+                const bool shortId = len == 8 && line.substr(e, 3) == "...";
+                if (len == 32 || shortId || (!selfPlayer8_.empty() && first8 == selfPlayer8_) ||
                     learned8_.count(std::string(first8)) != 0) {
                     out += PlayerToken(first8);
                     ++counts_.players;

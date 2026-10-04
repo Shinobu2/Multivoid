@@ -2,8 +2,7 @@
 //
 // A drill that varies a setting and never checks it took effect is not an experiment: a send-rate
 // run measured a controller its own log said was off. So a peer publishes the rows a layer actually
-// supplied -- the value as RESOLVED, and which layer won -- and a rig asserts its independent
-// variables against that before it measures anything.
+// supplied -- the value as RESOLVED, and which layer won -- for a rig to assert against first.
 //
 // The two lines are a contract with tools outside the tree, like coop/session/rig_ready.h's:
 //   config: EFFECTIVE <key>=<value> (<env|ini>)
@@ -12,7 +11,8 @@
 // so the end line carries that verdict too. A value prints through config_registry::ValueForLog,
 // the one place that decides a printed form: a credential row is <set>, an address row is marked
 // unless it is the default, and a refused raw value says so beside the default it fell back to, or
-// beside itself on a fail-closed row, where nothing falls back.
+// beside itself on a fail-closed row, where nothing falls back. A bug report carries the ini in
+// that same form (IniLinesForReport, IniTextForReport; coop/config/config_report.h).
 
 #include "coop/config/config.h"
 
@@ -138,7 +138,9 @@ std::vector<std::string> IniLinesForReport(const std::vector<std::string>& lines
         const std::string line = internal::TrimEdgesStr(raw);
         if (line.empty() || line[0] == ';' || line[0] == '#') continue;
         if (line[0] == '[') {
-            out.push_back(line);
+            // Only the header: what follows its `]` is free text, as a comment is.
+            const size_t close = line.find(']');
+            if (close != std::string::npos) out.push_back(line.substr(0, close + 1));
             continue;
         }
         std::string key, value;

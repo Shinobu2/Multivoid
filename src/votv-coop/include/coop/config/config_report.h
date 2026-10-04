@@ -12,8 +12,9 @@
 namespace coop::config {
 
 // Pure; any thread. Each line is trimmed; one starting with `;` or `#` is dropped, one starting
-// with `[` is kept, one that reads as `key=value` with a non-empty key becomes `key=` + the
-// value's printed form (cooked as the String reader cooks it), every other line is dropped.
+// with `[` keeps its `[`..`]` part (to the first `]`; with no `]` it is dropped), one that reads
+// as `key=value` with a non-empty key becomes `key=` + the value's printed form (cooked as the
+// String reader cooks it), every other line is dropped.
 std::vector<std::string> IniLinesForReport(const std::vector<std::string>& lines);
 
 // The live ini's report form as text: IniLinesForReport of the live ini's lines, joined by '\n'
