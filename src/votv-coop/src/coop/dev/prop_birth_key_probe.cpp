@@ -47,9 +47,11 @@ std::unordered_map<void*, Born> g_born;
 
 // The DESTROY lines, bounded per world and per destroying class: a save's load files every container's
 // items through spawn-then-destroy (`propInventory_C`, ~1700 in one second on the rig's host), and one
-// WARN each flooded the log the probe exists to keep readable. The first kDestroyLinesPerCaller print;
-// the rest are counted, and the count prints once when the next world's first destroy arrives.
-constexpr unsigned kDestroyLinesPerCaller = 8;
+// WARN each flooded the log the probe exists to keep readable. The first kDestroyLinesPerCaller print
+// (above a carried inventory's size, so the pause-quit drill's menu-world transport prints whole); the
+// first one over the cap prints a `capped` line at once, and the total prints when the next world's
+// first destroy arrives.
+constexpr unsigned kDestroyLinesPerCaller = 64;
 std::map<std::wstring, unsigned> g_destroyByCaller;  // this world's destroys, by the destroying class
 void* g_destroyWorld = nullptr;                       // the world those counts belong to
 
@@ -121,7 +123,12 @@ void NoteDestroy(void* actor, void* caller, const coop::net::Session* s) {
         FlushDestroySummary();
         g_destroyWorld = world;
     }
-    if (++g_destroyByCaller[by] <= kDestroyLinesPerCaller) {
+    const unsigned n = ++g_destroyByCaller[by];
+    if (n == kDestroyLinesPerCaller + 1) {
+        UE_LOGW("prop_birth_key_probe: DESTROY lines capped world=%p by '%ls' at %u -- the rest are counted",
+                world, by.c_str(), kDestroyLinesPerCaller);
+    }
+    if (n <= kDestroyLinesPerCaller) {
         UE_LOGW("prop_birth_key_probe: DESTROY actor=%p cls='%ls' key='%ls' by '%ls' session=%s world=%p (current %p)",
                 actor, it->second.cls.c_str(), it->second.key.c_str(), by.c_str(), state, world,
                 ue_wrap::world_identity::CurrentWorld());

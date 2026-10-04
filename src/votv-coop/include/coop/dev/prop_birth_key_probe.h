@@ -41,6 +41,7 @@ void NoteBirth(void* actor);
 // seam holds it (null before the first boot). The line names the caller, the session's state at
 // that instant (none, connected, joining, stopped) and the world the actor belongs to beside the
 // current one, which tells a world's own teardown from a script that spawned and removed the prop.
+// Bounded per world and per caller: past 64 lines a `capped` line prints and the rest are counted.
 void NoteDestroy(void* actor, void* caller, const coop::net::Session* s);
 
 // The pending vector was full, so this spawn was never enqueued.
