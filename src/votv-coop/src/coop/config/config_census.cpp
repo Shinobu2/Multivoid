@@ -150,4 +150,16 @@ std::vector<std::string> IniLinesForReport(const std::vector<std::string>& lines
     return out;
 }
 
+bool IniTextForReport(std::string& out) {
+    std::vector<std::string> lines;
+    IniFault fault = IniFault::None;
+    if (ListLiveIniLines(lines, &fault) != 0) return false;
+    out.clear();
+    for (const std::string& line : IniLinesForReport(lines)) {
+        if (!out.empty()) out += '\n';
+        out += line;
+    }
+    return true;
+}
+
 }  // namespace coop::config

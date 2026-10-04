@@ -340,6 +340,8 @@ set(VOTVCOOP_SOURCES
     src/coop/bug_report/report_redact.cpp
     src/coop/bug_report/report_form.cpp
     src/coop/bug_report/report_selftest.cpp
+    src/coop/bug_report/report_bundle.cpp
+    src/coop/bug_report/report_files.cpp
     src/coop/element/element.cpp
     src/coop/element/object_scan_hub.cpp
     src/coop/element/element_deleter.cpp
