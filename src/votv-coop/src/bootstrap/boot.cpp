@@ -83,29 +83,27 @@ void WriteMarker(const char* entryTag) {
 // ship "UE4SS.dll"; shimloader loads a lowercase "ue4ss.dll"). Boot-time
 // snapshot only.
 void LogUe4ssPresence() {
-    // One lookup: GetModuleHandleW is case-insensitive, so this matches the
-    // official "UE4SS.dll" and shimloader's lowercase "ue4ss.dll" alike.
-    HMODULE h = ::GetModuleHandleW(L"UE4SS.dll");
-    if (!h) {
+    // The path of whichever module is loaded, the official "UE4SS.dll" or
+    // shimloader's lowercase "ue4ss.dll" (ue_wrap::paths owns the lookup).
+    const std::wstring path = ue_wrap::paths::Ue4ssModulePath();
+    if (path.empty()) {
         UE_LOGI("boot: UE4SS host: not loaded at boot time");
         return;
     }
-    wchar_t path[MAX_PATH] = {};
-    ::GetModuleFileNameW(h, path, MAX_PATH);
     char ver[64] = "unknown";
     DWORD dummy = 0;
-    if (const DWORD sz = ::GetFileVersionInfoSizeW(path, &dummy)) {
+    if (const DWORD sz = ::GetFileVersionInfoSizeW(path.c_str(), &dummy)) {
         std::string buf(sz, '\0');
         VS_FIXEDFILEINFO* ffi = nullptr;
         UINT ffiLen = 0;
-        if (::GetFileVersionInfoW(path, 0, sz, buf.data()) &&
+        if (::GetFileVersionInfoW(path.c_str(), 0, sz, buf.data()) &&
             ::VerQueryValueW(buf.data(), L"\\", reinterpret_cast<void**>(&ffi), &ffiLen) && ffi) {
             std::snprintf(ver, sizeof(ver), "%u.%u.%u.%u", HIWORD(ffi->dwFileVersionMS),
                           LOWORD(ffi->dwFileVersionMS), HIWORD(ffi->dwFileVersionLS),
                           LOWORD(ffi->dwFileVersionLS));
         }
     }
-    UE_LOGI("boot: UE4SS host: '%ls' version %s", path, ver);
+    UE_LOGI("boot: UE4SS host: '%ls' version %s", path.c_str(), ver);
 }
 
 // The stand-down: this build of the game is not the one the mod targets, found before anything was

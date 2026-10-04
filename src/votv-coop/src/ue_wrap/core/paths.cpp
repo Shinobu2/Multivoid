@@ -15,4 +15,19 @@ std::wstring ExeDir() {
     return sep == std::wstring::npos ? std::wstring{} : p.substr(0, sep);
 }
 
+std::wstring Ue4ssModulePath() {
+    const HMODULE h = ::GetModuleHandleW(L"UE4SS.dll");
+    if (!h) return {};
+    wchar_t path[MAX_PATH] = {};
+    const DWORD n = ::GetModuleFileNameW(h, path, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return {};
+    return path;
+}
+
+std::wstring Ue4ssDir() {
+    const std::wstring p = Ue4ssModulePath();
+    const size_t sep = p.find_last_of(L"\\/");
+    return sep == std::wstring::npos ? std::wstring{} : p.substr(0, sep);
+}
+
 }  // namespace ue_wrap::paths

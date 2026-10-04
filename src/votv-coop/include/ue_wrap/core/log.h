@@ -44,6 +44,13 @@ void SetSink(Sink sink);
 // is a synchronous disk sync, and avoiding per-line flushing is the whole point of the buffer.
 void Flush();
 
+// The full paths of the live log and of the file the previous run's log was kept as (the live
+// name with `.prev.log` for `.log`, `.prev` appended otherwise). The rig names its logs by the
+// VOTVCOOP_LOG environment value, so no reader may hardcode `multivoid.log`: it asks here. Opens
+// the log first, so the answer is the real one. Any thread.
+std::wstring CurrentPath();
+std::wstring PreviousPath();
+
 // The address mark. A log line that prints a peer's address, a typed dial text, or an endpoint
 // that is not the project's own wraps the value in Addr(): it writes kAddrOpen + value +
 // kAddrClose, so the bug-report redactor finds the span by its delimiters, since an address has

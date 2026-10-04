@@ -38,6 +38,12 @@ CRITICAL_SECTION g_lock;
 std::once_flag g_lockOnce;
 bool g_opened = false;
 
+// The paths EnsureOpen settled on: the live log, and the file the previous run's log was kept as.
+// Guarded by g_lock. Fixed arrays, not strings: EnsureOpen runs inside Write, which never throws,
+// and holds the lock while it copies.
+wchar_t g_livePath[MAX_PATH] = {};
+wchar_t g_prevPath[MAX_PATH] = {};
+
 // The staleness bound for buffered info lines; guarded by the lock (every reader and writer
 // holds it), so a plain integer is correct. The runtime buffers info lines, and a game closed
 // without reaching the shutdown loses every line since the last warning, precisely the window
@@ -82,6 +88,7 @@ void EnsureOpen() {
     if (!g_opened) {
         wchar_t path[MAX_PATH] = {};
         LogPath(path);
+        wcscpy_s(g_livePath, path);
         // Preserve the previous session's log before the open below truncates it: players hit a
         // problem, then often relaunch before sending the log, and one level of history means the
         // bug session survives that relaunch. The prior process has exited (each launch is a fresh
@@ -96,6 +103,7 @@ void EnsureOpen() {
             } else {
                 wcscat_s(prev, L".prev");
             }
+            wcscpy_s(g_prevPath, prev);
             ::MoveFileExW(path, prev, MOVEFILE_REPLACE_EXISTING);  // best-effort; ignore failure
         }
         // Open with read sharing (others may read, not write), so the log can be tailed live while
@@ -133,6 +141,24 @@ void Flush() {
 }
 
 void SetSink(Sink sink) { g_sink.store(sink, std::memory_order_release); }
+
+std::wstring CurrentPath() {
+    EnsureOpen();
+    wchar_t copy[MAX_PATH];
+    ::EnterCriticalSection(&g_lock);
+    wcscpy_s(copy, g_livePath);
+    ::LeaveCriticalSection(&g_lock);
+    return copy;
+}
+
+std::wstring PreviousPath() {
+    EnsureOpen();
+    wchar_t copy[MAX_PATH];
+    ::EnterCriticalSection(&g_lock);
+    wcscpy_s(copy, g_prevPath);
+    ::LeaveCriticalSection(&g_lock);
+    return copy;
+}
 
 // The mark is for the bug-report redactor, which replaces every marked span with a token; the
 // callers are the log sites that print a peer's address, a dial text or a non-project endpoint.
