@@ -1,4 +1,4 @@
-// coop/dev/prop_birth_key_probe.h -- the client place/birth seam instrumented. Read-only, dev-only.
+// coop/dev/prop_birth_key_probe.h -- the prop place/birth seam instrumented. Read-only, dev-only.
 //
 // A client's fresh keyed prop spawn is enqueued at FinishSpawningActor and drained a tick later,
 // because the game restores the save Key inside loadData, after the spawn returns. Seven drain

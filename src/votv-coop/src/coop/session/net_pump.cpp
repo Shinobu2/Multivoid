@@ -166,8 +166,9 @@ void FleeToMainMenu(coop::net::Session& session, const char* why, bool travel = 
 // aggregate edge; a queued weather apply would otherwise run against the old daynightCycle's
 // recycled slot (fatal).
 void TearDownCoopStateForSessionEnd(coop::net::Session& session) {
-    // The network stops first, then the world goes (MTA: CClientGame::~CClientGame stops the
-    // network before it deletes its elements). A teardown run while the world is live -- the quit
+    // The network stops first, then the world goes (MTA, ~CClientGame: StopNetwork at
+    // reference/mtasa-blue/Client/mods/deathmatch/logic/CClientGame.cpp:537 runs before the
+    // SAFE_DELETE(m_pManager) at :559). A teardown run while the world is live -- the quit
     // decision, a local death -- destroys actors whose destroy seam would otherwise still see a
     // connected session. Stop is idempotent; FleeToMainMenu keeps its own for the host-closed eject,
     // which reaches it without this teardown.
@@ -222,8 +223,7 @@ bool IsFleeing() {
 }
 
 void FleeAfterNativeMenuTravel(coop::net::Session& session, const char* why) {
-    // The latch is what makes the two callers safe together: the quit decision's posted task and the
-    // reaper's scan can both find the same session, and whichever runs second returns here.
+    // Defence: both callers test running() before calling, and the first flee stops the session.
     if (g_fleeing) return;
     TearDownCoopStateForSessionEnd(session);
     FleeToMainMenu(session, why, /*travel=*/false);

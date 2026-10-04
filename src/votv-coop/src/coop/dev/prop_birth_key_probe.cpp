@@ -19,7 +19,8 @@ namespace {
 
 namespace R = ue_wrap::reflection;
 
-// All state client game-thread-only (the finish-spawn post-hook and the drain both are). No mutex.
+// All state game-thread-only (the finish-spawn post-hook, the destroy post-hook and the drain all
+// are), both roles. No mutex.
 constexpr int    kTriesBuckets  = 10;   // 0..8 drain ticks, plus an overflow bucket
 constexpr size_t kLiveCap       = 4096; // backstop on the per-actor side table
 constexpr int    kPerExitLines  = 6;    // event lines per exit before the tally carries it alone
