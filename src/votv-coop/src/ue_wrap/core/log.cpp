@@ -225,10 +225,10 @@ void Write(Level level, const char* fmt, ...) {
     } else if (wrote < 0 && msg[0] == '\0') {
         std::snprintf(msg, sizeof(msg), "%s [args unformattable]", fmt);
     } else if (wrote < 0) {
-        // Truncated, or stopped mid-string. Drop a trailing UTF-8 sequence only if it is
-        // incomplete: walking back past continuations and dropping the lead loses a whole valid
-        // character every time, and truncation is the common case for exactly the long name and
-        // roster lines this exists to serve.
+        // Stopped mid-string (a conversion the formatter could not finish, or a line the heap
+        // format above could not take). Drop a trailing UTF-8 sequence only if it is incomplete:
+        // walking back past continuations and dropping the lead loses a whole valid character
+        // every time.
         size_t n = std::strlen(msg);
         size_t lead = n;
         while (lead > 0 && (static_cast<unsigned char>(msg[lead - 1]) & 0xC0) == 0x80) --lead;
