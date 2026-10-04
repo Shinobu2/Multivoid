@@ -99,7 +99,11 @@ S3 = re.compile(r"(?:flag (?:it )?for|file (?:it )?(?:as|under)|belongs in|shoul
 # doc quoting code again, no private prose.
 # 59 -> 60 (2026-10-03), CONTENT, the line read: CMD C-2's sheet (COMMANDS_ARC.md 10c.3) dictated the
 # command_drill row of config_registry_rows_dev.inc verbatim -- doc quoting code, no private prose.
-OVERLAP_BASELINE = 60
+# 60 -> 66 (2026-10-05), CONTENT, every new line read: BR-1's sheets (BUG_REPORT_ARC.md 8d.8-8d.15) dictated
+# the address mark's two constants in ue_wrap/core/log.h, three declarations of report_bundle.h, one of
+# report_core.h and the two dev rows (selftest_break_bug_report, bug_report_drill) verbatim -- doc quoting
+# code, no private prose.
+OVERLAP_BASELINE = 66
 # EXCLUDED because it is a deliberate practice, not a leak: copying memory topics into the public
 # piles archive. It alone contributes ~1,263 of the raw 1,300 overlaps.
 OVERLAP_SKIP = ("docs/piles/_archive/session-log/",)
