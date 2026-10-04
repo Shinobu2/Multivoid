@@ -165,10 +165,9 @@ CFG_FLAG(ban_drill_stale_token, "ban_drill_stale_token", "dev", false, "VOTVCOOP
     "Ban drill's red arm: aim the ban with a generation one past the slot's, so the token check "
     "refuses it and the drill reports FAIL.")
 CFG_ENUM(settings_drill, "settings_drill", "dev", "off", "off|nameplate|nickcolor|flags|scale|font|voicemode|voicevolume|server|serverjoin|serverred|servercmd|servercmdred|red", "VOTVCOOP_SETTINGS_DRILL",
-    "Developer: a settings step at boot -- one token per step; the server steps (server, serverjoin, serverred, "
-    "servercmd, servercmdred) set the host's voice range and check the client follows. "
-    "Drill (host): once the client's world is up, the host sets the named row or rows through SetValue, "
-    "checks that their modules followed (a posted probe, or a counter), resets them through ResetValue and checks again. nameplate: the "
+    "Developer: a settings step after the session starts, one token per step; the server steps (server, "
+    "serverjoin, serverred, servercmd, servercmdred) exercise the host's voice range, each red by a designed failure. "
+    "nameplate: the "
     "nameplate row to hidden (the client logs both announces). nickcolor: the nick colour to the "
     "per-surface default. flags: the chat peer-actions flag off and the netstats flag on. "
     "scale: ui.scale to 1.50. font: the first font role's family. "
