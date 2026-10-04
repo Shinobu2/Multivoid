@@ -168,7 +168,7 @@ int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)()) {
     };
 
     // The environment twin is cleared so check 0 sees the row's default whatever the launch pinned,
-    // and restored after check 9.
+    // and restored after check 12.
     char old[256] = {};
     const DWORD oldLen = ::GetEnvironmentVariableA(kEnv, old, sizeof(old));
     ::SetEnvironmentVariableA(kEnv, nullptr);

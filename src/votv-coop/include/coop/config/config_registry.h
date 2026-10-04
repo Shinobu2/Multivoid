@@ -93,7 +93,7 @@ const Row* Rows(size_t& count);
 // in the file, inherently by string), for the one receiver of a row named on the wire by
 // its key, and for a server setting a person names (`/set`), as Source finds a cvar by name
 // (one walk per received message or typed command, which is a person's act: cold). Its result
-// feeds no read API, since typed handles cannot be built from it outside the registry TU.
+// feeds no typed Resolve, since typed handles cannot be built from it outside the registry TU.
 const Row* FindRow(const char* key);
 
 // True if `key` is a registry key (case-insensitive). The unknown-key report is the
