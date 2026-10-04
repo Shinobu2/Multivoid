@@ -316,13 +316,15 @@ bool Session::StartLanDirect() {
     } else {  // Client
         SteamNetworkingIPAddr addr{};
         if (!addr.ParseString(cfg_.peerIp.c_str())) {
-            UE_LOGE("net: client peer IP '%s' did not parse", cfg_.peerIp.c_str());
+            UE_LOGE("net: client peer IP '%s' did not parse",
+                    ue_wrap::log::Addr(cfg_.peerIp).c_str());
             return false;
         }
         addr.m_port = cfg_.port;
         const HSteamNetConnection hConn = sockets->ConnectByIPAddress(addr, 0, nullptr);
         if (hConn == k_HSteamNetConnection_Invalid) {
-            UE_LOGE("net: ConnectByIPAddress(%s:%u) failed", cfg_.peerIp.c_str(), cfg_.port);
+            UE_LOGE("net: ConnectByIPAddress(%s:%u) failed",
+                    ue_wrap::log::Addr(cfg_.peerIp).c_str(), cfg_.port);
             return false;
         }
         // GEN: none -- a client never mints an occupancy generation. Slot 0 is the host; the
@@ -331,7 +333,7 @@ bool Session::StartLanDirect() {
         peerConns_[0].store(hConn);
         linkStage_.store(static_cast<uint8_t>(LinkStage::Dialing), std::memory_order_release);
         UE_LOGI("net: client dialed %s:%u (hConn=0x%08x slot=0)",
-                cfg_.peerIp.c_str(), cfg_.port, static_cast<unsigned>(hConn));
+                ue_wrap::log::Addr(cfg_.peerIp).c_str(), cfg_.port, static_cast<unsigned>(hConn));
     }
     return true;
 }

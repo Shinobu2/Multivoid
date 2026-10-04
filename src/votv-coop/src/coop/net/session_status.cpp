@@ -102,7 +102,7 @@ EndReason AcceptPolicy(ISteamNetworkingSockets* sockets, HSteamNetConnection hCo
                               static_cast<unsigned long long>(policy.windowMs / 1000),
                               static_cast<unsigned long long>((v.retryMs + 999) / 1000));
             UE_LOGW("net: connect cap -- %s made %d connections in the last %llu s; refusing "
-                    "for %llu s [%s]", ip, v.count,
+                    "for %llu s [%s]", ue_wrap::log::Addr(ip).c_str(), v.count,
                     static_cast<unsigned long long>(policy.windowMs / 1000),
                     static_cast<unsigned long long>((v.retryMs + 999) / 1000),
                     Describe(EndReason::ConnectFlood).id);

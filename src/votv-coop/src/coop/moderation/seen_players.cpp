@@ -159,7 +159,7 @@ void TouchOnJoin(coop::net::Session& session, int peerSlot) {
     g_onlineGuidBySlot[peerSlot] = guid;
     WriteFileLocked();
     UE_LOGI("seen_players: slot %d registered (nick='%s' ip=%s) -- %zu known",
-            peerSlot, rec.nick.c_str(), rec.ip.empty() ? "?" : rec.ip.c_str(),
+            peerSlot, rec.nick.c_str(), rec.ip.empty() ? "?" : ue_wrap::log::Addr(rec.ip).c_str(),
             g_records.size());
 }
 

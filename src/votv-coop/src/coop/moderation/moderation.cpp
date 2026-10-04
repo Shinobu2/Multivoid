@@ -144,7 +144,7 @@ ModResult BanPlayer(const PlayerToken& token, const char* reason, bool byAddress
     else
         UE_LOGI("moderation: banned + kicked #%u (slot %d, id %.8s..., address %s)",
                 static_cast<unsigned>(token.playerNo), token.slot, id.c_str(),
-                address.empty() ? "not enforced" : address.c_str());
+                address.empty() ? "not enforced" : ue_wrap::log::Addr(address).c_str());
     return ModResult::Done;
 }
 
@@ -164,7 +164,7 @@ ModResult BanOffline(const char* id, const char* reason, bool byAddress) {
     if (!coop::ban_list::Add(guid.c_str(), known ? e.nick : "", address.c_str(), why.c_str()))
         return ModResult::NoId;
     UE_LOGI("moderation: offline-banned '%s' (id %.8s..., address %s)", known ? e.nick : "",
-            guid.c_str(), address.empty() ? "not enforced" : address.c_str());
+            guid.c_str(), address.empty() ? "not enforced" : ue_wrap::log::Addr(address).c_str());
     // A matching player still seated goes too. MTA's AddBan also kicks every seated player
     // matching the ban's IP (CStaticFunctionDefinitions.cpp:12157-12170); ours kicks the banned
     // id only, so bystanders at a shared address keep their session and meet the refusal at

@@ -100,7 +100,10 @@ void EnsureOpen() {
         // the game runs; without it the file is locked exclusively and diagnostics cannot be read
         // until the game exits.
         g_file = _wfsopen(path, L"w", _SH_DENYWR);
-        if (g_file) std::fprintf(g_file, "==== Multivoid log ====\n");
+        if (g_file) {
+            std::fprintf(g_file, "==== Multivoid log ====\n");
+            std::fprintf(g_file, "%s\n", kLogFormatLine);
+        }
         g_opened = true;
     }
     ::LeaveCriticalSection(&g_lock);
@@ -129,19 +132,54 @@ void Flush() {
 
 void SetSink(Sink sink) { g_sink.store(sink, std::memory_order_release); }
 
+// The mark is for the bug-report redactor, which replaces every marked span with a token; the
+// callers are the log sites that print a peer's address, a dial text or a non-project endpoint.
+// The delimiters are replaced inside the value so no value can close its own mark early.
+std::string Addr(std::string_view value) {
+    std::string out;
+    out.reserve(sizeof(kAddrOpen) + value.size() + sizeof(kAddrClose));
+    out += kAddrOpen;
+    for (size_t i = 0; i < value.size(); ++i) {
+        const unsigned char c = static_cast<unsigned char>(value[i]);
+        const bool bracket = c == 0xE2 && i + 2 < value.size() &&
+                             static_cast<unsigned char>(value[i + 1]) == 0x9F &&
+                             (static_cast<unsigned char>(value[i + 2]) == 0xA8 ||
+                              static_cast<unsigned char>(value[i + 2]) == 0xA9);
+        if (bracket) {
+            out += '?';
+            i += 2;
+        } else if (c == '\r' || c == '\n') {
+            out += '?';
+        } else {
+            out += static_cast<char>(c);
+        }
+    }
+    out += kAddrClose;
+    return out;
+}
+
 void Write(Level level, const char* fmt, ...) {
     EnsureOpen();
     if (!g_file) return;
 
     // Format the message body once into a local buffer, so it can go to the file and to the sink
-    // without re-running the formatter. Truncates at 1 KB.
+    // without re-running the formatter. A line under 1 KB (the common case) takes one stack
+    // format; a longer one is measured and formatted whole into `whole`, so a long line is never
+    // cut and its address mark is never split.
     char msg[1024];
+    std::string whole;
     // Not a full zero-initialisation: that clears a kilobyte on every log line. One byte is all
     // the failure paths below need, and without it the first byte and the length scan read
     // uninitialised stack whenever the formatter returns without writing.
     msg[0] = '\0';
     va_list args;
     va_start(args, fmt);
+    // Two copies, taken before the first format consumes the list: one to measure a line that did
+    // not fit, one to format it again at its real length.
+    va_list measure;
+    va_copy(measure, args);
+    va_list again;
+    va_copy(again, args);
     int wrote = -1;
     if (_locale_t loc = Utf8Locale()) {
         // The non-secure locale variant, deliberately: the secure one routes a malformed conversion
@@ -151,15 +189,40 @@ void Write(Level level, const char* fmt, ...) {
         // not terminate on truncation, so the last byte is reserved and terminated here.
 #pragma warning(suppress : 4996)  // "_vsnprintf_s_l is safer" -- see above: it is
         wrote = ::_vsnprintf_l(msg, sizeof(msg) - 1, fmt, loc, args);  // not, it FASTFAILS
+        if (wrote < 0 && msg[0] != '\0') {
+            // Truncated, or stopped at a conversion. The measure tells them apart: a length means
+            // the line is formattable whole; -1 means a conversion stop, which the trim below
+            // keeps as it was.
+            const int need = ::_vscprintf_l(fmt, loc, measure);
+            if (need >= 0) {
+                std::string big(static_cast<size_t>(need) + 1, '\0');
+#pragma warning(suppress : 4996)
+                if (::_vsnprintf_l(&big[0], big.size(), fmt, loc, again) >= 0) {
+                    big.resize(static_cast<size_t>(need));
+                    whole.swap(big);
+                }
+            }
+        }
     } else {
         wrote = std::vsnprintf(msg, sizeof(msg), fmt, args);
+        if (wrote >= static_cast<int>(sizeof(msg))) {
+            std::string big(static_cast<size_t>(wrote) + 1, '\0');
+            if (std::vsnprintf(&big[0], big.size(), fmt, again) >= 0) {
+                big.resize(static_cast<size_t>(wrote));
+                whole.swap(big);
+            }
+        }
     }
     msg[sizeof(msg) - 1] = '\0';
+    va_end(again);
+    va_end(measure);
     va_end(args);
     // A line must never disappear because of its arguments: a conversion failure can leave the
     // buffer empty, and an empty message is indistinguishable from a bug that never logged. Fall
     // back to the format string, which names the site, the half worth keeping.
-    if (wrote < 0 && msg[0] == '\0') {
+    if (!whole.empty()) {
+        // Formatted whole above: nothing to trim.
+    } else if (wrote < 0 && msg[0] == '\0') {
         std::snprintf(msg, sizeof(msg), "%s [args unformattable]", fmt);
     } else if (wrote < 0) {
         // Truncated, or stopped mid-string. Drop a trailing UTF-8 sequence only if it is
@@ -180,6 +243,7 @@ void Write(Level level, const char* fmt, ...) {
         }
         msg[n] = '\0';
     }
+    const char* const line = whole.empty() ? msg : whole.c_str();
 
     char ts[32] = {};
     {
@@ -190,7 +254,7 @@ void Write(Level level, const char* fmt, ...) {
     }
 
     ::EnterCriticalSection(&g_lock);
-    std::fprintf(g_file, "[%s] [%-5s] %s\n", ts, Tag(level), msg);
+    std::fprintf(g_file, "[%s] [%-5s] %s\n", ts, Tag(level), line);
     // Flush on warnings and errors only, keeping them visible at once; info lines ride the
     // runtime's buffer and land in bursts, since a per-line flush costs tens of synchronous disk
     // syncs per second during a burst, visibly tanking the frame rate. Info is flushed anyway once
@@ -209,7 +273,7 @@ void Write(Level level, const char* fmt, ...) {
 
     // Mirror to the sink outside our critical section, so the console's own lock can never be
     // held under ours (no lock-order inversion). The sink must not log.
-    if (Sink s = g_sink.load(std::memory_order_acquire)) s(level, msg);
+    if (Sink s = g_sink.load(std::memory_order_acquire)) s(level, line);
 }
 
 }  // namespace ue_wrap::log
