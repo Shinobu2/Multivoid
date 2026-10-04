@@ -64,7 +64,7 @@ bool Session::KickClaimed(int peerSlot, uint32_t hConn, EndReason code, const ch
         aggregateDue_.store(true);
     } else {
         std::lock_guard<std::mutex> lk(teardownMutex_);
-        pendingFrees_.push_back(PendingFree{peerSlot, hConn});
+        pendingFrees_.push_back(PendingFree{peerSlot});
     }
     UE_LOGI("net: kicked peer slot %d [%s] (reason='%s')", peerSlot, Describe(code).id,
             reason ? reason : Describe(code).text);
@@ -73,9 +73,10 @@ bool Session::KickClaimed(int peerSlot, uint32_t hConn, EndReason code, const ch
 
 // The net thread's half of an off-thread kick. A receive that was in flight when the kick claimed
 // the slot may have written the departed peer's epoch or streams after the kick's own reset, and
-// the inbox guard closes only the inbox's half of that window; so the slot's remote state and
-// inbox entries are swept once more here, and the generation is cleared LAST. A successor needs
-// generation 0 (FindFreePeerSlotForClient), so nothing of a successor is ever wiped.
+// the receive path's connection check under the inbox mutex closes only the inbox's half of that
+// window; so the slot's remote state is swept once more here, and the generation is cleared LAST.
+// A successor needs generation 0 (FindFreePeerSlotForClient), so nothing of a successor is ever
+// wiped.
 void Session::RunPendingFrees() {
     bool any = false;
     for (;;) {
@@ -87,11 +88,6 @@ void Session::RunPendingFrees() {
             pendingFrees_.pop_back();
         }
         { std::lock_guard<std::mutex> lk(remoteMutex_); ResetPeerRemoteState(f.slot); }
-        { std::lock_guard<std::mutex> lk(reliableInboxMutex_);
-          for (auto it = reliableInbox_.begin(); it != reliableInbox_.end();) {
-              if (it->senderPeerSlot == f.slot) it = reliableInbox_.erase(it);
-              else ++it;
-          } }
         peerGenBySlot_[f.slot].store(0, std::memory_order_release);
         any = true;
     }

@@ -415,9 +415,8 @@ public:
     // which it queues for the net thread's RunPendingFrees; the slot is free only after it.
     bool KickClaimed(int peerSlot, uint32_t hConn, EndReason code, const char* reason);
     // Net thread, first in each loop pass (and Stop, after the join): frees every slot an
-    // off-thread kick queued -- re-sweeps the slot's remote state and inbox entries for what an
-    // in-flight receive wrote after the kick, then clears its generation last -- and marks
-    // aggregateDue_.
+    // off-thread kick queued -- re-sweeps the slot's remote state for what an in-flight receive
+    // wrote after the kick, then clears its generation last -- and marks aggregateDue_.
     void RunPendingFrees();
     // Net thread, right after RunPendingFrees, once per pass: when a close marked aggregateDue_,
     // and the session has no peer left, state_ goes to Disconnected, linkStage_ to Idle and every
@@ -539,7 +538,7 @@ private:
     std::atomic<std::thread::id> netThreadId_{};
     // Slots an off-thread kick claimed and tore down but could not free: the net thread drains
     // them in RunPendingFrees. teardownMutex_ is a leaf lock, held for a push, a pop or a clear.
-    struct PendingFree { int slot; uint32_t hConn; };
+    struct PendingFree { int slot; };
     std::mutex teardownMutex_;
     std::vector<PendingFree> pendingFrees_;
     // Set by every close (an inline teardown, a ClosedByPeer, RunPendingFrees); UpdateAggregateState
