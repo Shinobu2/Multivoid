@@ -6,7 +6,7 @@
 //   HOME  -- toggle freecam on/off (also the menu checkbox).
 //   WASD  -- move; Space / Ctrl -- up / down; Shift -- move faster.
 //   mouse -- look (uses the game's own look, so it's as smooth as the game).
-//   wheel -- adjust fly speed; MMB -- bring the real player to the freecam.
+//   wheel -- adjust fly speed; MMB -- bring the real player to the freecam (host only).
 //
 // Smoothness: look comes from the game's control rotation (no raw-mouse jitter) and movement
 // is frame-synced + dt-scaled (driven off the player's per-frame tick), so it doesn't stutter

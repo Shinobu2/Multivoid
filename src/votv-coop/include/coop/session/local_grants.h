@@ -4,6 +4,10 @@
 // and the menu keep today's answer, true. One packed word holds the session serial and the bits, so
 // a reader never pairs one session's bits with another's; a word written for another serial reads
 // as the role's default (coop/permissions/grants_core.h).
+// The state is stamped by the session serial, not ended at a session-end seam, a divergence from
+// both precedents: readers on several threads cannot take a clear mid-read, and a word of another
+// session reads as the role default. Nearest shape: MTA's sync time context, a stamp the receiver
+// compares instead of a reset (reference/mtasa-blue/Server/mods/deathmatch/logic/CElement.cpp:1281-1306).
 #pragma once
 
 #include "coop/permissions/grants_core.h"

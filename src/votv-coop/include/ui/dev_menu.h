@@ -22,9 +22,9 @@ void Init();
 void Render();
 
 // The dev switch state ([dev] devkeys AND master enabled, latched by Init()) AND something to show:
-// host authority or a local grant from the host. Lock-free (atomic loads and a boot-set bool). Other
-// overlay surfaces (the player-list scoreboard) use this to gate dev-only actions (e.g. the host's
-// "Teleport to me" entry).
+// host authority or a local grant from the host. Lock-free (atomic loads and a boot-set bool). This is
+// the menu's own visibility switch, NOT an authority gate: a client holding a local grant is true
+// here too, so a host-only action asks coop::dev_gate::Allowed().
 bool DevMode();
 
 // Open the menu on one pane, named as the tree names it ("World", "Rules"). For the autonomous
