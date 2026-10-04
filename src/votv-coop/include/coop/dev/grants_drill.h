@@ -7,9 +7,10 @@
 //   none      the client holds none; the host holds all four
 //   hostdeny  the client holds none; the host holds all but the position readout
 // The rig's permission fixtures (the host's server folder) make the arm true; the drill only reads.
-// A peer judges once per session, when its grants for that session are in; the host also waits for a
-// joined client, because the joiner's boot re-marks the host's log and the verdict must follow the
-// mark. `grants_drill_expect` set to another arm judges against that arm instead (the red).
+// A client judges once per session, when its grants for that session are in. The host judges when
+// its own are in and a client is paired (roster count >= 2), and again on each rising edge of that
+// pairing: a joiner relaunched after a boot flake re-marks the host's log, and the verdict must
+// follow the mark. `grants_drill_expect` set to another arm judges against that arm (the red).
 // [GRANTS-DRILL]: '<role> PASS (bits=0x..)' or '<role> FAIL: <node> is <0|1>' (the first mismatch
 // in the projected table's order); <role> is `host` or `c<slot>`.
 
