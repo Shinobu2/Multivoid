@@ -30,6 +30,9 @@ using ui::scale::S;
 // pointless churn for file-backed lists that change on admin clicks).
 double                                    g_lastRefresh = -1.0;
 std::vector<coop::seen_players::Entry>    g_seen;
+// The records of g_seen that are not seated, rebuilt with it: the Offline list's clipper runs over
+// this vector, so every index it hands out draws exactly one row.
+std::vector<coop::seen_players::Entry>    g_offline;
 std::vector<coop::ban_list::Entry>        g_bans;
 // The ids in g_bans, rebuilt with it so a row asks "already banned?" with one lookup. The views
 // point into g_bans and live exactly as long as that snapshot.
@@ -53,6 +56,10 @@ void RefreshSnapshots() {
     if (g_lastRefresh >= 0.0 && now - g_lastRefresh < 0.5) return;
     g_lastRefresh = now;
     coop::seen_players::GetSnapshot(g_seen);
+    g_offline.clear();
+    for (const auto& e : g_seen) {
+        if (!e.online) g_offline.push_back(e);  // online rows live in the section above
+    }
     coop::ban_list::GetSnapshot(g_bans);
     g_banIds.clear();
     for (const auto& b : g_bans) g_banIds.insert(std::string_view(b.id));
@@ -160,13 +167,11 @@ void RenderOfflineSection() {
         ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, S(90.f));
         ImGui::TableHeadersRow();
         // Only the rows in view are drawn: the registry grows with every player who ever joined.
-        // The few online records inside the range draw nothing.
         ImGuiListClipper clipper;
-        clipper.Begin(static_cast<int>(g_seen.size()));
+        clipper.Begin(static_cast<int>(g_offline.size()));
         while (clipper.Step()) {
             for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
-                const auto& e = g_seen[static_cast<size_t>(i)];
-                if (e.online) continue;  // online rows live in the section above
+                const auto& e = g_offline[static_cast<size_t>(i)];
                 ImGui::TableNextRow();
                 ImGui::PushID(e.guid);
                 ImGui::TableSetColumnIndex(0);
@@ -191,7 +196,7 @@ void RenderOfflineSection() {
         }
         ImGui::EndTable();
     }
-    if (g_seen.empty()) ImGui::TextDisabled("Nobody in the registry yet (players are recorded when they join).");
+    if (g_offline.empty()) ImGui::TextDisabled("Nobody in the registry yet (players are recorded when they join).");
 }
 
 void RenderBannedSection() {
