@@ -3,6 +3,8 @@
 #include "coop/dev/dev_gate.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
+#include "coop/permissions/grants_core.h"
+#include "coop/session/local_grants.h"
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/actors/vitals.h"
@@ -72,9 +74,9 @@ void Restore() {
 }
 
 void SetStaminaLow() {
-    // Strict client lockout (same as Restore -- dev verbs are host-only).
-    if (!coop::dev_gate::Allowed()) {
-        UE_LOGW("restore_vitals: SetStaminaLow REFUSED -- dev features are disabled while connected as a client");
+    // The host's grant (coop/session/local_grants) decides.
+    if (!coop::session::local_grants::Has(coop::permissions::grants::Projected::Stamina)) {
+        UE_LOGW("restore_vitals: SetStaminaLow REFUSED -- multivoid.dev.local.stamina is not granted to this machine");
         return;
     }
     // VOTV has no separate "stamina" scalar -- checked against the whole header dump. The player's

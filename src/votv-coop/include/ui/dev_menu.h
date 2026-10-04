@@ -21,9 +21,10 @@ void Init();
 // Build the menu window (called inside the overlay's ImGui frame, render thread).
 void Render();
 
-// The dev switch state ([dev] devkeys AND master enabled), latched by Init().
-// Lock-free read of a boot-set bool. Other overlay surfaces (the player-list scoreboard)
-// use this to gate dev-only actions (e.g. the host's "Teleport to me" entry).
+// The dev switch state ([dev] devkeys AND master enabled, latched by Init()) AND something to show:
+// host authority or a local grant from the host. Lock-free (atomic loads and a boot-set bool). Other
+// overlay surfaces (the player-list scoreboard) use this to gate dev-only actions (e.g. the host's
+// "Teleport to me" entry).
 bool DevMode();
 
 // Open the menu on one pane, named as the tree names it ("World", "Rules"). For the autonomous

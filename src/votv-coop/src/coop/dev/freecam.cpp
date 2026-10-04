@@ -1,7 +1,9 @@
 #include "coop/dev/freecam.h"
 
 #include "coop/dev/dev_gate.h"
+#include "coop/permissions/grants_core.h"
 #include "coop/player/players_registry.h"
+#include "coop/session/local_grants.h"
 #include "coop/session/shutdown.h"
 #include "coop/config/config.h"
 #include "ui/input_focus.h"
@@ -127,8 +129,8 @@ void UnfreezePlayerControl() {
 }
 
 void Enable() {
-    if (!::coop::dev_gate::Allowed()) {
-        UE_LOGW("freecam: REFUSED -- dev features are disabled while connected as a client");
+    if (!::coop::session::local_grants::Has(::coop::permissions::grants::Projected::Freecam)) {
+        UE_LOGW("freecam: REFUSED -- multivoid.dev.local.freecam is not granted to this machine");
         return;
     }
     g_player.Set(coop::players::Registry::Get().Local());
@@ -185,6 +187,11 @@ void Disable() {
 }
 
 void Teleport() {
+    // The self-teleport moves the pawn in the shared world: host authority, not a grant.
+    if (!::coop::dev_gate::Allowed()) {
+        UE_LOGW("freecam: teleport refused -- only the host moves a pawn by the free camera");
+        return;
+    }
     if (!g_active.load() || !g_player.Alive()) return;
     E::SetActorLocation(g_player.Raw(), g_camPos);
     UE_LOGI("freecam: teleported player to (%.0f,%.0f,%.0f)", g_camPos.X, g_camPos.Y, g_camPos.Z);
@@ -195,11 +202,10 @@ void Teleport() {
 // below discards anything delivered faster and blocks re-entrant UFunction calls.
 void MovementTick() {
     if (!g_active.load() || !g_camActor.Raw() || !g_pc.Raw()) return;
-    // Live role gate: a freecam activated BEFORE joining (or during hosting,
-    // then the role changed) dies the moment this peer is a connected client.
+    // The host's grant (coop/session/local_grants) decides; a revoke turns the camera off.
     // Runs on the game thread -- Disable() restores the view target directly.
-    if (!::coop::dev_gate::Allowed()) {
-        UE_LOGW("freecam: auto-off -- dev features are disabled while connected as a client");
+    if (!::coop::session::local_grants::Has(::coop::permissions::grants::Projected::Freecam)) {
+        UE_LOGW("freecam: auto-off -- multivoid.dev.local.freecam is not granted to this machine");
         Disable();
         return;
     }

@@ -2,10 +2,11 @@
 
 #include "coop/dev/object_overlay.h"
 
-#include "coop/dev/dev_gate.h"
 #include "coop/element/registry.h"
 #include "coop/config/config.h"
+#include "coop/permissions/grants_core.h"
 #include "coop/player/players_registry.h"
+#include "coop/session/local_grants.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/actors/prop.h"
@@ -420,9 +421,10 @@ void InitFromIni() {
 }
 
 void Update() {
-    // A dev overlay (net identity and physics labels are wallhack material on a joined client):
-    // the same self-clear as toggle-off while the gate denies.
-    if (!g_enabled.load(std::memory_order_acquire) || !coop::dev_gate::Allowed()) {
+    // The host's grant (coop/session/local_grants) decides; a revoke turns the overlay off, with the
+    // same self-clear as toggle-off.
+    if (!g_enabled.load(std::memory_order_acquire) ||
+        !coop::session::local_grants::Has(coop::permissions::grants::Projected::Overlay)) {
         // Self-clear once so a stale snapshot does not linger after toggle-off; after that the
         // disabled cost is this one atomic load per tick.
         if (g_publishedAnything) PublishEmpty_(nullptr);
@@ -471,10 +473,11 @@ void GetSnapshot(Snapshot& out) {
 }
 
 bool IsEnabled() {
-    // Role-aware: reports off while connected as a client (the dev gate), so every draw site and
-    // the menu checkbox die together; the latent flag survives and the overlay returns on
-    // disconnect or when hosting.
-    return g_enabled.load(std::memory_order_acquire) && coop::dev_gate::Allowed();
+    // The host's grant (coop/session/local_grants) decides; a revoke turns the overlay off, so every
+    // draw site and the menu checkbox die together; the latent flag survives and the overlay
+    // returns when the grant does.
+    return g_enabled.load(std::memory_order_acquire) &&
+           coop::session::local_grants::Has(coop::permissions::grants::Projected::Overlay);
 }
 
 void SetEnabled(bool on) {

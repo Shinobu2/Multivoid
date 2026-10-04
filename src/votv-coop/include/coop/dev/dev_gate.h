@@ -1,15 +1,9 @@
-// coop/dev/dev_gate.h -- the CLIENT lockout for every dev feature.
-//
-// Dev features do not work when you are a client, strictly. They exist for
-// development and for a HOST administering their own world; a JOINED CLIENT firing
-// them (freecam, +points into the SHARED balance, vitals refill, local NPC spawns)
-// is cheating in someone else's game.
-//
-// Allowed() is false IFF a coop session is RUNNING and the local role is not
-// Host. Solo / pre-session = allowed (dev testing); host = allowed (their
-// server, their rules). The F1 menu hides its dev tree off this, but UI
-// hiding is NOT the gate -- every mutating dev entry point checks it itself
-// (hotkeys, the ini boot toggles, and a patched menu all bypass UI).
+// dev_gate -- AUTHORITY for the dev features that write the shared world: only the host (or a solo
+// game) writes the world, so points, the clock, events, NPC spawns, the vitals broadcast, the Q menu
+// and the free camera's self-teleport ask Allowed(); the weather and teleporting clients check the
+// host role themselves. A dev feature that touches only this machine (the free camera, the position
+// readout, the overlays, one's own stamina) is a permission instead, granted by the host:
+// coop/session/local_grants.
 
 #pragma once
 

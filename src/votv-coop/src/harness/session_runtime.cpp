@@ -254,7 +254,9 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     coop::dev::restore_vitals::SetSession(&g_session);
     coop::teleport_client::SetSession(&g_session);
     coop::dev::force_weather::SetSession(&g_session);
-    coop::dev_gate::SetSession(&g_session);  // the strict CLIENT lockout for every dev feature
+    // The two dev answers: dev_gate is AUTHORITY (the host alone writes the shared world),
+    // local_grants the host's grant of each local dev feature to this machine.
+    coop::dev_gate::SetSession(&g_session);
     coop::session::local_grants::Install(&g_session);
     coop::moderation::SetSession(&g_session);
     // The per-player inventory subsystem installs pre-world, here, not through the world-gated

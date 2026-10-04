@@ -1,7 +1,8 @@
 #include "coop/dev/pos_hud.h"
 
-#include "coop/dev/dev_gate.h"
+#include "coop/permissions/grants_core.h"
 #include "coop/player/players_registry.h"
+#include "coop/session/local_grants.h"
 #include "coop/session/shutdown.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/core/game_thread.h"
@@ -144,12 +145,11 @@ DWORD WINAPI RefreshPumpThread(LPVOID) {
     int refreshCounter = 0;
     constexpr int kRefreshEveryN = 12;  // 12 * 16 ms = ~192 ms -> ~5 Hz
     while (!coop::shutdown::IsShuttingDown()) {
-        // Live role gate: a readout shown BEFORE joining hides itself the
-        // moment this peer is a connected client (coop::dev_gate).
-        if (g_active.load() && !coop::dev_gate::Allowed()) {
+        // The host's grant (coop/session/local_grants) decides; a revoke turns the readout off.
+        if (g_active.load() && !coop::session::local_grants::Has(coop::permissions::grants::Projected::Hud)) {
             g_active.store(false, std::memory_order_release);
             GT::Post([] { Hide(); });
-            UE_LOGW("pos_hud: auto-off -- dev features are disabled while connected as a client");
+            UE_LOGW("pos_hud: auto-off -- multivoid.dev.local.hud is not granted to this machine");
         }
         if (g_active.load() && ++refreshCounter >= kRefreshEveryN) {
             refreshCounter = 0;
@@ -172,8 +172,8 @@ void EnsurePump() {
 }  // namespace
 
 void SetVisible(bool on) {
-    if (on && !coop::dev_gate::Allowed()) {
-        UE_LOGW("pos_hud: REFUSED -- dev features are disabled while connected as a client");
+    if (on && !coop::session::local_grants::Has(coop::permissions::grants::Projected::Hud)) {
+        UE_LOGW("pos_hud: REFUSED -- multivoid.dev.local.hud is not granted to this machine");
         return;
     }
     g_active.store(on, std::memory_order_release);
