@@ -10,6 +10,7 @@
 #include "coop/props/prop_echo_suppress.h"  // IsMirrorSpawn (mirror-spawn exclusion)
 #include "coop/props/prop_element_tracker.h"
 #include "coop/props/prop_lifecycle.h"      // ExpressSpawnedProp (reuse the keyed broadcast)
+#include "coop/props/prop_save_data.h"      // Publish (the record behind the express)
 #include "coop/props/remote_prop_spawn.h"
 #include "coop/props/join_membership_sweep.h"  // the join claim and sweep
 #include "ue_wrap/core/game_thread.h"
@@ -379,6 +380,13 @@ void DrainPendingSpawns(coop::net::Session* s) {
                     "Func seam -- drop/place visible to peers this tick)",
                     e.actor,
                     static_cast<unsigned>(PT::GetPropElementIdForActor(e.actor)));
+            // The record behind the row. The express carries identity only, and a birth sets its
+            // state AFTER FinishSpawningActor, in the same Blueprint call: a device's eject
+            // loadDatas the disc from its slot JSON there. That call has returned by this drain, so
+            // the record is the real one. Publish declines a class with no record of its own, one
+            // another lane owns, and a key whose author's record is still owed (a birth from a
+            // client's intent).
+            coop::prop_save_data::Publish(s, e.actor, ue_wrap::prop::GetInteractableKeyString(e.actor));
         }
     }
     g_pendingFinished.clear();
