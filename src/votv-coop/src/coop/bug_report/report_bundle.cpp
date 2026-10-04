@@ -26,9 +26,11 @@
 #include <windows.h>
 
 #include <atomic>
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <exception>
 #include <filesystem>
 #include <mutex>
 #include <system_error>
@@ -49,12 +51,17 @@ void Publish(Status s) {
     g_status = std::move(s);
 }
 
-Status FailedStatus(const char* why) {
+// The Failed status a player sees: the sentence only. `cause` is the internal reason, written
+// to the log, which the report then carries (the sentence alone cannot tell seven causes apart).
+Status Fail(const char* sentence, const std::string& cause) {
+    UE_LOGW("bug_report: the report failed (%s): %s", sentence, cause.c_str());
     Status s;
     s.phase = Phase::Failed;
-    s.error = why;
+    s.error = sentence;
     return s;
 }
+
+std::string ErrnoText(int err) { return "errno " + std::to_string(err); }
 
 // What the game thread knows, read before the worker starts.
 struct Capture {
@@ -93,11 +100,33 @@ Capture CaptureOnGameThread() {
 
 std::wstring Widen(const char* ascii) { return std::wstring(ascii, ascii + std::strlen(ascii)); }
 
-// _wfopen as the tree spells it (_wfopen_s); null when it fails.
-FILE* OpenFile(const std::wstring& path, const wchar_t* mode) {
-    FILE* f = nullptr;
-    return ::_wfopen_s(&f, path.c_str(), mode) == 0 ? f : nullptr;
-}
+// A FILE closed on every path out, an exception included; Close reports the close's own result
+// where the data written matters. Opens as the tree spells _wfopen (_wfopen_s).
+class OwnedFile {
+public:
+    OwnedFile() = default;
+    ~OwnedFile() { Close(); }
+    OwnedFile(const OwnedFile&) = delete;
+    OwnedFile& operator=(const OwnedFile&) = delete;
+
+    bool Open(const std::wstring& path, const wchar_t* mode, int& err) {
+        Close();
+        err = static_cast<int>(::_wfopen_s(&f_, path.c_str(), mode));
+        if (err != 0) f_ = nullptr;
+        return f_ != nullptr;
+    }
+    FILE* get() const { return f_; }
+    // True when nothing was open or the close succeeded.
+    bool Close() {
+        if (!f_) return true;
+        const bool ok = std::fclose(f_) == 0;
+        f_ = nullptr;
+        return ok;
+    }
+
+private:
+    FILE* f_ = nullptr;
+};
 
 // Removes what a run leaves in the work folder, and the half-written zip unless it was renamed.
 // Declared before anything that holds a file open, so it runs after those close.
@@ -130,7 +159,8 @@ void RemoveLeftovers(const fs::path& reports, const fs::path& tmpDir) {
     }
 }
 
-// The zip being written, on a FILE the writer owns; closed on every path out.
+// The zip being written, on a FILE the writer owns; closed on every path out. A failing call
+// leaves its internal cause in Cause(), for the log.
 class Zip {
 public:
     Zip() { mz_zip_zero_struct(&zip_); }
@@ -139,9 +169,13 @@ public:
     Zip& operator=(const Zip&) = delete;
 
     bool Open(const std::wstring& part) {
-        file_ = OpenFile(part, L"wb");
-        if (!file_) return false;
-        if (!mz_zip_writer_init_cfile(&zip_, file_, 0)) {
+        int err = 0;
+        if (!file_.Open(part, L"wb", err)) {
+            cause_ = "open the .part file: " + ErrnoText(err);
+            return false;
+        }
+        if (!mz_zip_writer_init_cfile(&zip_, file_.get(), 0)) {
+            Remember("mz_zip_writer_init_cfile");
             Close();
             return false;
         }
@@ -149,72 +183,108 @@ public:
         return true;
     }
     bool AddFile(const char* name, FILE* src, uint64_t size) {
-        return mz_zip_writer_add_cfile(&zip_, name, src, size, nullptr, nullptr, 0, MZ_DEFAULT_LEVEL,
-                                       nullptr, 0, nullptr, 0) != 0;
+        if (mz_zip_writer_add_cfile(&zip_, name, src, size, nullptr, nullptr, 0, MZ_DEFAULT_LEVEL,
+                                    nullptr, 0, nullptr, 0) != 0)
+            return true;
+        Remember("mz_zip_writer_add_cfile");
+        return false;
     }
     bool AddMem(const char* name, const std::string& data) {
-        return mz_zip_writer_add_mem(&zip_, name, data.data(), data.size(), MZ_DEFAULT_LEVEL) != 0;
+        if (mz_zip_writer_add_mem(&zip_, name, data.data(), data.size(), MZ_DEFAULT_LEVEL) != 0)
+            return true;
+        Remember("mz_zip_writer_add_mem");
+        return false;
     }
-    // The central directory written, the writer ended, the file closed.
+    // The central directory written, the writer ended, the file closed: a close that fails is a
+    // failed zip, since the last buffered bytes are written by it.
     bool Finish() {
         bool ok = open_ && mz_zip_writer_finalize_archive(&zip_) != 0;
-        Close();
+        if (!ok) Remember("mz_zip_writer_finalize_archive");
+        const bool closed = Close();
+        if (ok && !closed) {
+            cause_ = "fclose of the .part file failed: " + ErrnoText(errno);
+            ok = false;
+        }
         return ok;
     }
+    const std::string& Cause() const { return cause_; }
 
 private:
-    void Close() {
+    bool Close() {
         if (open_) {
             mz_zip_writer_end(&zip_);
             open_ = false;
         }
-        if (file_) {
-            std::fclose(file_);
-            file_ = nullptr;
-        }
+        return file_.Close();
+    }
+    void Remember(const char* call) {
+        cause_ = std::string(call) + ": " + mz_zip_get_error_string(mz_zip_get_last_error(&zip_));
     }
     mz_zip_archive zip_;
-    FILE* file_ = nullptr;
+    OwnedFile file_;
     bool open_ = false;
+    std::string cause_;
 };
 
 enum class AddResult { Ok, ReadFailed, WriteFailed };
 using Feed = std::function<bool(const detail::LineFn&)>;
 
+// Removes a path when it goes out of scope.
+struct RemoveOnExit {
+    const std::wstring& path;
+    ~RemoveOnExit() {
+        std::error_code ec;
+        fs::remove(fs::path(path), ec);
+    }
+};
+
 // One entry: the lines `feed` produces go through the Redactor into a temporary file, which
-// miniz deflates into the zip in its own buffered loop; the temporary file is deleted.
+// miniz deflates into the zip in its own buffered loop; the temporary file is deleted. A failure
+// leaves its internal cause in `cause`.
 AddResult AddRedacted(Zip& zip, Redactor& redactor, const std::wstring& tmpDir, const char* name,
-                      const Feed& feed) {
+                      const Feed& feed, std::string& cause) {
     const std::wstring tmp = tmpDir + L"\\" + Widen(name);
-    FILE* out = OpenFile(tmp, L"wb");
-    if (!out) return AddResult::WriteFailed;
+    RemoveOnExit removeTmp{tmp};  // declared first: it runs after the handles below close
+    OwnedFile out;
+    int err = 0;
+    if (!out.Open(tmp, L"wb", err)) {
+        cause = std::string("open the temporary file of ") + name + ": " + ErrnoText(err);
+        return AddResult::WriteFailed;
+    }
     bool writeOk = true;
+    int writeErr = 0;
     uint64_t written = 0;
     const bool read = feed([&](std::string_view line) {
         if (!writeOk) return;
         const std::string redacted = redactor.Apply(line);
-        if (!redacted.empty() && std::fwrite(redacted.data(), 1, redacted.size(), out) != redacted.size())
+        if (!redacted.empty() && std::fwrite(redacted.data(), 1, redacted.size(), out.get()) != redacted.size())
             writeOk = false;
-        else if (std::fputc('\n', out) == EOF)
+        else if (std::fputc('\n', out.get()) == EOF)
             writeOk = false;
         else
             written += redacted.size() + 1;
+        if (!writeOk) writeErr = errno;
     });
-    const bool closed = std::fclose(out) == 0;
-    AddResult result = AddResult::Ok;
     if (!read) {
-        result = AddResult::ReadFailed;
-    } else if (!writeOk || !closed) {
-        result = AddResult::WriteFailed;
-    } else if (FILE* in = OpenFile(tmp, L"rb")) {
-        if (!zip.AddFile(name, in, written)) result = AddResult::WriteFailed;
-        std::fclose(in);
-    } else {
-        result = AddResult::WriteFailed;
+        cause = std::string("reading ") + name + " failed";
+        return AddResult::ReadFailed;
     }
-    std::error_code ec;
-    fs::remove(fs::path(tmp), ec);
-    return result;
+    const bool closed = out.Close();
+    if (!writeOk || !closed) {
+        cause = std::string("writing the temporary file of ") + name + " failed: " +
+                ErrnoText(writeOk ? errno : writeErr);
+        return AddResult::WriteFailed;
+    }
+    OwnedFile in;
+    if (!in.Open(tmp, L"rb", err)) {
+        cause = std::string("reopen the temporary file of ") + name + ": " + ErrnoText(err);
+        return AddResult::WriteFailed;
+    }
+    if (!zip.AddFile(name, in.get(), written)) {
+        cause = std::string("adding ") + name + " to the zip: " + zip.Cause();
+        return AddResult::WriteFailed;
+    }
+    return AddResult::Ok;
 }
 
 // A text's lines, each without its '\n'; a last line with no '\n' counts.
@@ -241,9 +311,10 @@ detail::ReadPlan PlanFor(const Entry& e) {
 
 Status Build(const Form& form, const Capture& cap) {
     constexpr const char* kWriteFailed = "Could not write the report file.";
+    constexpr const char* kReadLog = "Could not read the log.";
     constexpr const char* kClosing = "The game is closing.";
     const std::wstring exeDir = ue_wrap::paths::ExeDir();
-    if (exeDir.empty()) return FailedStatus(kWriteFailed);
+    if (exeDir.empty()) return Fail(kWriteFailed, "the game folder's path is empty");
     const std::wstring reports = exeDir + L"\\multivoid_reports";
     const std::wstring tmpDir = reports + L"\\.tmp";
     const std::wstring zipPath = reports + L"\\report-" + Widen(cap.stamp.c_str()) + L".zip";
@@ -251,14 +322,15 @@ Status Build(const Form& form, const Capture& cap) {
 
     std::error_code ec;
     fs::create_directories(fs::path(tmpDir), ec);
-    if (ec) return FailedStatus(kWriteFailed);
+    if (ec) return Fail(kWriteFailed, "create_directories of the work folder: " + ec.message());
     RemoveLeftovers(fs::path(reports), fs::path(tmpDir));
 
     RedactContext ctx = ReadThisMachine(cap.selfId, cap.selfKey);
     std::string iniText;
     bool iniOk = coop::config::IniTextForReport(iniText);
     std::vector<Entry> entries = ListEntries();
-    if (!entries[0].leftOut.empty()) return FailedStatus("Could not find the log.");
+    if (!entries[0].leftOut.empty())
+        return Fail("Could not find the log.", "multivoid.log is " + entries[0].leftOut);
     Redactor redactor(std::move(ctx));
     const std::string reportText = ReportText(form);
 
@@ -267,10 +339,11 @@ Status Build(const Form& form, const Capture& cap) {
     std::vector<detail::Span> spans(entries.size());
     for (size_t i = 0; i < entries.size(); ++i) {
         if (!entries[i].leftOut.empty()) continue;
-        if (coop::shutdown::IsShuttingDown()) return FailedStatus(kClosing);
+        if (coop::shutdown::IsShuttingDown())
+            return Fail(kClosing, std::string("shutting down before pass 1 of ") + entries[i].name);
         if (!detail::StreamLines(entries[i].path, PlanFor(entries[i]), false, spans[i],
                                  [&](std::string_view line) { redactor.Learn(line); })) {
-            if (i == 0) return FailedStatus("Could not read the log.");
+            if (i == 0) return Fail(kReadLog, "pass 1 could not read multivoid.log");
             entries[i].leftOut = "could not be read";
         }
     }
@@ -278,35 +351,40 @@ Status Build(const Form& form, const Capture& cap) {
 
     // Pass 2, in zip order.
     Zip zip;
-    if (!zip.Open(cleanup.part)) return FailedStatus(kWriteFailed);
+    if (!zip.Open(cleanup.part)) return Fail(kWriteFailed, zip.Cause());
+    std::string cause;  // the internal reason of the last addText / addEntry that failed
     const auto addText = [&](const char* name, const std::string& text) {
         return AddRedacted(zip, redactor, tmpDir, name,
-                           [&](const detail::LineFn& fn) { return FeedText(text, fn); });
+                           [&](const detail::LineFn& fn) { return FeedText(text, fn); }, cause);
     };
     const auto addEntry = [&](size_t i) -> const char* {
         Entry& e = entries[i];
         if (!e.leftOut.empty()) return nullptr;
-        if (coop::shutdown::IsShuttingDown()) return kClosing;
+        if (coop::shutdown::IsShuttingDown()) {
+            cause = std::string("shutting down before pass 2 of ") + e.name;
+            return kClosing;
+        }
         const detail::ReadPlan plan = PlanFor(e);
         const AddResult r = AddRedacted(zip, redactor, tmpDir, e.name, [&](const detail::LineFn& fn) {
             return detail::StreamLines(e.path, plan, true, spans[i], fn);
-        });
+        }, cause);
         if (r == AddResult::WriteFailed) return kWriteFailed;
         if (r == AddResult::ReadFailed) {
-            if (i == 0) return "Could not read the log.";
+            if (i == 0) return kReadLog;
             e.leftOut = "could not be read";
         }
         return nullptr;
     };
 
-    if (addText(kMadeEntries[0], reportText) != AddResult::Ok) return FailedStatus(kWriteFailed);
+    if (addText(kMadeEntries[0], reportText) != AddResult::Ok) return Fail(kWriteFailed, cause);
     for (const size_t i : {size_t(0), size_t(1), size_t(2)})
-        if (const char* why = addEntry(i)) return FailedStatus(why);
+        if (const char* why = addEntry(i)) return Fail(why, cause);
     if (iniOk) {
-        if (coop::shutdown::IsShuttingDown()) return FailedStatus(kClosing);
-        if (addText(kMadeEntries[1], iniText) != AddResult::Ok) return FailedStatus(kWriteFailed);
+        if (coop::shutdown::IsShuttingDown())
+            return Fail(kClosing, "shutting down before pass 2 of multivoid.ini");
+        if (addText(kMadeEntries[1], iniText) != AddResult::Ok) return Fail(kWriteFailed, cause);
     }
-    if (const char* why = addEntry(3)) return FailedStatus(why);
+    if (const char* why = addEntry(3)) return Fail(why, cause);
 
     Json meta;
     meta["format"] = 1;
@@ -327,9 +405,10 @@ Status Build(const Form& form, const Capture& cap) {
     if (!iniOk) leftOut[kMadeEntries[1]] = "could not be read";
     meta["left_out"] = leftOut;
     if (!zip.AddMem(kMadeEntries[2], meta.dump(2, ' ', false, Json::error_handler_t::replace)))
-        return FailedStatus(kWriteFailed);
-    if (!zip.Finish()) return FailedStatus(kWriteFailed);
-    if (!::MoveFileExW(cleanup.part.c_str(), zipPath.c_str(), 0)) return FailedStatus(kWriteFailed);
+        return Fail(kWriteFailed, "adding meta.json to the zip: " + zip.Cause());
+    if (!zip.Finish()) return Fail(kWriteFailed, "finishing the zip: " + zip.Cause());
+    if (!::MoveFileExW(cleanup.part.c_str(), zipPath.c_str(), 0))
+        return Fail(kWriteFailed, "MoveFileExW of the .part file: error " + std::to_string(::GetLastError()));
 
     Status done;
     done.phase = Phase::Done;
@@ -340,24 +419,32 @@ Status Build(const Form& form, const Capture& cap) {
     return done;
 }
 
-void FailToStart() {
-    Publish(FailedStatus("Could not start the report."));
+void FailToStart(const std::string& cause) {
+    Publish(Fail("Could not start the report.", cause));
     g_inFlight.store(false, std::memory_order_release);
 }
 
 // The worker thread's whole body. An exception escaping a detached thread is std::terminate, so
 // nothing leaves it; the flag is cleared outside the inner try, as session_manager's workers do.
 void WorkerMain(const Form& form, const Capture& cap) {
+    // A report reads two logs twice and deflates them while the game runs: the game's own threads
+    // come first.
+    if (!::SetThreadPriority(::GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL))
+        UE_LOGW("bug_report: the worker keeps normal priority (SetThreadPriority error %lu)",
+                ::GetLastError());
     try {
         Status result;
         try {
             result = Build(form, cap);
+        } catch (const std::exception& e) {
+            result = Fail("The report could not be made.", std::string("exception: ") + e.what());
         } catch (...) {
-            result = FailedStatus("The report could not be made.");
+            result = Fail("The report could not be made.", "a non-standard exception");
         }
         Publish(std::move(result));
     } catch (...) {
         // Publish itself failed: the status stays Building and the flag below is all that can be done.
+        UE_LOGW("bug_report: the final status could not be published; the report stays Building");
     }
     g_inFlight.store(false, std::memory_order_release);
 }
@@ -377,12 +464,16 @@ bool Request(Form form) {
                 ue_wrap::log::Flush();
                 std::thread([form = std::move(form), cap = std::move(cap)] { WorkerMain(form, cap); })
                     .detach();
+            } catch (const std::exception& e) {
+                FailToStart(std::string("the capture or the worker's start threw: ") + e.what());
             } catch (...) {
-                FailToStart();
+                FailToStart("the capture or the worker's start threw a non-standard exception");
             }
         });
+    } catch (const std::exception& e) {
+        FailToStart(std::string("posting the request threw: ") + e.what());
     } catch (...) {
-        FailToStart();
+        FailToStart("posting the request threw a non-standard exception");
     }
     return true;
 }
