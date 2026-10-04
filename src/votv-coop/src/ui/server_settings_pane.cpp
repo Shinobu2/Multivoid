@@ -166,7 +166,7 @@ void Render() {
     for (size_t i = 0; i < count; ++i) {
         const CR::Row* row = &rows[i];
         const char* label = CR::RowLabel(row);
-        // A credential is changed in its own screen, never here or by a command.
+        // A credential row is never drawn here: no credential is set from this pane or a command.
         if (!CR::IsServerScope(row) || label == nullptr || CR::IsCredentialKey(row->key)) continue;
         DrawRow(*row, label);
         ++drawn;
