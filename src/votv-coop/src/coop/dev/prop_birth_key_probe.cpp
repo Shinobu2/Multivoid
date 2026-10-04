@@ -4,6 +4,8 @@
 
 #include "coop/config/config.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/reflection.h"
+#include "ue_wrap/engine/world_identity.h"
 
 #include <chrono>
 #include <map>
@@ -62,8 +64,21 @@ void NoteEnqueue(void* actor, const std::wstring& cls, const std::wstring& seamK
     if (present) ++g_keyAtSeam;
     if (g_live.size() < kLiveCap)
         g_live[actor] = Entry{cls, present ? seamKey : std::wstring(), containerExtract};
-    UE_LOGW("prop_birth_key_probe: ENQUEUE actor=%p cls='%ls' key-at-seam='%ls' container-extract=%d",
-            actor, cls.c_str(), present ? seamKey.c_str() : L"<none>", containerExtract ? 1 : 0);
+    UE_LOGW("prop_birth_key_probe: ENQUEUE actor=%p cls='%ls' key-at-seam='%ls' container-extract=%d "
+            "world=%p (current %p)",
+            actor, cls.c_str(), present ? seamKey.c_str() : L"<none>", containerExtract ? 1 : 0,
+            ue_wrap::world_identity::WorldOf(actor), ue_wrap::world_identity::CurrentWorld());
+    g_dirty = true;
+}
+
+void NoteDestroy(void* actor, void* caller) {
+    if (!IsEnabled() || !actor) return;
+    const auto it = g_live.find(actor);
+    if (it == g_live.end()) return;
+    const std::wstring by = caller ? ue_wrap::reflection::ClassNameOf(caller) : std::wstring(L"<native>");
+    UE_LOGW("prop_birth_key_probe: DESTROY actor=%p cls='%ls' key-at-seam='%ls' by '%ls' world=%p (current %p)",
+            actor, it->second.cls.c_str(), it->second.seamKey.empty() ? L"<none>" : it->second.seamKey.c_str(),
+            by.c_str(), ue_wrap::world_identity::WorldOf(actor), ue_wrap::world_identity::CurrentWorld());
     g_dirty = true;
 }
 

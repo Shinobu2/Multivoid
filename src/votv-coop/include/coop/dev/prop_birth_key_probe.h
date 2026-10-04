@@ -28,6 +28,12 @@ bool IsEnabled();
 void NoteEnqueue(void* actor, const std::wstring& cls, const std::wstring& seamKey,
                  bool containerExtract);
 
+// An actor this probe saw born, and has not seen leave the pending vector, reached the destroy
+// seam. `caller` is the object whose script called K2_DestroyActor (null for a native destroy);
+// the line names it and the world the actor belongs to beside the current one, which tells a
+// world's own teardown from a script that spawned and removed the prop.
+void NoteDestroy(void* actor, void* caller);
+
 // The pending vector was full, so this spawn was never enqueued.
 void NotePendingCapHit(void* actor);
 
