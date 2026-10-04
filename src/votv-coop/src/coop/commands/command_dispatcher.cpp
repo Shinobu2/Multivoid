@@ -10,11 +10,11 @@
 
 #include "coop/commands/command_dispatcher.h"
 
+#include "coop/commands/command_args.h"
 #include "coop/commands/command_line.h"
 #include "coop/permissions/grants_core.h"
 
 #include <algorithm>
-#include <charconv>
 #include <cstddef>
 
 namespace coop::commands {
@@ -109,17 +109,6 @@ std::string RawRest(const Expanded& ex, size_t at, std::string_view line) {
         return TrimRight(out);
     }
     return out;
-}
-
-// A leading `+` before a digit is skipped; from_chars reads a `-` itself and must take it all.
-bool ParseInteger(std::string_view s, long long* out) {
-    if (s.size() >= 2 && s[0] == '+' && s[1] >= '0' && s[1] <= '9') s.remove_prefix(1);
-    long long v = 0;
-    const char* end = s.data() + s.size();
-    const auto r = std::from_chars(s.data(), end, v);
-    if (r.ec != std::errc() || r.ptr != end) return false;
-    *out = v;
-    return true;
 }
 
 bool Passes(const Registry& reg, const Policy& policy, const Caller& caller, std::string_view node) {
@@ -272,6 +261,8 @@ DispatchResult Dispatch(const Registry& reg, const Caller& caller, std::string_v
                 .integers = {},
                 .texts = {},
                 .given = {},
+                .booleans = {},
+                .contexts = {},
                 .replies = {},
                 .notifySlots = {}};
     const size_t argCount = ctx.args.size();
@@ -279,33 +270,78 @@ DispatchResult Dispatch(const Registry& reg, const Caller& caller, std::string_v
     ctx.integers.assign(argCount, 0);
     ctx.texts.resize(argCount);
     ctx.given.assign(argCount, false);
+    ctx.booleans.assign(argCount, false);
 
     // The first `pivotCount` arguments are the targeted parents' words, always given: a target
     // names ONE player, whose id must be proved, since the leaf below keys a store by it.
     const size_t pivotCount = walked.pivots.size();
     bool usedSelector = false;
-    // One argument's word, parsed and resolved into its slot of the context; the refusal line, or
-    // empty when the word is taken.
-    auto parseWord = [&](size_t i, const std::string& word) -> std::string {
+    // One argument's word, parsed and resolved into its slot of the context. True when the word is
+    // taken. False with `refusal` empty when an optional Boolean or Duration LOOKS AHEAD and the
+    // word is not its kind: the argument is absent and the word stays for the next one (`/mute
+    // <who> [duration] [reason]` reads `/mute Bob spamming` as no duration). False with a
+    // `refusal` line when the word is wrong.
+    auto parseWord = [&](size_t i, const std::string& word, std::string& refusal) -> bool {
         const ArgSpec& a = *ctx.args[i];
-        ctx.given[i] = true;
-        ctx.texts[i] = word;
-        if (a.kind == ArgKind::Integer) {
-            if (!ParseInteger(word, &ctx.integers[i]))
-                return "'" + word + "' is not a whole number. Usage: " + reg.Usage(spec);
+        if (a.kind == ArgKind::Boolean) {
+            bool value = false;
+            if (!ParseBoolean(word, &value)) {
+                if (!a.optional)
+                    refusal = "'" + word + "' is not true or false. Usage: " + reg.Usage(spec);
+                return false;
+            }
+            ctx.booleans[i] = value;
+        } else if (a.kind == ArgKind::Duration) {
+            if (policy.nowSeconds == nullptr) {
+                refusal = "The clock is not available.";
+                return false;
+            }
+            switch (ParseDuration(word, policy.nowSeconds(), &ctx.integers[i])) {
+                case DurationError::None: break;
+                case DurationError::NotADuration:
+                    if (!a.optional)
+                        refusal = "'" + word + "' is not a duration (like 30m, 2h or 1d12h). Usage: " +
+                                  reg.Usage(spec);
+                    return false;
+                case DurationError::Zero:
+                    refusal = "'" + word + "' is no time at all.";
+                    return false;
+                case DurationError::Passed:
+                    refusal = "'" + word +
+                              "' has already passed (a bare number is a moment in epoch seconds; "
+                              "for a length write 30m).";
+                    return false;
+                case DurationError::TooFar:
+                    refusal = "'" + word + "' is more than 100 years away.";
+                    return false;
+            }
+        } else if (a.kind == ArgKind::Integer) {
+            if (!ParseInteger(word, &ctx.integers[i])) {
+                refusal = "'" + word + "' is not a whole number. Usage: " + reg.Usage(spec);
+                return false;
+            }
         } else if (a.kind == ArgKind::Player || a.kind == ArgKind::PlayerOrId ||
                    a.kind == ArgKind::Players) {
-            if (i < pivotCount && !word.empty() && word[0] == '@')
-                return "Name one player, not @a, @p, @r or @s.";
+            if (i < pivotCount && !word.empty() && word[0] == '@') {
+                refusal = "Name one player, not @a, @p, @r or @s.";
+                return false;
+            }
             TargetResult r = ResolveTarget(word, a.kind != ArgKind::Players,
                                            a.kind == ArgKind::PlayerOrId, caller, players, policy.pick);
-            if (r.error != TargetError::None) return DescribeTargetError(r, word, players);
-            if (i < pivotCount && !r.slots.empty() && r.playerIds[0].empty())
-                return NickOf(players, r.slots[0]) + "'s identity is not proved yet.";
+            if (r.error != TargetError::None) {
+                refusal = DescribeTargetError(r, word, players);
+                return false;
+            }
+            if (i < pivotCount && !r.slots.empty() && r.playerIds[0].empty()) {
+                refusal = NickOf(players, r.slots[0]) + "'s identity is not proved yet.";
+                return false;
+            }
             usedSelector = usedSelector || r.usedSelector;
             ctx.targets[i] = std::move(r);
         }
-        return std::string();
+        ctx.given[i] = true;
+        ctx.texts[i] = word;
+        return true;
     };
 
     size_t next = walked.next;
@@ -322,8 +358,25 @@ DispatchResult Dispatch(const Registry& reg, const Caller& caller, std::string_v
             next = ex.words.size();
             continue;
         }
-        const std::string refusal = parseWord(i, pivot ? ex.words[walked.pivots[i]] : ex.words[next++]);
+        if (!pivot && a.kind == ArgKind::Contexts) {
+            for (size_t k = next; k < ex.words.size(); ++k) {
+                const std::string& pair = ex.words[k];
+                const size_t eq = pair.find('=');
+                if (eq == std::string::npos || eq == 0 || eq + 1 == pair.size())
+                    return Said("'" + pair + "' is not key=value. Usage: " + reg.Usage(spec));
+                if (!ctx.contexts.Add(std::string_view(pair).substr(0, eq),
+                                      std::string_view(pair).substr(eq + 1)))
+                    return Said("'" + pair + "' is not a valid context.");
+            }
+            ctx.given[i] = true;
+            ctx.texts[i] = RawRest(ex, next, line);
+            next = ex.words.size();
+            continue;
+        }
+        std::string refusal;
+        const bool taken = parseWord(i, pivot ? ex.words[walked.pivots[i]] : ex.words[next], refusal);
         if (!refusal.empty()) return Said(refusal);
+        if (!pivot && taken) ++next;
     }
     if (next < ex.words.size()) return Said("Usage: " + reg.Usage(spec));
 

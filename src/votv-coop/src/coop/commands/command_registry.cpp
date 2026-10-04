@@ -151,9 +151,19 @@ struct TreeCheck {
                 const ArgSpec& a = *effective[i];
                 if (a.kind == ArgKind::Rest && i + 1 != effective.size())
                     return Fail("'" + s.name + "': a Rest argument must be last");
-                if (a.optional) sawOptional = true;
-                else if (sawOptional)
+                if (a.kind == ArgKind::Contexts && (i + 1 != effective.size() || !a.optional))
+                    return Fail("'" + s.name + "': a Contexts argument must be last and optional");
+                // An optional Boolean directly before a required Duration or Integer is read by
+                // look-ahead (no Boolean word parses as either), so it is no "optional one".
+                const bool readAhead = a.kind == ArgKind::Boolean && a.optional &&
+                                       i + 1 < effective.size() && !effective[i + 1]->optional &&
+                                       (effective[i + 1]->kind == ArgKind::Duration ||
+                                        effective[i + 1]->kind == ArgKind::Integer);
+                if (a.optional) {
+                    if (!readAhead) sawOptional = true;
+                } else if (sawOptional) {
                     return Fail("'" + s.name + "': a required argument after an optional one");
+                }
             }
             if (s.pastTense.empty()) {
                 bool needs = false;
@@ -339,7 +349,7 @@ std::string Registry::Usage(const CommandSpec& c) const {
     for (const ArgSpec& a : c.args) {
         out += a.optional ? " [" : " <";
         out += a.name;
-        if (a.kind == ArgKind::Rest) out += "...";
+        if (a.kind == ArgKind::Rest || a.kind == ArgKind::Contexts) out += "...";
         out += a.optional ? "]" : ">";
     }
     if (!c.subVerbs.empty()) {

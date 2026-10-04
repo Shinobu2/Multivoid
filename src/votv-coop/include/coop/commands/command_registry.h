@@ -31,6 +31,14 @@ enum class ArgKind : uint8_t {
     Players,  // one or more
     Integer,  // a signed decimal into a long long; a leading `+` before a digit is skipped
     Rest,     // the RAW remainder of the line from its first word, trailing spaces removed; last only
+    // The three kinds below are parsed by command_args. Register refuses a Contexts argument that
+    // is not last and optional, and treats an optional Boolean immediately followed by a required
+    // Duration or Integer as no "optional one" for the rule that a required argument may not
+    // follow an optional one (no Boolean word parses as either, so the look-ahead reads them).
+    Boolean,   // `true` or `false`; an optional one is taken only when the word is one of the two
+    Duration,  // a LuckPerms duration or an epoch second, as an absolute expiry (integers[i]); an
+               // optional one is taken when the word has a duration's shape, then its value is judged
+    Contexts,  // every remaining word, each `key=value` (Context::contexts); last and optional
 };
 
 struct ArgSpec {
@@ -125,7 +133,7 @@ public:
     // node already declared as a non-qualifier node or by a qualifier of another kind. On success
     // every spec without a nodeOf is declared as a node, and every qualifier node `<node>.<name>`
     // not declared yet (default false, described "<the spec's description> -- <name>").
-    // The rules of a targeted parent, and what its leaves are judged over: CommandSpec::Targeted.
+    // The rules of a targeted parent: CommandSpec::Targeted; of the argument kinds: ArgKind.
     bool Register(CommandSpec spec, std::string* why);
 
     // Adds a node that is not a command (`multivoid.command.selector`); refuses one declared.
@@ -153,8 +161,9 @@ public:
 
     // `/` + PathOf with each targeted ancestor followed by ` <its argument>` (`/mv user <who>
     // permission set`), then ` <name>` or ` [name]` per OWN argument (`<name...>` / `[name...]`
-    // for Rest), then the sub-verbs joined by `|`: in `<...>` when the spec has no handler of its
-    // own (`/mv user <who> <permission|parent>`), in `[...]` when it has one (`/time [set|add]`).
+    // for Rest and Contexts), then the sub-verbs joined by `|`: in `<...>` when the spec has no
+    // handler of its own (`/mv user <who> <permission|parent>`), in `[...]` when it has one
+    // (`/time [set|add]`).
     std::string Usage(const CommandSpec& c) const;
 
 private:

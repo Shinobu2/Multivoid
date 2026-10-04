@@ -112,7 +112,8 @@ bool SeenBefore(std::string_view id) {
 }
 
 const coop::commands::Policy g_policy{&PermissionCheck, &Pick, &HoldsNode,
-                                      &coop::permissions::host::HoldsExplicitly, &SeenBefore};
+                                      &coop::permissions::host::HoldsExplicitly, &SeenBefore,
+                                      &coop::permissions::host::NowSeconds};
 
 // The nick a seen-players record holds for an id; empty when there is none.
 std::string RecordNick(std::string_view id) {

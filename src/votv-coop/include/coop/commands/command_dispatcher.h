@@ -13,6 +13,7 @@
 
 #include "coop/commands/command_registry.h"
 #include "coop/commands/command_targets.h"
+#include "coop/permissions/context_set.h"
 
 #include <string>
 #include <string_view>
@@ -37,6 +38,9 @@ struct Policy {
     // target the host never saw is refused to a caller that is not the console. Null: every id is
     // unseen.
     bool (*known)(std::string_view playerId) = nullptr;
+    // The clock a Duration argument is measured from: unix seconds. Null: a line that reaches a
+    // Duration argument is refused ("The clock is not available.").
+    long long (*nowSeconds)() = nullptr;
 };
 
 // What a handler sees, for the handler call only. The caller, the spec, the players, the registry
@@ -45,9 +49,11 @@ struct Policy {
 // EFFECTIVE argument list (Registry::ArgsOf: its targeted ancestors' arguments, then its own);
 // each vector has one entry per `args` index. `given[i]` is false for an absent optional
 // argument; `targets[i]` is filled for Player / PlayerOrId / Players (an offline PlayerOrId target
-// has `offline` set, `offlineId`, and no slots), `integers[i]` for Integer, `texts[i]` is the word
-// (the raw remainder for Rest) for every kind. `notifySlots` is filled for a spec with a Notify
-// qualifier: the seated slots, other than the caller's and the host's, that hold its node.
+// has `offline` set, `offlineId`, and no slots), `integers[i]` for Integer and Duration (an
+// absolute expiry in epoch seconds), `booleans[i]` for Boolean, `contexts` for the Contexts
+// argument; `texts[i]` is the word (the raw remainder for Rest and Contexts) for every kind.
+// `notifySlots` is filled for a spec with a Notify qualifier: the seated slots, other than the
+// caller's and the host's, that hold its node.
 struct Context {
     const Caller& caller;
     const CommandSpec& spec;
@@ -59,6 +65,8 @@ struct Context {
     std::vector<long long> integers;
     std::vector<std::string> texts;
     std::vector<bool> given;
+    std::vector<bool> booleans;
+    coop::permissions::ContextSet contexts;
     std::vector<std::string> replies;
     std::vector<int> notifySlots;
 
