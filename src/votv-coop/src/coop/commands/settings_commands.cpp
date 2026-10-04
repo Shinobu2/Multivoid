@@ -17,7 +17,7 @@ namespace {
 using config::SetResult;
 
 std::string NotChangedHere(const char* key) {
-    return std::string(key) + " is changed in its own screen, not by command.";
+    return std::string(key) + " holds a credential; it is not set by a command.";
 }
 
 // The row the first argument names, or null with the reply already made.

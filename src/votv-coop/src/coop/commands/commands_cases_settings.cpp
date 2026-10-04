@@ -159,13 +159,13 @@ void RefusalCases(Checker& check, const Registry& reg) {
           "settings: /reset of a local row is refused, the ports finding no server row for it");
     {
         const DispatchResult r = RunAs<1>(reg, "set net.lobby_password hunter2", SetResult::Saved);
-        check(Said(r, "net.lobby_password is changed in its own screen, not by command.") &&
+        check(Said(r, "net.lobby_password holds a credential; it is not set by a command.") &&
                   F::R().sets == 0 && F::R().validValue.empty() &&
                   r.replies[0].find("hunter2") == std::string::npos,
               "settings: /set of a credential row answers with its own reply and never echoes the value");
     }
     check(Said(RunAs<1>(reg, "reset net.lobby_password", SetResult::Saved),
-               "net.lobby_password is changed in its own screen, not by command.") &&
+               "net.lobby_password holds a credential; it is not set by a command.") &&
               F::R().resets == 0,
           "settings: /reset of a credential row answers with its own reply");
 }
