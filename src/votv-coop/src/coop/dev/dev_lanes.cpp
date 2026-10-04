@@ -37,6 +37,7 @@
 #include "coop/dev/chat_drill.h"  // [dev] the chat checks, judged in memory
 #include "coop/dev/ban_drill.h"  // [dev] the host bans a joined client by the moderation verb
 #include "coop/dev/bug_report_drill.h"  // [dev] a bug report is saved and its zip judged in memory
+#include "coop/dev/grants_drill.h"  // [dev] this machine's local grants judged against an arm
 #include "coop/dev/pause_quit_drill.h"  // [dev] a peer quits through the pause menu's own button
 #include "coop/dev/settings_drill.h"  // [dev] the host sets its own rows and the modules show they followed
 #include "coop/dev/mannequin_drill.h"  // [dev] the walking mannequin's spawn and baseline drill
@@ -228,6 +229,7 @@ void TickDrills(coop::net::Session& session) {
     coop::dev::chat_drill::Tick(&session);  // [dev] the chat drill (a latched read when off)
     coop::dev::ban_drill::Tick(&session);  // [dev] the host ban drill (a latched read when off)
     coop::dev::bug_report_drill::Tick(&session);  // [dev] the bug-report drill (a latched read when off)
+    coop::dev::grants_drill::Tick(&session);  // [dev] the local grants drill (a latched read when off)
     coop::dev::pause_quit_drill::Tick(&session);  // [dev] the pause-quit drill (a latched read when off)
     coop::dev::drive_selftest::Tick();  // [dev] rack-lane e2e circles (single bool read when off; 5 s self-throttle)
     coop::dev::floppy_selftest::Tick();  // [dev] disc/server episodes (single bool read when off; 6 s census period)

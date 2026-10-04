@@ -150,6 +150,10 @@ CFG_ENUM(command_drill, "command_drill", "dev", "off", "off|on|red|grant|grantre
     "the host runs a command its own permission file denies it and reports the refusal.")
 CFG_ENUM(bug_report_drill, "bug_report_drill", "dev", "off", "off|on|red", "VOTVCOOP_BUG_REPORT_DRILL",
     "The bug-report drill: plants values, saves a report, opens it and judges it (red: plants an address unmarked).")
+CFG_ENUM(grants_drill, "grants_drill", "dev", "off", "off|grant|none|hostdeny", "VOTVCOOP_GRANTS_DRILL",
+    "The local grants drill: checks this machine's dev grants against an arm's expectation.")
+CFG_ENUM(grants_drill_expect, "grants_drill_expect", "dev", "same", "same|grant|none|hostdeny",
+    "VOTVCOOP_GRANTS_DRILL_EXPECT", "Judges the grants drill against another arm's expectation (a red arm).")
 CFG_ENUM(chat_drill, "chat_drill", "dev", "off", "off|history|seed|i18n", "VOTVCOOP_CHAT_DRILL",
     "Developer: chat checks judged in memory -- history (the host), seed (the second joiner), i18n "
     "(every peer); each prints [CHAT-DRILL] PASS, FAIL or ABORT.")
