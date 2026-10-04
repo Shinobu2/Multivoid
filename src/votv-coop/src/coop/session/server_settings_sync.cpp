@@ -26,8 +26,9 @@ using coop::net::Session;
 
 // The protocol catalog includes nothing of the config, so the wire's two limits are stated in both
 // and tied here. The key limit is the wire's own. The registry's value limit is the smaller: a
-// `/set` line bounds it (command_sync.cpp), so the wire never carries more than the registry lets
-// a row hold.
+// `/set` line bounds it (command_sync.cpp). The wire's constant stays the payload capacity: every
+// host writer is bounded by the registry's limit and the receiver bounds a value by it too, so
+// neither end holds more than the registry lets a row hold.
 static_assert(reg::kServerSettingTextMax <= net::kServerSettingTextMax &&
                   reg::kServerSettingKeyMax == net::kServerSettingKeyMax,
               "a replicated row's value must fit the wire, and the two key limits must agree");
@@ -147,7 +148,7 @@ void HandleServerSetting(Session& session, const Session::ReliableMessage& msg) 
     }
     const auto& p = *reinterpret_cast<const ServerSettingPayload*>(msg.payload);
     if (p.keyLen == 0 || p.keyLen > net::kServerSettingKeyMax ||
-        p.valueLen > net::kServerSettingTextMax || msg.payloadLen != 2 + p.keyLen + p.valueLen) {
+        p.valueLen > reg::kServerSettingTextMax || msg.payloadLen != 2 + p.keyLen + p.valueLen) {
         DropMalformed(msg.payloadLen);
         return;
     }
