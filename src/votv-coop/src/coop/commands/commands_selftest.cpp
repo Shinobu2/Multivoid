@@ -325,12 +325,13 @@ void RegistryCases(Checker& check) {
     check(Refuses(reg, p), "registry: an alias that is another root's name is refused");
     p = Probe();
     p.handler = nullptr;
+    p.args.clear(); p.qualifiers.clear();
     CommandSpec set = KickSpec();
     set.name = "set";
     CommandSpec twin = set;
     twin.nodeOf = "multivoid.help";
     p.subVerbs = {twin, twin};
-    check(Refuses(reg, p), "registry: two sub-verbs of one name are refused");
+    check(RefusesFor(reg, p, "two sub-verbs named"), "registry: two sub-verbs of one name are refused");
     p = Probe();
     p.args = {{"t", ArgKind::Rest, false}, {"w", ArgKind::Word, false}};
     check(Refuses(reg, p), "registry: a Rest before another argument is refused");
@@ -342,9 +343,10 @@ void RegistryCases(Checker& check) {
     check(Refuses(reg, p), "registry: no handler and no sub-verbs is refused");
     p = Probe();
     p.handler = nullptr;
+    p.args.clear(); p.qualifiers.clear();
     set.aliases = {{"s", ""}};
     p.subVerbs = {set};
-    check(Refuses(reg, p), "registry: an alias on a sub-verb is refused");
+    check(RefusesFor(reg, p, "an alias on a sub-verb"), "registry: an alias on a sub-verb is refused");
     p = Probe();
     p.nodeOf = "multivoid.nosuch";
     check(Refuses(reg, p), "registry: a nodeOf that is not declared is refused");
@@ -559,7 +561,7 @@ void QualifierCases(Checker& check) {
           "qualifier: a seated target needs no .offline node");
     {
         const std::string unseenId = Repeat("f", 32);
-        const char* unseen = "ffffffff has never played here; only the host can ban an unknown id.";
+        const char* unseen = "ffffffff has never played here; only the host can act on an unknown id.";
         check(SaidOnly(Run(reg, who, ("zap " + unseenId).c_str(), players, full), unseen),
               "qualifier: a caller that is not the console is refused an offline id the host never saw");
         check(Run(reg, console, ("zap " + unseenId).c_str(), players, full).ran,
@@ -567,7 +569,7 @@ void QualifierCases(Checker& check) {
         Policy noKnown = full;
         noKnown.known = nullptr;
         check(SaidOnly(Run(reg, who, ("zap " + offlineId).c_str(), players, noKnown),
-                       "dddddddd has never played here; only the host can ban an unknown id."),
+                       "dddddddd has never played here; only the host can act on an unknown id."),
               "qualifier: a null known treats every offline id as unseen");
         check(Run(reg, who, ("zap " + offlineId).c_str(), players, full).ran,
               "qualifier: a caller that is not the console may act on an offline id the host knows");
@@ -645,12 +647,11 @@ void QualifierCases(Checker& check) {
     {
         CommandSpec c = ZapSpec();
         c.name = "zapsub";
-        c.handler = nullptr;
         CommandSpec sub = Probe();
         sub.name = "notify";
         c.subVerbs = {sub};
         Registry bare;
-        check(Refuses(bare, c),
+        check(RefusesFor(bare, c, "already declared"),
               "qualifier: a command node derived onto a qualifier node is refused");
     }
 
@@ -782,6 +783,7 @@ bool RunSelftest() {
     QualifierCases(check);
     ModerationCases(check);
     SettingsCases(check);
+    GrammarCases(check);
 
     if (check.pass == check.total) {
         UE_LOGI("commands selftest: ALL PASS (%d checks)", check.total);

@@ -1,8 +1,9 @@
 // coop/commands/command_dispatcher.cpp -- Dispatch and the built-in /help.
 //
 // The order of a dispatch: split, find the root (an alias becomes its expansion), walk to the
-// sub-verb, refuse a console-only verb to anyone else, ask the policy about the reached verb's
-// node, parse and resolve the arguments, ask about the selector node when `@a` or `@r` was used,
+// sub-verb (taking the target of each targeted parent on the way), refuse a console-only verb to
+// anyone else, ask the policy about the reached verb's node, parse and resolve the effective
+// arguments (the targets first), ask about the selector node when `@a` or `@r` was used,
 // apply the qualifiers (the host as a target, an offline target and whether the host knows its id,
 // an exempt target, who is told),
 // run the handler. Each refusal is one reply line and sets no `ran`.
@@ -62,19 +63,26 @@ const CommandSpec* Expand(const Registry& reg, std::string_view line, Expanded& 
 
 struct Walked {
     const CommandSpec* spec;
-    size_t next;  // the first effective word the sub-verbs did not consume
+    size_t next;                 // the first effective word the walk did not consume
+    std::vector<size_t> pivots;  // indices into the words of the targeted parents' targets, in order
 };
 
-// While the next word equals (ASCII, case-insensitive) a sub-verb of the current spec, descend.
+// While the next word equals (ASCII, case-insensitive) a sub-verb of the current spec, descend. At
+// a targeted parent the word at `next` is its target and the word after it names the sub-verb;
+// the walk goes on only when both exist and the sub-verb matches, else it stops AT the parent.
 Walked Walk(const CommandSpec* root, const Expanded& ex) {
-    Walked w{root, 1};
+    Walked w{root, 1, {}};
     while (w.next < ex.words.size()) {
+        const bool targeted = w.spec->Targeted();
+        const size_t verbAt = targeted ? w.next + 1 : w.next;
+        if (verbAt >= ex.words.size()) break;
         const CommandSpec* hit = nullptr;
         for (const CommandSpec& sub : w.spec->subVerbs)
-            if (EqualsAsciiNoCase(ex.words[w.next], sub.name)) { hit = &sub; break; }
+            if (EqualsAsciiNoCase(ex.words[verbAt], sub.name)) { hit = &sub; break; }
         if (hit == nullptr) break;
+        if (targeted) w.pivots.push_back(w.next);
         w.spec = hit;
-        ++w.next;
+        w.next = verbAt + 1;
     }
     return w;
 }
@@ -144,7 +152,7 @@ std::string ShortId(const std::string& id) { return id.substr(0, 8); }
 // The qualifier steps over the resolved targets, before the handler: the host as a target, an
 // offline target, an exempt target, then who is told. Returns the refusal line, or empty when the
 // handler may run (`ctx.notifySlots` is then filled). The offline, exempt and identity steps judge
-// the spec's one Player / PlayerOrId argument, when it was given.
+// the one Player / PlayerOrId argument of the effective list (`ctx.args`), when it was given.
 std::string ApplyQualifiers(Context& ctx) {
     const CommandSpec& spec = ctx.spec;
     const Caller& caller = ctx.caller;
@@ -153,19 +161,19 @@ std::string ApplyQualifiers(Context& ctx) {
 
     // Register refuses a GateOffline or Exempt qualifier on a spec without exactly one such
     // argument, and a PlayerOrId argument on a spec without GateOffline.
-    size_t at = spec.args.size();
-    for (size_t i = 0; i < spec.args.size(); ++i) {
-        const ArgKind kind = spec.args[i].kind;
+    size_t at = ctx.args.size();
+    for (size_t i = 0; i < ctx.args.size(); ++i) {
+        const ArgKind kind = ctx.args[i]->kind;
         if (kind == ArgKind::Player || kind == ArgKind::PlayerOrId) at = i;
     }
 
-    for (size_t i = 0; i < spec.args.size(); ++i) {
-        if (!ctx.given[i] || !spec.args[i].notHost) continue;
+    for (size_t i = 0; i < ctx.args.size(); ++i) {
+        if (!ctx.given[i] || !ctx.args[i]->notHost) continue;
         for (int slot : ctx.targets[i].slots)
             if (slot == 0) return "That is the host -- it cannot be " + spec.pastTense + ".";
     }
 
-    if (at != spec.args.size() && ctx.given[at]) {
+    if (at != ctx.args.size() && ctx.given[at]) {
         const TargetResult& t = ctx.targets[at];
         const Qualifier* gate = FindQualifier(spec, QualKind::GateOffline);
         if (gate != nullptr && t.offline) {
@@ -177,7 +185,7 @@ std::string ApplyQualifiers(Context& ctx) {
             // node could otherwise add a persisted record per line at the bucket rate.
             if (!caller.isOperator && (policy.known == nullptr || !policy.known(t.offlineId)))
                 return ShortId(t.offlineId) +
-                       " has never played here; only the host can ban an unknown id.";
+                       " has never played here; only the host can act on an unknown id.";
         }
 
         const Qualifier* exempt = FindQualifier(spec, QualKind::Exempt);
@@ -254,40 +262,68 @@ DispatchResult Dispatch(const Registry& reg, const Caller& caller, std::string_v
     if (!Passes(reg, policy, caller, node))
         return Said("You do not have permission for /" + reg.PathOf(spec) + " (" + node + ").");
 
-    const size_t argCount = spec.args.size();
-    Context ctx{caller, spec, players, reg, policy, {}, {}, {}, {}, {}, {}};
+    Context ctx{.caller = caller,
+                .spec = spec,
+                .players = players,
+                .registry = reg,
+                .policy = policy,
+                .args = reg.ArgsOf(spec),
+                .targets = {},
+                .integers = {},
+                .texts = {},
+                .given = {},
+                .replies = {},
+                .notifySlots = {}};
+    const size_t argCount = ctx.args.size();
     ctx.targets.resize(argCount);
     ctx.integers.assign(argCount, 0);
     ctx.texts.resize(argCount);
     ctx.given.assign(argCount, false);
 
+    // The first `pivotCount` arguments are the targeted parents' words, always given: a target
+    // names ONE player, whose id must be proved, since the leaf below keys a store by it.
+    const size_t pivotCount = walked.pivots.size();
     bool usedSelector = false;
+    // One argument's word, parsed and resolved into its slot of the context; the refusal line, or
+    // empty when the word is taken.
+    auto parseWord = [&](size_t i, const std::string& word) -> std::string {
+        const ArgSpec& a = *ctx.args[i];
+        ctx.given[i] = true;
+        ctx.texts[i] = word;
+        if (a.kind == ArgKind::Integer) {
+            if (!ParseInteger(word, &ctx.integers[i]))
+                return "'" + word + "' is not a whole number. Usage: " + reg.Usage(spec);
+        } else if (a.kind == ArgKind::Player || a.kind == ArgKind::PlayerOrId ||
+                   a.kind == ArgKind::Players) {
+            if (i < pivotCount && !word.empty() && word[0] == '@')
+                return "Name one player, not @a, @p, @r or @s.";
+            TargetResult r = ResolveTarget(word, a.kind != ArgKind::Players,
+                                           a.kind == ArgKind::PlayerOrId, caller, players, policy.pick);
+            if (r.error != TargetError::None) return DescribeTargetError(r, word, players);
+            if (i < pivotCount && !r.slots.empty() && r.playerIds[0].empty())
+                return NickOf(players, r.slots[0]) + "'s identity is not proved yet.";
+            usedSelector = usedSelector || r.usedSelector;
+            ctx.targets[i] = std::move(r);
+        }
+        return std::string();
+    };
+
     size_t next = walked.next;
     for (size_t i = 0; i < argCount; ++i) {
-        const ArgSpec& a = spec.args[i];
-        if (next >= ex.words.size()) {
+        const ArgSpec& a = *ctx.args[i];
+        const bool pivot = i < pivotCount;
+        if (!pivot && next >= ex.words.size()) {
             if (a.optional) continue;
             return Said("Usage: " + reg.Usage(spec));
         }
-        ctx.given[i] = true;
-        if (a.kind == ArgKind::Rest) {
+        if (!pivot && a.kind == ArgKind::Rest) {
+            ctx.given[i] = true;
             ctx.texts[i] = RawRest(ex, next, line);
             next = ex.words.size();
             continue;
         }
-        const std::string& word = ex.words[next++];
-        ctx.texts[i] = word;
-        if (a.kind == ArgKind::Integer) {
-            if (!ParseInteger(word, &ctx.integers[i]))
-                return Said("'" + word + "' is not a whole number. Usage: " + reg.Usage(spec));
-        } else if (a.kind == ArgKind::Player || a.kind == ArgKind::PlayerOrId ||
-                   a.kind == ArgKind::Players) {
-            TargetResult r = ResolveTarget(word, a.kind != ArgKind::Players,
-                                           a.kind == ArgKind::PlayerOrId, caller, players, policy.pick);
-            if (r.error != TargetError::None) return Said(DescribeTargetError(r, word, players));
-            usedSelector = usedSelector || r.usedSelector;
-            ctx.targets[i] = std::move(r);
-        }
+        const std::string refusal = parseWord(i, pivot ? ex.words[walked.pivots[i]] : ex.words[next++]);
+        if (!refusal.empty()) return Said(refusal);
     }
     if (next < ex.words.size()) return Said("Usage: " + reg.Usage(spec));
 

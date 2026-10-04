@@ -76,6 +76,8 @@ struct CommandSpec {
     // declared for it, and defaultGranted is unused (the declared node's default is what a check
     // is given). `/r` names `multivoid.msg`.
     std::string nodeOf;
+    // A handler's arguments, in order; on a targeted parent (Targeted) its one argument, the target
+    // its sub-verbs act on.
     std::vector<ArgSpec> args;
     // The reply's verb (`kicked`, `banned`, `teleported`): Register requires it for a spec with a
     // notHost argument or an Exempt qualifier.
@@ -87,7 +89,18 @@ struct CommandSpec {
     // nodeOf) does not declare it again; one of another kind is refused.
     std::vector<Qualifier> qualifiers;
     Handler handler = nullptr;
-    std::vector<CommandSpec> subVerbs;  // a spec with sub-verbs may also have its own handler
+    // A spec with sub-verbs may also have its own handler. Without one, its words are the verbs a
+    // line continues with, and its argument, if any, is read between its name and its sub-verb.
+    std::vector<CommandSpec> subVerbs;
+
+    // A targeted parent: no handler, one argument taken between its name and its sub-verb,
+    // `/mv user <who> permission`. Its argument is the first of each leaf's effective arguments
+    // (Registry::ArgsOf), so the leaf's qualifiers judge it. Register requires that argument to be
+    // one required Word, Player or PlayerOrId, and refuses an alias or a qualifier on any spec
+    // without a handler. A leaf's argument rules (a Rest last, no required argument after an
+    // optional one, a notHost argument needs a pastTense) and its qualifiers' target rules are
+    // judged over that effective list.
+    bool Targeted() const { return handler == nullptr && !args.empty(); }
 };
 
 struct NodeDecl {
@@ -112,6 +125,7 @@ public:
     // node already declared as a non-qualifier node or by a qualifier of another kind. On success
     // every spec without a nodeOf is declared as a node, and every qualifier node `<node>.<name>`
     // not declared yet (default false, described "<the spec's description> -- <name>").
+    // The rules of a targeted parent, and what its leaves are judged over: CommandSpec::Targeted.
     bool Register(CommandSpec spec, std::string* why);
 
     // Adds a node that is not a command (`multivoid.command.selector`); refuses one declared.
@@ -131,18 +145,28 @@ public:
     std::string NodeOf(const CommandSpec& c) const;
     std::string PathOf(const CommandSpec& c) const;  // the words from the root: `time set`
 
-    // `/` + PathOf, then ` <name>` or ` [name]` per argument (`<name...>` / `[name...]` for Rest),
-    // then the sub-verbs joined by `|`: in `<...>` when the spec has no handler of its own
-    // (`/mv <user|group>`), in `[...]` when it has one (`/time [set|add]`).
+    // The arguments a spec's line carries: for each targeted ancestor from the root down, its one
+    // argument, then the spec's own in order. Every per-argument vector of a Context is indexed
+    // over this list. Empty for a spec this registry does not own; the pointers are into the
+    // owned tree.
+    std::vector<const ArgSpec*> ArgsOf(const CommandSpec& c) const;
+
+    // `/` + PathOf with each targeted ancestor followed by ` <its argument>` (`/mv user <who>
+    // permission set`), then ` <name>` or ` [name]` per OWN argument (`<name...>` / `[name...]`
+    // for Rest), then the sub-verbs joined by `|`: in `<...>` when the spec has no handler of its
+    // own (`/mv user <who> <permission|parent>`), in `[...]` when it has one (`/time [set|add]`).
     std::string Usage(const CommandSpec& c) const;
 
 private:
     struct SpecInfo {
         std::string path;
         std::string node;
+        std::string usageHead;               // `/` + the path, a targeted ancestor's ` <name>` inline
+        std::vector<const ArgSpec*> args;    // what ArgsOf returns
     };
 
-    void Record(const CommandSpec& c, const std::string& parentPath, const std::string& parentNode);
+    void Record(const CommandSpec& c, const std::string& parentPath, const std::string& parentNode,
+                const std::string& parentUsage, const std::vector<const ArgSpec*>& inherited);
 
     std::vector<std::unique_ptr<CommandSpec>> roots_;  // never moved or changed after Register
     std::map<std::string, NodeDecl, std::less<>> nodes_;

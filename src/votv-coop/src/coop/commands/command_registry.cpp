@@ -62,20 +62,21 @@ struct TreeCheck {
         return t != qualifiersByThisTree.end() ? &t->second : nullptr;
     }
 
-    // The qualifiers of one spec against its arguments: a valid name each, one qualifier per kind
-    // and per name, and the target-argument rules the dispatcher relies on. Exempt and GateOffline
-    // are judged on the one Player / PlayerOrId argument; GateOffline gates only a PlayerOrId.
-    bool Qualifiers(const CommandSpec& s) {
+    // The qualifiers of one spec against its effective arguments (the targeted ancestors' and its
+    // own): a valid name each, one qualifier per kind and per name, and the target-argument rules
+    // the dispatcher relies on. Exempt and GateOffline are judged on the one Player / PlayerOrId
+    // argument; GateOffline gates only a PlayerOrId.
+    bool Qualifiers(const CommandSpec& s, const std::vector<const ArgSpec*>& effective) {
         size_t targets = 0;
         ArgKind targetKind = ArgKind::Word;
         bool orId = false;
-        for (const ArgSpec& a : s.args) {
-            if (a.kind == ArgKind::Player || a.kind == ArgKind::PlayerOrId ||
-                a.kind == ArgKind::Players) {
+        for (const ArgSpec* a : effective) {
+            if (a->kind == ArgKind::Player || a->kind == ArgKind::PlayerOrId ||
+                a->kind == ArgKind::Players) {
                 ++targets;
-                targetKind = a.kind;
+                targetKind = a->kind;
             }
-            orId = orId || a.kind == ArgKind::PlayerOrId;
+            orId = orId || a->kind == ArgKind::PlayerOrId;
         }
         bool gates = false;
         for (size_t i = 0; i < s.qualifiers.size(); ++i) {
@@ -104,10 +105,14 @@ struct TreeCheck {
         return true;
     }
 
-    bool Spec(const CommandSpec& s, const std::string& parentNode, bool isRoot) {
+    // `inherited` is the targeted ancestors' arguments, root first.
+    bool Spec(const CommandSpec& s, const std::string& parentNode, bool isRoot,
+              const std::vector<const ArgSpec*>& inherited) {
         if (!ValidName(s.name)) return Fail("'" + s.name + "' is not 1..32 of [a-z0-9]");
         if (isRoot && Reserved(s.name)) return Fail("'" + s.name + "' is a reserved word");
         if (!isRoot && !s.aliases.empty()) return Fail("'" + s.name + "': an alias on a sub-verb");
+        if (s.Targeted() && !s.aliases.empty())
+            return Fail("'" + s.name + "': an alias on a spec that takes a target");
         for (const Alias& a : s.aliases) {
             if (!ValidName(a.name)) return Fail("alias '" + a.name + "' is not 1..32 of [a-z0-9]");
             if (!s.subVerbs.empty()) {
@@ -123,25 +128,43 @@ struct TreeCheck {
         }
         if (s.handler == nullptr && s.subVerbs.empty())
             return Fail("'" + s.name + "' has neither a handler nor sub-verbs");
-        bool sawOptional = false;
-        for (size_t i = 0; i < s.args.size(); ++i) {
-            const ArgSpec& a = s.args[i];
-            if (a.kind == ArgKind::Rest && i + 1 != s.args.size())
-                return Fail("'" + s.name + "': a Rest argument must be last");
-            if (a.optional) sawOptional = true;
-            else if (sawOptional)
-                return Fail("'" + s.name + "': a required argument after an optional one");
-        }
-        if (s.pastTense.empty()) {
-            bool needs = false;
-            for (const ArgSpec& a : s.args) needs = needs || a.notHost;
-            for (const Qualifier& q : s.qualifiers) needs = needs || q.kind == QualKind::Exempt;
-            if (needs)
+        // A spec without a handler is judged here and by the verbs below it; its qualifiers and
+        // its argument rules are the leaves'.
+        if (s.handler == nullptr) {
+            if (!s.qualifiers.empty())
                 return Fail("'" + s.name +
-                            "': a notHost argument or an Exempt qualifier needs a pastTense");
+                            "': a qualifier on a spec without a handler; put it on the verbs below");
+            if (s.Targeted()) {
+                const ArgSpec& target = s.args[0];
+                const bool kindOk = target.kind == ArgKind::Word || target.kind == ArgKind::Player ||
+                                    target.kind == ArgKind::PlayerOrId;
+                if (s.args.size() != 1 || target.optional || !kindOk)
+                    return Fail("'" + s.name +
+                                "': a spec without a handler takes one required Word, Player or "
+                                "PlayerOrId argument, its target");
+            }
+        } else {
+            std::vector<const ArgSpec*> effective = inherited;
+            for (const ArgSpec& a : s.args) effective.push_back(&a);
+            bool sawOptional = false;
+            for (size_t i = 0; i < effective.size(); ++i) {
+                const ArgSpec& a = *effective[i];
+                if (a.kind == ArgKind::Rest && i + 1 != effective.size())
+                    return Fail("'" + s.name + "': a Rest argument must be last");
+                if (a.optional) sawOptional = true;
+                else if (sawOptional)
+                    return Fail("'" + s.name + "': a required argument after an optional one");
+            }
+            if (s.pastTense.empty()) {
+                bool needs = false;
+                for (const ArgSpec* a : effective) needs = needs || a->notHost;
+                for (const Qualifier& q : s.qualifiers) needs = needs || q.kind == QualKind::Exempt;
+                if (needs)
+                    return Fail("'" + s.name +
+                                "': a notHost argument or an Exempt qualifier needs a pastTense");
+            }
+            if (!Qualifiers(s, effective)) return false;
         }
-
-        if (!Qualifiers(s)) return false;
 
         std::string node;
         if (!s.nodeOf.empty()) {
@@ -175,11 +198,13 @@ struct TreeCheck {
             qualifiersByThisTree.emplace(qualNode, q.kind);
         }
 
+        std::vector<const ArgSpec*> below = inherited;
+        if (s.Targeted()) below.push_back(&s.args[0]);
         std::set<std::string> subNames;
         for (const CommandSpec& sub : s.subVerbs) {
             if (!subNames.insert(sub.name).second)
                 return Fail("'" + s.name + "': two sub-verbs named '" + sub.name + "'");
-            if (!Spec(sub, node, false)) return false;
+            if (!Spec(sub, node, false, below)) return false;
         }
         return true;
     }
@@ -206,18 +231,22 @@ bool Registry::Register(CommandSpec spec, std::string* why) {
     }
 
     TreeCheck check{nodes_, qualifierNodes_, {}, {}, {}};
-    if (!check.Spec(spec, std::string(), true)) return refuse(check.why);
+    if (!check.Spec(spec, std::string(), true, {})) return refuse(check.why);
 
     auto owned = std::make_unique<CommandSpec>(std::move(spec));
-    Record(*owned, std::string(), std::string());
+    Record(*owned, std::string(), std::string(), std::string(), {});
     roots_.push_back(std::move(owned));
     return true;
 }
 
 void Registry::Record(const CommandSpec& c, const std::string& parentPath,
-                      const std::string& parentNode) {
+                      const std::string& parentNode, const std::string& parentUsage,
+                      const std::vector<const ArgSpec*>& inherited) {
     SpecInfo info;
     info.path = parentPath.empty() ? c.name : parentPath + " " + c.name;
+    info.usageHead = parentUsage.empty() ? "/" + c.name : parentUsage + " " + c.name;
+    info.args = inherited;
+    for (const ArgSpec& a : c.args) info.args.push_back(&a);
     if (!c.nodeOf.empty()) {
         info.node = c.nodeOf;
     } else {
@@ -231,8 +260,14 @@ void Registry::Record(const CommandSpec& c, const std::string& parentPath,
     }
     const std::string path = info.path;
     const std::string node = info.node;
+    std::string below = info.usageHead;
+    std::vector<const ArgSpec*> belowArgs = inherited;
+    if (c.Targeted()) {
+        below += " <" + c.args[0].name + ">";
+        belowArgs.push_back(&c.args[0]);
+    }
     info_.emplace(&c, std::move(info));
-    for (const CommandSpec& sub : c.subVerbs) Record(sub, path, node);
+    for (const CommandSpec& sub : c.subVerbs) Record(sub, path, node, below, belowArgs);
 }
 
 bool Registry::DeclareNode(NodeDecl d, std::string* why) {
@@ -293,8 +328,14 @@ std::string Registry::PathOf(const CommandSpec& c) const {
     return it == info_.end() ? std::string() : it->second.path;
 }
 
+std::vector<const ArgSpec*> Registry::ArgsOf(const CommandSpec& c) const {
+    const auto it = info_.find(&c);
+    return it == info_.end() ? std::vector<const ArgSpec*>() : it->second.args;
+}
+
 std::string Registry::Usage(const CommandSpec& c) const {
-    std::string out = "/" + PathOf(c);
+    const auto it = info_.find(&c);
+    std::string out = it == info_.end() ? std::string("/") : it->second.usageHead;
     for (const ArgSpec& a : c.args) {
         out += a.optional ? " [" : " <";
         out += a.name;

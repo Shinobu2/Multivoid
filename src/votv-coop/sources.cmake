@@ -681,6 +681,7 @@ set(VOTVCOOP_SOURCES
     src/coop/commands/commands_selftest.cpp
     src/coop/commands/commands_cases_moderation.cpp
     src/coop/commands/commands_cases_settings.cpp
+    src/coop/commands/commands_cases_grammar.cpp
     src/coop/commands/moderation_commands.cpp
     src/coop/commands/settings_commands.cpp
     src/coop/permissions/context_set.cpp

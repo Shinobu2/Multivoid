@@ -41,18 +41,20 @@ struct Policy {
 
 // What a handler sees, for the handler call only. The caller, the spec, the players, the registry
 // and the policy outlive no further than the call; a handler that defers work copies what it
-// needs (slots, player ids, texts, the caller's slot and generation). One entry per `spec.args`
-// index in each vector: `given[i]` is false for an absent optional argument; `targets[i]` is
-// filled for Player / PlayerOrId / Players (an offline PlayerOrId target has `offline` set,
-// `offlineId`, and no slots), `integers[i]` for Integer, `texts[i]` is the word (the raw
-// remainder for Rest) for every kind. `notifySlots` is filled for a spec with a Notify qualifier:
-// the seated slots, other than the caller's and the host's, that hold its node.
+// needs (slots, player ids, texts, the caller's slot and generation). `args` is the spec's
+// EFFECTIVE argument list (Registry::ArgsOf: its targeted ancestors' arguments, then its own);
+// each vector has one entry per `args` index. `given[i]` is false for an absent optional
+// argument; `targets[i]` is filled for Player / PlayerOrId / Players (an offline PlayerOrId target
+// has `offline` set, `offlineId`, and no slots), `integers[i]` for Integer, `texts[i]` is the word
+// (the raw remainder for Rest) for every kind. `notifySlots` is filled for a spec with a Notify
+// qualifier: the seated slots, other than the caller's and the host's, that hold its node.
 struct Context {
     const Caller& caller;
     const CommandSpec& spec;
     const std::vector<PlayerView>& players;
     const Registry& registry;
     const Policy& policy;
+    std::vector<const ArgSpec*> args;
     std::vector<TargetResult> targets;
     std::vector<long long> integers;
     std::vector<std::string> texts;
