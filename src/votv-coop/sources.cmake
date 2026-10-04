@@ -500,6 +500,7 @@ set(VOTVCOOP_SOURCES
     src/coop/dev/command_drill.cpp
     src/coop/dev/chat_drill.cpp
     src/coop/dev/ban_drill.cpp
+    src/coop/dev/bug_report_drill.cpp
     src/coop/dev/pause_quit_drill.cpp
     src/coop/dev/game_window.cpp
     src/coop/dev/desk_verb_drill.cpp
