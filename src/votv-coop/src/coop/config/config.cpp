@@ -425,7 +425,8 @@ static void FillP2PFields(coop::net::Config& c) {
 
     // Both as the player wrote them: an empty relay prints as the master's it will be.
     UE_LOGI("config: P2P fields -- identity=<durable key> host='%s' signaling='%s' stun='%s'",
-            c.hostIdentity.c_str(),
+            config_registry::ValueForLog(config_registry::FindRow("net.host_identity"),
+                                         c.hostIdentity).c_str(),
             c.signalingUrl.empty()
                 ? "(the chosen master's)"
                 : config_registry::ValueForLog(config_registry::FindRow("net.signaling"),
