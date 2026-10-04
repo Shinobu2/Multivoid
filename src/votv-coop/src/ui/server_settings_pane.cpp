@@ -147,6 +147,8 @@ void DrawRow(const CR::Row& row, const char* label) {
         case CR::Kind::Float:
         case CR::Kind::String: DrawTyped(row, st, now); break;
         case CR::Kind::Enum: DrawEnum(row, now); break;
+        // A labelled row is never Identity: config_registry.cpp static_asserts it.
+        case CR::Kind::Identity: break;
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("Reset")) SubmitLine(std::string("reset ") + row.key);
