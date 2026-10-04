@@ -140,7 +140,8 @@ CFG_FLAG(event_drill, "event_drill", "dev", false, "VOTVCOOP_EVENT_DRILL",
     "solar, arirGraff_0 and enasus by the dev fire; the client's DONE line counts the showers and the "
     "fires it replayed. MUTATES the world (the clock, the events), so it is armed per run.")
 CFG_ENUM(command_drill, "command_drill", "dev", "off", "off|on|red|grant|grantred|hostdeny", "VOTVCOOP_COMMAND_DRILL",
-    "Commands drill: once its world is ready, this peer submits /help and an unknown command, then (a "
+    "Commands drill: once its world is ready, this peer submits /help and an unknown command, then a "
+    "line one byte too long for a request (and, on the host, one of exactly the limit), then (a "
     "client) six unknown commands at once, and checks the replies in order. red expects a wrong first "
     "line, so it must fail. grant / grantred: a client runs a command and reports whether the host's "
     "permissions allowed it (grant: one the rig's fixture grants; grantred: one it does not); hostdeny: "

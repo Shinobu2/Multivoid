@@ -4,15 +4,15 @@
 //
 // Once its world is ready, each peer submits `help` and an unknown command through the chat input's
 // own entry (command_sync::Submit) and checks the reply lines in order. The host's lines run locally;
-// the client's travel as CommandRequest and come back as CommandReply. Then the client submits six
-// unknown commands at once: the host's per-sender rate accepts the first few, drops the rest and tells
-// the client once, and the client counts the accepted answers before that notice. `red` expects a wrong
-// first reply line, so the drill must fail.
-// grant, grantred and hostdeny skip those phases and send one line each. grant / grantred (a client):
-// `unban` / `banid`, one the host's permission files grant the client and one they do not; the first
-// reply is the verdict. hostdeny (the host): an `unban` its own permission file denies it.
-// Lines tagged [CMD-DRILL]; 'host DONE' and 'client DONE' end it, 'grant PASS' and 'hostdeny PASS'
-// end the one-line modes, FAIL names the reply that differed, or an answered count outside 1..5.
+// the client's travel as CommandRequest and come back as CommandReply. Then each peer submits a line
+// one byte past the request's limit and expects the local refusal (no command token spent); the host
+// also submits a line of exactly the limit and expects the unknown-command reply, uncut. Then the
+// client submits six unknown commands at once: the host's rate accepts the first few and tells the
+// client once; the client counts the accepted answers. `red` expects a wrong first reply line, so it
+// must fail. grant / grantred (a client) send `unban` / `banid`, one the host's permission files
+// grant and one they do not, the first reply the verdict; hostdeny (the host) an `unban` its own file
+// denies it; those skip the phases above. [CMD-DRILL]: 'host DONE', 'client DONE', 'grant PASS' and
+// 'hostdeny PASS' end it; FAIL names the differing reply, or an answered count outside 1..5.
 
 #pragma once
 

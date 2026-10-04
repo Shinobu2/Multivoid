@@ -5,6 +5,7 @@
 #include "coop/commands/command_sync.h"
 #include "coop/config/config.h"
 #include "coop/config/config_registry.h"
+#include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/session/join_progress.h"
 #include "coop/session/net_pump.h"  // HasAnnouncedWorldReady
@@ -38,7 +39,9 @@ Mode ModeNow() {
 
 bool IsGrantMode() { return ModeNow() == Mode::Grant || ModeNow() == Mode::GrantRed; }
 
-enum class Phase : uint8_t { Ready, WaitA, SendB, WaitB, WaitFirst, Done };
+enum class Phase : uint8_t {
+    Ready, WaitA, SendLong, WaitLong, SendControl, WaitControl, SendB, WaitB, WaitFirst, Done
+};
 
 Phase g_phase = Phase::Ready;
 bool g_isHost = false;
@@ -52,6 +55,12 @@ constexpr const char* kHelpLine =
 constexpr const char* kUnknownLine = "Unknown command '/nosuchcommand'. Type /help for the commands.";
 constexpr const char* kRateNotice = "Too many commands -- wait a moment.";
 constexpr int kBurstLines = 6;
+
+// The longest line a request carries (protocol.h). A line one
+// byte past it is refused where it is typed, on either role, and spends no command token; a line
+// of exactly this length is dispatched.
+constexpr size_t kLineMax = sizeof(coop::net::CommandRequestPayload::text);
+constexpr const char* kTooLongLine = "That line is too long.";
 
 // Phase A's lines after the header, by role: what `/help` and an unknown command answer. The host
 // is the console and may use every command, listed in registry order (roots by name); a client
@@ -96,12 +105,27 @@ void OnPhaseA(std::string_view line) {
     const char* want = i == 0 ? (ModeNow() == Mode::Red ? kHelpHeaderRed : kHelpHeader) : lines[i - 1];
     if (line != want) { Fail(i + 1, line, want); return; }
     if (++g_replies < count) return;
-    if (g_isHost) {
-        UE_LOGI("[CMD-DRILL] host DONE");
-        Finish();
-    } else {
-        g_phase = Phase::SendB;
-    }
+    g_phase = Phase::SendLong;
+}
+
+// The reply to the 204-byte line: the local refusal, the same text on both roles.
+void OnTooLong(std::string_view line) {
+    if (line != kTooLongLine) { Fail(g_replies + 1, line, kTooLongLine); return; }
+    ++g_replies;
+    g_phase = g_isHost ? Phase::SendControl : Phase::SendB;
+}
+
+// The host's reply to its own 203-byte line: not cut, so it carries the whole 203-byte word.
+std::string HostControlReply() {
+    return "Unknown command '/" + std::string(kLineMax, 'x') + "'. Type /help for the commands.";
+}
+
+void OnControl(std::string_view line) {
+    const std::string want = HostControlReply();
+    if (line != want) { Fail(g_replies + 1, line, want.c_str()); return; }
+    ++g_replies;
+    UE_LOGI("[CMD-DRILL] host DONE");
+    Finish();
 }
 
 void OnPhaseB(std::string_view line) {
@@ -141,6 +165,8 @@ void OnHostDenyReply(std::string_view line) {
 // Every delivered reply line of this peer, in order.
 void Observe(std::string_view line) {
     if (g_phase == Phase::WaitA) OnPhaseA(line);
+    else if (g_phase == Phase::WaitLong) OnTooLong(line);
+    else if (g_phase == Phase::WaitControl) OnControl(line);
     else if (g_phase == Phase::WaitB) OnPhaseB(line);
     else if (g_phase == Phase::WaitFirst && ModeNow() == Mode::HostDeny) OnHostDenyReply(line);
     else if (g_phase == Phase::WaitFirst) OnGrantReply(line);
@@ -178,12 +204,24 @@ void Tick(coop::net::Session* session) {
         CS::Submit("nosuchcommand");
         UE_LOGI("[CMD-DRILL] %s sent phase A", g_isHost ? "host" : "client");
         return;
+    case Phase::SendLong:
+        g_phase = Phase::WaitLong;
+        CS::Submit(std::string(kLineMax + 1, 'x'));
+        UE_LOGI("[CMD-DRILL] %s sent a %zu-byte line", g_isHost ? "host" : "client", kLineMax + 1);
+        return;
+    case Phase::SendControl:
+        g_phase = Phase::WaitControl;
+        CS::Submit(std::string(kLineMax, 'x'));
+        UE_LOGI("[CMD-DRILL] host sent a %zu-byte line", kLineMax);
+        return;
     case Phase::SendB:
         g_phase = Phase::WaitB;
         for (int i = 0; i < kBurstLines; ++i) CS::Submit("nosuchcommand");
         UE_LOGI("[CMD-DRILL] client sent phase B (%d lines)", kBurstLines);
         return;
     case Phase::WaitA:
+    case Phase::WaitLong:
+    case Phase::WaitControl:
     case Phase::WaitB:
     case Phase::WaitFirst:
     case Phase::Done:
