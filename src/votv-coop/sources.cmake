@@ -685,6 +685,7 @@ set(VOTVCOOP_SOURCES
     src/coop/permissions/model.cpp
     src/coop/permissions/inheritance.cpp
     src/coop/permissions/resolution.cpp
+    src/coop/permissions/grants_core.cpp
     src/coop/permissions/permission_files.cpp
     src/coop/permissions/permission_host.cpp
     src/coop/permissions/permissions_selftest.cpp
@@ -693,6 +694,7 @@ set(VOTVCOOP_SOURCES
     src/coop/permissions/permissions_cases_inheritance.cpp
     src/coop/permissions/permissions_cases_resolution.cpp
     src/coop/permissions/permissions_cases_files.cpp
+    src/coop/permissions/permissions_cases_grants.cpp
     src/coop/commands/command_sync.cpp
     src/harness/harness.cpp
     src/harness/session_runtime.cpp

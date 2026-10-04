@@ -25,6 +25,7 @@ bool RunSelftest() {
     RunInheritanceCases(sink);
     RunResolutionCases(sink);
     RunFilesCases(sink);
+    RunGrantsCases(sink);
 
     if (sink.passed == sink.total) {
         UE_LOGI("permissions selftest: ALL PASS (%d checks)", sink.total);

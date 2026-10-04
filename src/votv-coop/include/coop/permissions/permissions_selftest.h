@@ -31,6 +31,7 @@ void RunStoreCases(CheckSink& sink);
 void RunInheritanceCases(CheckSink& sink);
 void RunResolutionCases(CheckSink& sink);
 void RunFilesCases(CheckSink& sink);
+void RunGrantsCases(CheckSink& sink);
 
 // Runs every cases function and logs the result line. True when every check passed.
 bool RunSelftest();
