@@ -61,6 +61,8 @@ constexpr const char* kHostLines[] = {
     "/banid <who> [reason...] -- Bans a player by id only.",
     kHelpLine,
     "/kick <who> [reason...] -- Disconnects a player.",
+    "/reset <setting> -- Puts a server setting back to its default.",
+    "/set <setting> <value...> -- Changes a server setting.",
     "/tphere <who> -- Brings a player to you (the host).",
     "/unban <id> -- Lifts a ban.",
     kUnknownLine};

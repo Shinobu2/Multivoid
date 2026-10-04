@@ -13,8 +13,11 @@
 #include "coop/commands/command_dispatcher.h"
 #include "coop/commands/command_line.h"
 #include "coop/commands/moderation_commands.h"
+#include "coop/commands/settings_commands.h"
 
 #include "coop/comms/chat_feed.h"
+#include "coop/config/config.h"
+#include "coop/config/config_registry.h"
 #include "coop/moderation/ban_list.h"
 #include "coop/moderation/moderation.h"
 #include "coop/moderation/seen_players.h"
@@ -64,6 +67,8 @@ constexpr coop::net::IntentBudget kBudget{3.0f, 2.0f};
 constexpr uint64_t kSayEveryMs = 10000;
 // The longest command word a log line carries.
 constexpr size_t kLogWordMax = 32;
+// The longest line a request carries, and so the longest line a peer may type.
+constexpr size_t kLineMax = sizeof(coop::net::CommandRequestPayload::text);
 
 coop::net::IntentBucket g_bucket[kMaxPeers];
 uint64_t g_nextSayMs[kMaxPeers] = {};
@@ -126,6 +131,44 @@ coop::commands::moderation::Ports RealModerationPorts() {
     return p;
 }
 
+// The settings commands' ports. A word names a row by its key; only a server-scope row that is not
+// a credential can be set or reset by name, so a local row is never reachable from a command line.
+const coop::config_registry::Row* RowNamed(std::string_view word) {
+    return coop::config_registry::FindRow(std::string(word).c_str());
+}
+
+const char* CredentialKeyNamed(std::string_view word) {
+    const coop::config_registry::Row* row = RowNamed(word);
+    return row != nullptr && coop::config_registry::IsCredentialKey(row->key) ? row->key : nullptr;
+}
+
+const coop::config_registry::Row* ServerRowNamed(std::string_view word) {
+    const coop::config_registry::Row* row = RowNamed(word);
+    if (row == nullptr || !coop::config_registry::IsServerScope(row) ||
+        coop::config_registry::IsCredentialKey(row->key))
+        return nullptr;
+    return row;
+}
+
+bool ValueValidFor(const coop::config_registry::Row* row, const std::string& value, std::string* why) {
+    return coop::config::ValueValidForKey(row->key, value, why);
+}
+
+std::string CurrentValueOf(const coop::config_registry::Row* row) {
+    return coop::config::EffectiveText(*row);
+}
+
+coop::commands::settings::Ports RealSettingsPorts() {
+    coop::commands::settings::Ports p;
+    p.credentialKey = &CredentialKeyNamed;
+    p.findServerRow = &ServerRowNamed;
+    p.valid = &ValueValidFor;
+    p.set = &coop::config::SetServerRow;
+    p.reset = &coop::config::ResetServerRow;
+    p.current = &CurrentValueOf;
+    return p;
+}
+
 struct RegistryHolder {
     coop::commands::Registry registry;
     RegistryHolder() {
@@ -133,6 +176,8 @@ struct RegistryHolder {
             UE_LOGE("command_sync: builtin registration refused");
         if (!coop::commands::moderation::Register(registry, RealModerationPorts()))
             UE_LOGE("commands: the moderation commands did not register");
+        if (!coop::commands::settings::Register(registry, RealSettingsPorts()))
+            UE_LOGE("commands: the settings commands did not register");
     }
 };
 
@@ -260,6 +305,13 @@ void Submit(std::string line) {
     GT::Post([line = std::move(line)] {
         coop::net::Session* s = g_session.load(std::memory_order_acquire);
         const bool inSession = s && s->running();
+        // A line the request cannot carry whole is refused on every peer, before the role decides
+        // where it runs: it never runs cut, and a host and a client answer alike.
+        if (line.size() > kLineMax) {
+            const std::string_view tooLong = "That line is too long.";
+            Deliver(tooLong, coop::text::FromUtf8Lossy(tooLong.data(), tooLong.size()));
+            return;
+        }
         if (!inSession || s->role() == coop::net::Role::Host) {
             DispatchLocal(line);
             return;
@@ -272,9 +324,8 @@ void Submit(std::string line) {
             return;
         }
         coop::net::CommandRequestPayload p{};
-        const std::string cut = coop::text::CapUtf8Bytes(line, sizeof(p.text));
-        p.len = static_cast<uint8_t>(cut.size());
-        std::memcpy(p.text, cut.data(), cut.size());
+        p.len = static_cast<uint8_t>(line.size());
+        std::memcpy(p.text, line.data(), line.size());
         if (!s->SendReliable(coop::net::ReliableKind::CommandRequest, &p, sizeof(p))) {
             const std::string_view failed = "Could not send the command.";
             Deliver(failed, coop::text::FromUtf8Lossy(failed.data(), failed.size()));

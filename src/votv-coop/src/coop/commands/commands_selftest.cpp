@@ -781,6 +781,7 @@ bool RunSelftest() {
     RegistryCases(check);
     QualifierCases(check);
     ModerationCases(check);
+    SettingsCases(check);
 
     if (check.pass == check.total) {
         UE_LOGI("commands selftest: ALL PASS (%d checks)", check.total);

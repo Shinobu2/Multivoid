@@ -1,7 +1,7 @@
 // coop/commands/commands_selftest.h -- the commands' un-gated boot selftest, run at every session
 // start on both peers: pinned lines through the tokenizer, pinned players through the resolver, a
-// test command tree through the registry and the dispatcher, the moderation commands over fake
-// ports.
+// test command tree through the registry and the dispatcher, the moderation and settings commands
+// over fake ports.
 
 #pragma once
 
@@ -19,5 +19,8 @@ struct Checker {
 
 // The moderation commands over fake ports (commands_cases_moderation.cpp), called by RunSelftest.
 void ModerationCases(Checker& check);
+
+// The settings commands over fake ports (commands_cases_settings.cpp), called by RunSelftest.
+void SettingsCases(Checker& check);
 
 }  // namespace coop::commands

@@ -9,7 +9,9 @@
 // The server tokens set voice.distance_cm, a server-scope row: the host's own reads answer it at
 // once and the client's log shows it arrive. serverjoin is the one step that sets BEFORE any
 // client connects, so the joiner's snapshot carries the value, and resets once the joiner's world
-// is up. Each completed step prints its DONE line with a cycle number, counted per process.
+// is up. servercmd and servercmdred run the step through /set and /reset submitted as lines, the
+// probe posted when the reply is read; another reply ends the step with a FAIL line. Each completed
+// step prints its DONE line with a cycle number, counted per process.
 // Tagged [SETTINGS-DRILL]; the [dev] settings_drill row.
 
 #pragma once

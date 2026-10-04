@@ -35,8 +35,9 @@ void Install(coop::net::Session* s);
 coop::commands::Registry& Commands();
 
 // The text after a chat line's `/`. Any thread (the chat input calls it on the render thread); it
-// posts to the game thread, where a process with no running session or a host runs the line itself
-// and a client in a running session sends it to the host as a CommandRequest. A client never
+// posts to the game thread, where a line longer than a CommandRequest carries is refused on every
+// peer with "That line is too long.", a process with no running session or a host runs the line
+// itself and a client in a running session sends it to the host as a CommandRequest. A client never
 // dispatches: its bare `/` shows the help hint itself, with nothing sent.
 void Submit(std::string line);
 

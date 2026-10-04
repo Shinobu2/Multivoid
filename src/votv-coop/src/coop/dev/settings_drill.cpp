@@ -2,6 +2,7 @@
 
 #include "coop/dev/settings_drill.h"
 
+#include "coop/commands/command_sync.h"
 #include "coop/config/config.h"
 #include "coop/comms/peer_action_feed.h"
 #include "coop/config/config_registry.h"
@@ -21,20 +22,24 @@
 #include <cmath>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace coop::dev::settings_drill {
 namespace {
+
+namespace CS = coop::command_sync;
 
 constexpr int kSlot = 1;  // the pair's client
 
 // The step the row names, parsed once at the first Tick.
 enum class Token {
     Off, Nameplate, NickColor, Flags, Scale, Font, VoiceMode, VoiceVolume, Server, ServerJoin,
-    ServerRed, Red
+    ServerRed, ServerCmd, ServerCmdRed, Red
 };
 
 // 0 idle; 1 SET done, waiting (the probe posted, or for a counter token the counter to move;
-// serverjoin: until the joiner's world is up); 2 RESET done, waiting likewise; 3 DONE.
+// serverjoin: until the joiner's world is up; a command token: for the command's reply, which
+// posts the probe); 2 RESET done, waiting likewise; 3 DONE.
 int      g_phase = 0;
 Token    g_token = Token::Off;
 // The steps this process has completed, counted in Done() and never reset: a rejoin re-arms the
@@ -55,15 +60,28 @@ Token ParseToken(const std::string& mode) {
     if (mode == "server")    return Token::Server;
     if (mode == "serverjoin") return Token::ServerJoin;
     if (mode == "serverred") return Token::ServerRed;
+    if (mode == "servercmd") return Token::ServerCmd;
+    if (mode == "servercmdred") return Token::ServerCmdRed;
     if (mode == "red")       return Token::Red;
     return Token::Off;
 }
 
-// The three server tokens set the session's voice range, which every later read on the host
-// answers at once, and which the client's log shows arriving.
+// The three server tokens set the session's voice range through the setters, which every later
+// read on the host answers at once, and which the client's log shows arriving.
 bool IsServerToken() {
     return g_token == Token::Server || g_token == Token::ServerJoin || g_token == Token::ServerRed;
 }
+
+// The two command tokens run the server step through /set and /reset, submitted as command lines;
+// their probes judge the voice range like the server step's, and each reads the command's reply.
+bool IsCommandToken() { return g_token == Token::ServerCmd || g_token == Token::ServerCmdRed; }
+
+constexpr const char* kSetLine = "set voice.distance_cm 6000";
+constexpr const char* kResetLine = "reset voice.distance_cm";
+// A local row named: the command refuses it, so the reply is not the set's and the step fails.
+constexpr const char* kRedLine = "set net.nick x";
+constexpr const char* kSetReply = "voice.distance_cm is now 6000.";
+constexpr const char* kResetReply = "voice.distance_cm is back to 4800.";
 
 // The render thread applies a scale or a font row at a later drawn frame, and the voice tick
 // reopens the devices for a mode row at a later game tick, so these three tokens wait on the
@@ -101,6 +119,7 @@ const char* SetResultName(coop::config::SetResult r) {
 
 void Done() {
     g_phase = 3;
+    if (IsCommandToken()) CS::SetReplyObserver(nullptr);
     UE_LOGI("[SETTINGS-DRILL] host DONE (cycle %d)", ++g_cycle);
 }
 
@@ -127,7 +146,7 @@ void ProbeAfterReset() {
             UE_LOGI("[SETTINGS-DRILL] host: voice.volume followed back (volume=%.2f)", vol);
         else
             UE_LOGW("[SETTINGS-DRILL] FAIL: voice.volume did not follow back (volume=%.2f)", vol);
-    } else if (IsServerToken()) {
+    } else if (IsServerToken() || IsCommandToken()) {
         const float range = coop::config::ResolveFloat(::coop::config_registry::rows::voice_distance_cm);
         if (range == 4800.f)
             UE_LOGI("[SETTINGS-DRILL] host: voice.distance_cm followed back (host resolves %.0f)", range);
@@ -160,6 +179,13 @@ void ResetCounterRow() {
 void Reset() {
     if (IsCounterToken()) {
         ResetCounterRow();
+        return;
+    }
+    // A command token's reset is a command line: its probe is posted when the reply is read.
+    if (IsCommandToken()) {
+        UE_LOGI("[SETTINGS-DRILL] host: servercmd submits '%s'", kResetLine);
+        g_phase = 2;
+        CS::Submit(kResetLine);
         return;
     }
     if (g_token == Token::Flags) {
@@ -217,7 +243,7 @@ void ProbeAfterSet() {
         followed = std::fabs(vol - 0.5f) < 0.001f;
         if (followed) UE_LOGI("[SETTINGS-DRILL] host: voice.volume followed (volume=%.2f)", vol);
         else UE_LOGW("[SETTINGS-DRILL] FAIL: voice.volume did not follow (volume=%.2f)", vol);
-    } else if (IsServerToken()) {
+    } else if (IsServerToken() || IsCommandToken()) {
         const float range = coop::config::ResolveFloat(::coop::config_registry::rows::voice_distance_cm);
         followed = (range == 6000.f);
         if (followed)
@@ -291,10 +317,45 @@ void PollCounter() {
     }
 }
 
-// The red arms are the nameplate step and the server step with their one call skipped.
+// Game thread, for every reply line the host's own command is answered with. The reply is
+// delivered inside the dispatch, after the setter queued its subscribers, so the probe posted here
+// runs after them (FIFO). A reply other than the one the step expects ends it.
+void OnCommandReply(std::string_view line) {
+    UE_LOGI("[SETTINGS-DRILL] host: servercmd reply '%s'", std::string(line).c_str());
+    const bool setStep = (g_phase == 1);
+    if (line != (setStep ? kSetReply : kResetReply)) {
+        UE_LOGW("[SETTINGS-DRILL] FAIL: servercmd reply '%s'", std::string(line).c_str());
+        Done();
+        return;
+    }
+    ue_wrap::game_thread::Post(setStep ? &ProbeAfterSet : &ProbeAfterReset);
+}
+
+// A command token's SET: the reply observer is one slot, shared with the command drill, so the
+// step refuses to start while that drill is on. The red arm submits a local row's name, which the
+// command refuses.
+void SetByCommand() {
+    if (coop::config::ResolveEnum(::coop::config_registry::rows::command_drill) != "off") {
+        UE_LOGW("[SETTINGS-DRILL] FAIL: command_drill is on; the reply observer is one slot");
+        Done();
+        return;
+    }
+    const char* line = (g_token == Token::ServerCmdRed) ? kRedLine : kSetLine;
+    UE_LOGI("[SETTINGS-DRILL] host: servercmd submits '%s'", line);
+    CS::SetReplyObserver(&OnCommandReply);
+    g_phase = 1;
+    CS::Submit(line);
+}
+
+// The red arms are the nameplate step and the server step with their one call skipped, and the
+// command step with a command the dispatcher refuses.
 void Set() {
     if (IsCounterToken()) {
         SetCounterRow();
+        return;
+    }
+    if (IsCommandToken()) {
+        SetByCommand();
         return;
     }
     const bool skipSet = (g_token == Token::Red || g_token == Token::ServerRed);
@@ -380,6 +441,7 @@ void Tick(coop::net::Session* session) {
 }
 
 void OnDisconnect() {
+    if (IsCommandToken()) CS::SetReplyObserver(nullptr);
     g_phase = 0;
 }
 
