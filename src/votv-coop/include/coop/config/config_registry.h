@@ -120,9 +120,10 @@ const char* RetiredKeyNote(const char* key);
 bool IsCredentialKey(const char* key);
 const char* const* CredentialKeys(size_t& count);
 
-// A row's scope and whether its readers follow a set, declared with the row by CFG_ROWFLAGS in the
-// row list: kRowServer = it belongs to the server being hosted; kRowReplicated = its session value
-// is sent to every client (Source's FCVAR_REPLICATED, iconvar.h:55-62); replicated implies server.
+// A row's scope, whether its readers follow a set, and whether it names an address, declared with
+// the row by CFG_ROWFLAGS in the row list: kRowServer = it belongs to the server being hosted;
+// kRowReplicated = its session value is sent to every client (Source's FCVAR_REPLICATED,
+// iconvar.h:55-62); replicated implies server.
 // A replicated row is never a credential, and its key and its default fit the wire (static_asserts
 // in config_registry.cpp); a value longer than kServerSettingTextMax is refused by SetValue at run
 // time. kRowLive = every reader of the row follows a set (subscribed, or re-resolving at each use):

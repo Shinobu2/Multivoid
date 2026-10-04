@@ -1,10 +1,9 @@
 // coop/config/config_census.cpp -- what this launch is actually configured with, said out loud.
 //
-// A drill that varies a setting and never checks the setting took effect is not an experiment: a
-// send-rate run measured a controller its own log said was off, and every conclusion drawn from
-// it described a binary that never ran the code under test. So a peer publishes the rows a layer
-// actually supplied -- the value as RESOLVED, and which layer won -- and a rig asserts its own
-// independent variables against that before it measures anything.
+// A drill that varies a setting and never checks it took effect is not an experiment: a send-rate
+// run measured a controller its own log said was off. So a peer publishes the rows a layer actually
+// supplied -- the value as RESOLVED, and which layer won -- and a rig asserts its independent
+// variables against that before it measures anything.
 //
 // The two lines are a contract with tools outside the tree, like coop/session/rig_ready.h's:
 //   config: EFFECTIVE <key>=<value> (<env|ini>)
@@ -12,7 +11,8 @@
 // An absent row means the peer took that row's default, which holds only if the ini was readable,
 // so the end line carries that verdict too. A value prints through config_registry::ValueForLog,
 // the one place that decides a printed form: a credential row is <set>, an address row is marked
-// unless it is the default, and a refused raw value says so beside the default it fell back to.
+// unless it is the default, and a refused raw value says so beside the default it fell back to, or
+// beside itself on a fail-closed row, where nothing falls back.
 
 #include "coop/config/config.h"
 

@@ -52,8 +52,10 @@ void Flush();
 inline constexpr char kAddrOpen[] = "\xE2\x9F\xA8" "addr:";  // U+27E8 + "addr:"
 inline constexpr char kAddrClose[] = "\xE2\x9F\xA9";          // U+27E9
 inline constexpr char kLogFormatLine[] = "log format 1";
-// MTA and Source print a peer's address raw (CGame.cpp:1411, EventLog.cpp:73): their log stays
-// with the server's operator; ours leaves the machine in a report, so the mark lets it be replaced.
+// MTA and Source print a peer's address raw in the server's own log (CGame.cpp:1411,
+// EventLog.cpp:73); MTA's client log, uploaded with a crash (CCrashDumpWriter.cpp:2450), holds only
+// a public server's address. Ours holds every peer's home address and leaves in a report, so the
+// site marks it.
 // Pure, any thread, no lock, no log call. The value's own U+27E8 / U+27E9, CR and LF become
 // '?', so a value cannot end its own mark or its line. Used as Addr(x).c_str() in a varargs.
 std::string Addr(std::string_view value);
