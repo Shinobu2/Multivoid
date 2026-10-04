@@ -45,6 +45,23 @@ struct Born {
 };
 std::unordered_map<void*, Born> g_born;
 
+// The DESTROY lines, bounded per world and per destroying class: a save's load files every container's
+// items through spawn-then-destroy (`propInventory_C`, ~1700 in one second on the rig's host), and one
+// WARN each flooded the log the probe exists to keep readable. The first kDestroyLinesPerCaller print;
+// the rest are counted, and the count prints once when the next world's first destroy arrives.
+constexpr unsigned kDestroyLinesPerCaller = 8;
+std::map<std::wstring, unsigned> g_destroyByCaller;  // this world's destroys, by the destroying class
+void* g_destroyWorld = nullptr;                       // the world those counts belong to
+
+void FlushDestroySummary() {
+    for (const auto& [by, n] : g_destroyByCaller) {
+        if (n > kDestroyLinesPerCaller)
+            UE_LOGW("prop_birth_key_probe: DESTROY summary world=%p by '%ls': %u destroyed, the first %u printed",
+                    g_destroyWorld, by.c_str(), n, kDestroyLinesPerCaller);
+    }
+    g_destroyByCaller.clear();
+}
+
 int g_enqueued     = 0;
 int g_keyAtSeam    = 0;   // ... of which the Key read back with no waiting
 int g_capHit       = 0;   // refused at enqueue, pending vector full
@@ -99,9 +116,16 @@ void NoteDestroy(void* actor, void* caller, const coop::net::Session* s) {
     if (it == g_born.end()) return;
     const std::wstring by = caller ? R::ClassNameOf(caller) : std::wstring(L"<native>");
     const char* state = !s ? "none" : s->connected() ? "connected" : s->running() ? "joining" : "stopped";
-    UE_LOGW("prop_birth_key_probe: DESTROY actor=%p cls='%ls' key='%ls' by '%ls' session=%s world=%p (current %p)",
-            actor, it->second.cls.c_str(), it->second.key.c_str(), by.c_str(), state,
-            ue_wrap::world_identity::WorldOf(actor), ue_wrap::world_identity::CurrentWorld());
+    void* const world = ue_wrap::world_identity::WorldOf(actor);
+    if (world != g_destroyWorld) {
+        FlushDestroySummary();
+        g_destroyWorld = world;
+    }
+    if (++g_destroyByCaller[by] <= kDestroyLinesPerCaller) {
+        UE_LOGW("prop_birth_key_probe: DESTROY actor=%p cls='%ls' key='%ls' by '%ls' session=%s world=%p (current %p)",
+                actor, it->second.cls.c_str(), it->second.key.c_str(), by.c_str(), state, world,
+                ue_wrap::world_identity::CurrentWorld());
+    }
     g_born.erase(it);
     g_dirty = true;
 }
