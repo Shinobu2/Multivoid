@@ -153,40 +153,45 @@ void RenderOnlineSection(const coop::roster::Snapshot& rs) {
 
 void RenderOfflineSection() {
     SectionHeader("Offline (seen before)");
-    int shown = 0;
     if (ImGui::BeginTable("##admin_offline", 3,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_PadOuterX)) {
         ImGui::TableSetupColumn("Player", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Last seen", ImGuiTableColumnFlags_WidthFixed, S(130.f));
         ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, S(90.f));
         ImGui::TableHeadersRow();
-        for (const auto& e : g_seen) {
-            if (e.online) continue;  // online rows live in the section above
-            ++shown;
-            ImGui::TableNextRow();
-            ImGui::PushID(e.guid);
-            ImGui::TableSetColumnIndex(0);
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(e.nick[0] ? e.nick : "(no nick)");
-            IdTooltip(e.guid);
-            ImGui::TableSetColumnIndex(1);
-            char when[24];
-            FormatUnix(e.lastSeenUnix, when, sizeof(when));
-            ImGui::TextDisabled("%s", when);
-            ImGui::TableSetColumnIndex(2);
-            const bool alreadyBanned = g_banIds.count(std::string_view(e.guid)) != 0;
-            if (alreadyBanned) {
-                ImGui::TextDisabled("banned");
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00f, 0.45f, 0.42f, 1.0f));
-                if (ImGui::SmallButton("Ban...")) OpenBanFor(false, e.guid, e.nick);
-                ImGui::PopStyleColor();
+        // Only the rows in view are drawn: the registry grows with every player who ever joined.
+        // The few online records inside the range draw nothing.
+        ImGuiListClipper clipper;
+        clipper.Begin(static_cast<int>(g_seen.size()));
+        while (clipper.Step()) {
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+                const auto& e = g_seen[static_cast<size_t>(i)];
+                if (e.online) continue;  // online rows live in the section above
+                ImGui::TableNextRow();
+                ImGui::PushID(e.guid);
+                ImGui::TableSetColumnIndex(0);
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(e.nick[0] ? e.nick : "(no nick)");
+                IdTooltip(e.guid);
+                ImGui::TableSetColumnIndex(1);
+                char when[24];
+                FormatUnix(e.lastSeenUnix, when, sizeof(when));
+                ImGui::TextDisabled("%s", when);
+                ImGui::TableSetColumnIndex(2);
+                const bool alreadyBanned = g_banIds.count(std::string_view(e.guid)) != 0;
+                if (alreadyBanned) {
+                    ImGui::TextDisabled("banned");
+                } else {
+                    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00f, 0.45f, 0.42f, 1.0f));
+                    if (ImGui::SmallButton("Ban...")) OpenBanFor(false, e.guid, e.nick);
+                    ImGui::PopStyleColor();
+                }
+                ImGui::PopID();
             }
-            ImGui::PopID();
         }
         ImGui::EndTable();
     }
-    if (shown == 0) ImGui::TextDisabled("Nobody in the registry yet (players are recorded when they join).");
+    if (g_seen.empty()) ImGui::TextDisabled("Nobody in the registry yet (players are recorded when they join).");
 }
 
 void RenderBannedSection() {
