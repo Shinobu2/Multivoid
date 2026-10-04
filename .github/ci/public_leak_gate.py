@@ -103,7 +103,9 @@ S3 = re.compile(r"(?:flag (?:it )?for|file (?:it )?(?:as|under)|belongs in|shoul
 # the address mark's two constants in ue_wrap/core/log.h, three declarations of report_bundle.h, one of
 # report_core.h and the two dev rows (selftest_break_bug_report, bug_report_drill) verbatim -- doc quoting
 # code, no private prose.
-OVERLAP_BASELINE = 66
+# 66 -> 69 (2026-10-05), CONTENT, the three lines read: F3 WP-4's sheet (PERMISSIONS_ARC.md 14.5) dictated
+# grants_core.h's Projected enum, the kProjected table and ReadBit's declaration verbatim -- doc quoting code.
+OVERLAP_BASELINE = 69
 # EXCLUDED because it is a deliberate practice, not a leak: copying memory topics into the public
 # piles archive. It alone contributes ~1,263 of the raw 1,300 overlaps.
 OVERLAP_SKIP = ("docs/piles/_archive/session-log/",)
