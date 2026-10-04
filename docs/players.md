@@ -224,6 +224,12 @@ teleport. The host can deny itself a command the same way, in a file named by it
 your own row in the player list). A player whose permission file sets `multivoid.kick.exempt` (or
 `.ban.exempt`) cannot be kicked or banned by a friend, only by the host.
 
+The host's server settings -- today the voice range, `voice.distance_cm` -- change with
+`/set <setting> <value>` and go back to their default with `/reset <setting>`; every peer follows
+at once. F1's `Administration > Server settings` draws each one and runs those same lines. A
+friend given `multivoid.set` in the permission files can change them too: their line runs on the
+host. A setting that holds a password is never set or shown by command.
+
 ## Who owns what
 
 | State | Owner | Shape |
