@@ -167,12 +167,12 @@ SetResult SetValueAt(const std::wstring& iniPath, const Row* row, const char* va
         }
         saved = WriteIniKeyAtPath(iniPath, row->key, v.c_str());
     }
-    // The value is shown as the ini writer shows it: a credential is never printed.
-    const char* shown = config_registry::IsCredentialKey(row->key) ? "<set>" : v.c_str();
+    // The value is shown as every printer shows it (a credential is never printed).
+    const std::string shown = config_registry::ValueForLog(row, v);
     std::string over;
     if (row->envVar && !ReadEnv(row->envVar).empty()) over = std::string(", over ") + row->envVar;
-    UE_LOGI("config: SET %s=%s (runtime%s%s%s)", row->key, shown, saved ? "" : ", not saved",
-            over.c_str(), sessionNote);
+    UE_LOGI("config: SET %s=%s (runtime%s%s%s)", row->key, shown.c_str(),
+            saved ? "" : ", not saved", over.c_str(), sessionNote);
     PostNotify(row);
     return saved ? SetResult::Saved : SetResult::HeldNotSaved;
 }

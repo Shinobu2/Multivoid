@@ -97,13 +97,12 @@ bool WriteIniValueAt(const std::wstring& path, const char* key, const char* valu
     // both lines below name the key and the outcome, and a lobby password printed beside them
     // outlives the session in every pasted log. Same registry predicate the census asks, so the
     // tree cannot redact a value in one writer and print it in the other.
-    const char* shown =
-        config_registry::IsCredentialKey(key) ? "<set>" : safe.c_str();
+    const std::string shown = config_registry::ValueForLog(r, safe);
     const char* wantSec = SectionForKey(key);
     if (!ValueValidForKey(key, safe, nullptr)) {
         UE_LOGW("config: ini write('%s'='%s') REFUSED -- the value would be rejected "
                 "on read (registry kind/range/tokens); not persisting garbage (T3b)",
-                key, shown);
+                key, shown.c_str());
         return false;
     }
     const std::string newLine =
@@ -193,7 +192,7 @@ bool WriteIniValueAt(const std::wstring& path, const char* key, const char* valu
         lines.push_back(newLine);  // headerless/unknown key: today's EOF append
     }
     if (!AtomicWriteLines(path, lines, "ini write")) return false;
-    UE_LOGI("config: persisted %s=%s", key, shown);
+    UE_LOGI("config: persisted %s=%s", key, shown.c_str());
     return true;
 }
 
@@ -416,7 +415,8 @@ static bool RemoveDuplicateKeyLinesAt(const std::wstring& path, const char* key,
     if (removed == 0) return false;  // nothing to delete (already resolved)
     if (!AtomicWriteLines(path, out, "keep-line dedup")) return false;
     UE_LOGI("config: duplicate resolution for '%s' -- kept value '%s', removed %d line(s) "
-            "(owner action from the config review)", key, keepValue, removed);
+            "(owner action from the config review)", key,
+            config_registry::ValueForLog(config_registry::FindRow(key), keepValue).c_str(), removed);
     return true;
 }
 

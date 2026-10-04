@@ -45,7 +45,7 @@ Session* g_session = nullptr;
 // the client's put is idempotent).
 coop::roster_ledger::PerSlotState<bool> g_snapshotSent;
 
-// One row to one slot. A replicated row is never a credential, so the value is printed as it is.
+// One row to one slot. The value is printed through the registry's one printed form.
 // Returns false only when the send failed, so the caller's latch holds; a value the wire cannot
 // carry is warned and counts as sent, or it would hold its slot's latch for ever.
 bool SendRow(Session& s, int slot, const reg::Row* row, const char* why) {
@@ -53,7 +53,7 @@ bool SendRow(Session& s, int slot, const reg::Row* row, const char* why) {
     const size_t k = std::strlen(row->key);  // at most kServerSettingKeyMax: a build-time check
     if (v.size() > net::kServerSettingTextMax) {
         UE_LOGW("server_settings: %s not sent -- '%s' is longer than the wire carries", row->key,
-                v.c_str());
+                reg::ValueForLog(row, v).c_str());
         return true;
     }
     ServerSettingPayload p{};
@@ -64,7 +64,8 @@ bool SendRow(Session& s, int slot, const reg::Row* row, const char* why) {
     const bool ok = s.SendReliableToSlot(slot, ReliableKind::ServerSetting, &p,
                                          static_cast<int>(2 + k + v.size()));
     if (ok)
-        UE_LOGI("server_settings: sent %s=%s to slot %d (%s)", row->key, v.c_str(), slot, why);
+        UE_LOGI("server_settings: sent %s=%s to slot %d (%s)", row->key,
+                reg::ValueForLog(row, v).c_str(), slot, why);
     return ok;
 }
 

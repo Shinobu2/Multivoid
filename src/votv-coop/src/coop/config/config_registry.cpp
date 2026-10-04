@@ -11,6 +11,7 @@
 
 #include "coop/net/connect_history.h"  // History::kMaxStamps, the cap row's upper bound
 #include "coop/net/protocol.h"  // kDefaultPort (row defaults ALIAS the one owning constant)
+#include "ue_wrap/core/log.h"
 
 #include <array>
 #include <cstring>
@@ -411,6 +412,7 @@ constexpr const char* const kCredentials[] = {
     "net.join_password",     // the secret a joiner offers
     "net.signaling_token",   // the relay's bearer
     "net.turn_pass",         // the TURN credential
+    "net.turn_user",         // the TURN account name: a credential of the pair, so not quoted
 };
 
 // The scope marks, checked by the compiler (Source declares FCVAR_REPLICATED and FCVAR_PROTECTED
@@ -440,6 +442,14 @@ constexpr bool NoReplicatedCredential() {
     }
     return true;
 }
+constexpr bool NoCredentialAddress() {
+    for (size_t i = 0; i < kRowCount; ++i) {
+        if (!(kRowFlags[i] & kRowAddress)) continue;
+        for (const char* c : kCredentials)
+            if (CEq(kRows[i].key, c)) return false;
+    }
+    return true;
+}
 constexpr bool ReplicatedKeysFitTheWire() {
     for (size_t i = 0; i < kRowCount; ++i)
         if ((kRowFlags[i] & kRowReplicated) && CLen(kRows[i].key) > kServerSettingKeyMax)
@@ -457,6 +467,7 @@ constexpr bool ReplicatedDefaultsFitTheWire() {
 static_assert(ReplicatedImpliesServer(), "a kRowReplicated row must also be kRowServer");
 static_assert(NoLabelledIdentity(), "a labelled row must not be Kind::Identity: a pane has no drawer for it");
 static_assert(NoReplicatedCredential(), "a credential row must never be kRowReplicated");
+static_assert(NoCredentialAddress(), "a credential row must never be kRowAddress");
 static_assert(ReplicatedKeysFitTheWire(),
               "a kRowReplicated row's key is longer than kServerSettingKeyMax");
 static_assert(ReplicatedDefaultsFitTheWire(),
@@ -486,6 +497,18 @@ bool IsServerScope(const Row* row) { return (RowFlags(row) & kRowServer) != 0; }
 bool IsReplicated(const Row* row) { return (RowFlags(row) & kRowReplicated) != 0; }
 
 bool IsLive(const Row* row) { return (RowFlags(row) & kRowLive) != 0; }
+
+bool IsAddressRow(const Row* row) { return row && (RowFlags(row) & kRowAddress) != 0; }
+
+std::string ValueForLog(const Row* row, std::string_view value) {
+    if (!row) return "<not shown>";
+    if (row->kind == Kind::Identity || IsCredentialKey(row->key)) return "<set>";
+    if (IsAddressRow(row)) {
+        if (value == (row->defS ? row->defS : "")) return std::string(value);
+        return ue_wrap::log::Addr(value);
+    }
+    return std::string(value);
+}
 
 const char* RowLabel(const Row* row) {
     for (const RowLabelEntry& e : kRowLabels)

@@ -207,7 +207,9 @@ void InitOnce() {
     for (size_t i = 0; i < slots.size() && !found; ++i)
         if (EqualsNoCase(slots[i].label, want)) { selected = static_cast<int>(i); found = true; }
     if (!found)
-        UE_LOGI("master_slots: net.master='%s' is not in the list -- showing %s", want.c_str(),
+        UE_LOGI("master_slots: net.master='%s' is not in the list -- showing %s",
+                ::coop::config_registry::ValueForLog(
+                    ::coop::config_registry::FindRow("net.master"), want).c_str(),
                 LogLabel(slots[0]).c_str());
     // Labels only for the official masters; a configured address is its owner's: marked, so a
     // report replaces it.

@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <string>
+#include <string_view>
 
 namespace coop::config_registry {
 
@@ -131,6 +132,7 @@ enum RowFlag : unsigned {
     kRowServer = 1u << 0,
     kRowReplicated = 1u << 1,
     kRowLive = 1u << 2,
+    kRowAddress = 1u << 3,  // the value is a peer's or a dialled address: a log marks it
 };
 
 // The limits of a replicated row, the registry's facts so that this file needs no other header.
@@ -147,6 +149,13 @@ unsigned RowFlags(const Row* row);
 bool IsServerScope(const Row* row);
 bool IsReplicated(const Row* row);
 bool IsLive(const Row* row);
+bool IsAddressRow(const Row* row);
+
+// THE printed form of a config value, for every log line, ini line and report that quotes one: a
+// null row (an unknown key) is "<not shown>"; an identity or credential row "<set>"; an address
+// row as written when it equals the row's compiled default, else marked (ue_wrap::log::Addr);
+// any other row the value. Pure; any thread. This log is pasted into bug reports.
+std::string ValueForLog(const Row* row, std::string_view value);
 
 // A plain-English name for a row a generated pane draws; the row's desc is its tooltip. A row
 // without one is never drawn by a pane. Null for a row with no label, for null, and for any pointer

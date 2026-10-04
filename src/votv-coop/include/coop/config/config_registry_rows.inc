@@ -49,6 +49,7 @@ CFG_ENUM(net_role, "net.role", "net", "", "host|client", "VOTVCOOP_NET_ROLE",
     "Multiplayer menu handles hosting and joining.")
 CFG_STRING(net_peer, "net.peer", "net", "127.0.0.1", "VOTVCOOP_NET_PEER", false,
     "Test framework: the host address a client connects to at auto-start (lan topology).")
+CFG_ROWFLAGS(net_peer, kRowAddress)
 CFG_STRING(net_server, "net.server", "net", "", "VOTVCOOP_NET_SERVER", false,
     "The server this install hosts: the name of its folder under multivoid_servers beside the game. "
     "Set from your nickname the first time you host; empty means you have not hosted yet.")
@@ -88,13 +89,16 @@ CFG_STRING(net_masters, "net.masters", "net", "default", "VOTVCOOP_NET_MASTERS",
     "Label=host:port after it, e.g. default,Home=my.host:10443 (host:port means TLS, "
     "http://host:port a master without a certificate); a list without default replaces the "
     "official ones. A label is what the browser's tab says, up to 16 plain characters.")
+CFG_ROWFLAGS(net_masters, kRowAddress)
 CFG_STRING(net_master, "net.master", "net", "", nullptr, false,
     "Which master the server browser lists and where a game you host is listed: a label from "
     "net.masters. Written when you pick a tab in the browser; empty means the first one.")
+CFG_ROWFLAGS(net_master, kRowAddress)
 CFG_STRING(net_signaling, "net.signaling", "net", "", "VOTVCOOP_NET_SIGNALING", false,
     "Signaling (rendezvous) server for a P2P connection made WITHOUT a master (a test, or a "
     "host's gen: line). Empty means the chosen master's own. Games found in the server browser "
     "always use the one their master hands out.")
+CFG_ROWFLAGS(net_signaling, kRowAddress)
 CFG_STRING(net_signaling_token, "net.signaling_token", "net", "", "VOTVCOOP_NET_SIGNALING_TOKEN", false,
     "Access token for a self-hosted signaling server. The official flow mints per-session "
     "tokens automatically -- leave empty.")
@@ -113,9 +117,11 @@ CFG_STRING(net_host_identity, "net.host_identity", "net", "", "VOTVCOOP_NET_HOST
     "not the one it names. Joining from the server browser never needs it.")
 CFG_STRING(net_stun, "net.stun", "net", "stun.l.google.com:19302", "VOTVCOOP_NET_STUN", false,
     "STUN server list for NAT discovery (host:port, comma-separated).")
+CFG_ROWFLAGS(net_stun, kRowAddress)
 CFG_STRING(net_turn, "net.turn", "net", "", "VOTVCOOP_NET_TURN", false,
     "Static TURN relay server list. Empty = none; the master mints ephemeral TURN "
     "credentials when a session needs a relay.")
+CFG_ROWFLAGS(net_turn, kRowAddress)
 CFG_STRING(net_turn_user, "net.turn_user", "net", "", "VOTVCOOP_NET_TURN_USER", false,
     "Static TURN username (dev / self-hosted relays only).")
 CFG_STRING(net_turn_pass, "net.turn_pass", "net", "", "VOTVCOOP_NET_TURN_PASS", false,
@@ -175,6 +181,7 @@ CFG_STRING(browser_lastdirect, "browser.lastdirect", "ui", ::coop::net::kDefault
     "automatically). Its default names the port a host actually listens on (net.port), "
     "not Unreal's 7777, which nothing in the mod has ever bound. Replacing the address "
     "while keeping the port is the natural edit.")
+CFG_ROWFLAGS(browser_lastdirect, kRowAddress)
 CFG_FLAG(multiplayer_menu_off, "multiplayer_menu_off", "ui", false, nullptr,
     "Set to 1 to hide the Multiplayer main-menu button (the mod stays loaded).")
 // The composed font family, per-role enum rows. The default family per role: the menus, chat

@@ -10,9 +10,9 @@
 //   config: EFFECTIVE <key>=<value> (<env|ini>)
 //   config: EFFECTIVE end -- <n> row(s) configured
 // An absent row means the peer took that row's default, which holds only if the ini was readable,
-// so the end line carries that verdict too. A credential row -- named by the registry, never
-// guessed from a spelling -- prints as <set>, and a refused raw value says so beside the default
-// it fell back to, or beside itself on a fail-closed row, where nothing falls back.
+// so the end line carries that verdict too. A value prints through config_registry::ValueForLog,
+// the one place that decides a printed form: a credential row is <set>, an address row is marked
+// unless it is the default, and a refused raw value says so beside the default it fell back to.
 
 #include "coop/config/config.h"
 
@@ -28,13 +28,6 @@ namespace {
 
 using config_registry::Kind;
 using config_registry::Row;
-
-// A credential, or the minted identity, is reported as PRESENT and never quoted: this log is
-// pasted into bug reports and captured by CI, and a lobby password in it outlives the session.
-// Which keys those are is the registry's fact, not this file's guess at a spelling.
-bool Redacted(const Row& r) {
-    return r.kind == Kind::Identity || config_registry::IsCredentialKey(r.key);
-}
 
 // The resolved value in the one spelling a reader and a rig both compare: a flag is 1 or 0, an
 // integer its own digits, a float the catalog's C-locale emission, an enum its canonical token.
@@ -111,8 +104,8 @@ void ReportEffectiveConfig() {
         const bool valid = !unread && ValueValidForKey(r.key, raw, &why);
         if (unread) why = std::string("multivoid.ini ") + IniFaultWords(fault);
         const bool refused = !valid && r.failClosed;
-        const std::string value =
-            Redacted(r) ? "<set>" : refused ? internal::Printable(raw) : Resolved(r, raw);
+        const std::string value = config_registry::ValueForLog(
+            &r, refused ? internal::Printable(raw) : Resolved(r, raw));
         // The env/ini label holds only before the first SetValue: fromEnv is false when the
         // runtime layer answered, so a row set this run reads "ini" here whatever its source.
         if (valid)
@@ -135,6 +128,38 @@ void ReportEffectiveConfig() {
                 IniFaultWords(fault));
     else
         UE_LOGI("config: EFFECTIVE end -- %d row(s) configured", configured);
+}
+
+// Section headers and `key=value` lines only: a comment is free text, so a line starting with `;`
+// or `#`, a note, and a line with an empty key are dropped. Each value is its printed form, so a
+// credential is `<set>`, an address is marked and an unknown key's value is `<not shown>`.
+std::vector<std::string> IniLinesForReport(const std::vector<std::string>& lines) {
+    std::vector<std::string> out;
+    for (const std::string& raw : lines) {
+        const std::string line = internal::TrimEdgesStr(raw);
+        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
+        if (line[0] == '[') {
+            out.push_back(line);
+            continue;
+        }
+        std::string key, value;
+        if (!internal::ParseIniKeyValue(line, key, value)) continue;
+        out.push_back(key + "=" +
+                      config_registry::ValueForLog(config_registry::FindRow(key.c_str()),
+                                                   internal::CookIniValue(value, true)));
+    }
+    return out;
+}
+
+std::string IniTextForReport() {
+    std::vector<std::string> lines;
+    ListLiveIniLines(lines);
+    std::string text;
+    for (const std::string& line : IniLinesForReport(lines)) {
+        if (!text.empty()) text += '\n';
+        text += line;
+    }
+    return text;
 }
 
 }  // namespace coop::config

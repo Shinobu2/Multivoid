@@ -202,6 +202,10 @@ std::string ReadPlayerSkin();
 // unreadable, with `faultOut` saying why.
 int ListLiveIniLines(std::vector<std::string>& out, IniFault* faultOut = nullptr);
 
+// The ini as a bug report may carry it (headers and key=value lines, values through ValueForLog).
+std::vector<std::string> IniLinesForReport(const std::vector<std::string>& lines);
+std::string IniTextForReport();
+
 // Reader-equivalent validation of a raw ini value for `key` against its registry row,
 // comment-stripped exactly as the readers do. True for string and identity rows and for
 // unregistered keys. On false the optional reason gets the panel-facing text. Shared by the

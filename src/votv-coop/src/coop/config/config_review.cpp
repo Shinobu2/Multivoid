@@ -192,15 +192,17 @@ void RunBootSweep() {
             switch (r.type) {
                 case Row::Type::Rejected:
                     UE_LOGI("config_review:   REJECTED %s='%s' from %s (%s)%s%s", r.key.c_str(),
-                            r.value.c_str(), r.origin.c_str(), r.reason.c_str(),
+                            config_registry::ValueForLog(
+                                config_registry::FindRow(r.key.c_str()), r.value).c_str(),
+                            r.origin.c_str(), r.reason.c_str(),
                             !r.overriddenBy.empty() ? " -- not in use, overridden by "
                             : r.failClosed          ? " -- fail-closed: what it governs is refused"
                                                     : "",
                             r.overriddenBy.c_str());
                     break;
                 case Row::Type::Unknown:
-                    UE_LOGI("config_review:   UNKNOWN key '%s'='%s' -- not in the registry",
-                            r.key.c_str(), r.value.c_str());
+                    UE_LOGI("config_review:   UNKNOWN key '%s' (%zu bytes) -- not in the registry",
+                            r.key.c_str(), r.value.size());
                     break;
                 case Row::Type::DuplicateDormant:
                     UE_LOGI("config_review:   DUPLICATE '%s' on %zu lines; the first wins",

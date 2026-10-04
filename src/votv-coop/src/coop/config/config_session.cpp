@@ -40,11 +40,10 @@ std::unordered_map<const Row*, std::string> g_sessionLayer;
 // answer.
 std::atomic<int> g_sessionRole{0};
 
-// A value as the logs show it: a credential is never printed, and any other value goes through
-// internal::Printable, since the host chose its bytes.
+// A value as the logs show it: through the registry's one printed form, after internal::Printable,
+// since the host chose its bytes.
 std::string Shown(const Row* row, const std::string& v) {
-    if (config_registry::IsCredentialKey(row->key)) return "<set>";
-    return internal::Printable(v);
+    return config_registry::ValueForLog(row, internal::Printable(v));
 }
 
 }  // namespace
