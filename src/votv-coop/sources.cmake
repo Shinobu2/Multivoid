@@ -615,6 +615,7 @@ set(VOTVCOOP_SOURCES
     src/ui/dev_menu.cpp
     src/ui/skins_panel.cpp
     src/ui/admin_panel.cpp
+    src/ui/server_settings_pane.cpp
     src/ui/world_rules_panel.cpp
     src/ui/scoreboard.cpp
     src/ui/link_format.cpp

@@ -49,7 +49,7 @@ One folder, one concept, named after it. `src/votv-coop/src/` holds the implemen
 | the native UI kit | `native_screen`, `native_text_field`, `style`, `scale`, `link_format` |
 | in-game surfaces | `hud` (nameplates, chat, the event feed), `chat_input`, `chat_view`, `scoreboard`, `loading_screen`, `join_curtain`, `voice_icons` |
 | the F1 overlay | `imgui_overlay`, `overlay_backend` with `overlay_backend_dx11`, `overlay_backend_dx12`, `overlay_backend_dx12_capture`, `overlay_cursor`, `overlay_diag`, `overlay_test_arm`, `fonts`, `atlas_watch`, `input_focus` |
-| overlay panels | `dev_menu`, `admin_panel`, `skins_panel`, `voice_panel`, `world_rules_panel`, `config_review_panel`, `net_stats_panel`, `console` |
+| overlay panels | `dev_menu`, `admin_panel`, `skins_panel`, `voice_panel`, `world_rules_panel`, `server_settings_pane`, `config_review_panel`, `net_stats_panel`, `console` |
 
 ## `harness/` — boot glue and scripted tests
 

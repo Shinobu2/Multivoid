@@ -283,6 +283,12 @@ static int FlagVerdictFromValue(const std::string& raw) {
     return 0;
 }
 
+int FlagVerdict(const std::string& raw) { return FlagVerdictFromValue(raw); }
+
+std::string CookValue(const std::string& raw) {
+    return internal::CookIniValue(raw, /*wsPrecededOnly=*/false);
+}
+
 // Whole-string numeric parses: "1.25abc" and "" are garbage, not 1.25 and 0 (a prefix-accepting
 // atof once turned voice.volume=abc into silence).
 static bool ParseWholeLong(const std::string& s, long& out) {

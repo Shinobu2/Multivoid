@@ -28,6 +28,7 @@
 #include "ui/world_rules_panel.h"  // F1 > World > Rules (shown to everyone)
 #include "ui/net_stats_panel.h"
 #include "ui/scale.h"
+#include "ui/server_settings_pane.h"
 #include "ui/skins_panel.h"
 
 #include <atomic>
@@ -536,6 +537,7 @@ const std::vector<Cat>& Tree() {
         { "Administration", {
             // HOST-role-gated (not dev): online/offline/banned player admin.
             { "Players", { { &RenderAdminPlayers, false } }, false, true },
+            { "Server settings", { { &ui::server_settings_pane::Render, false } }, false, true },
         }, false, true },
         { "Cosmetics", {
             { "Skins",     { { &RenderSkins, false } }, false },

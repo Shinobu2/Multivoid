@@ -178,6 +178,11 @@ std::string ResolveString(const config_registry::StringRow& row);
 // The text every Resolve of this row starts from: the top layer that answers, or the default as
 // text. Any thread.
 std::string EffectiveText(const config_registry::Row& row);
+// What a pane draws from EffectiveText, the readers' own steps exposed unchanged. FlagVerdict: 1 for
+// 1/true/yes/on, -1 for 0/false/no/off, 0 for anything else (a reader answers the row's default);
+// CookValue: the text cooked as the typed readers cook it, to compare with a row's tokens.
+int FlagVerdict(const std::string& raw);
+std::string CookValue(const std::string& raw);
 
 // The net Config from the runtime layer, env and ini; `enabled` is true iff a host or client role
 // is configured, otherwise hands-on play stays single-machine.
