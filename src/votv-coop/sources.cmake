@@ -366,6 +366,7 @@ set(VOTVCOOP_SOURCES
     src/coop/net/session_propdrive.cpp
     src/coop/net/session_start.cpp
     src/coop/net/session_status.cpp
+    src/coop/net/session_teardown.cpp
     src/coop/net/link_kind.cpp
     src/coop/net/session_relay.cpp
     src/coop/net/origin_context.cpp
