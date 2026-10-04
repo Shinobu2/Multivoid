@@ -223,8 +223,7 @@ void BeginConnect(const std::string& hostLabel, Stage first) {
     g_tokenMs.store(now, std::memory_order_relaxed);
     g_stage.store(static_cast<int>(first), std::memory_order_relaxed);
     g_phase.store(static_cast<int>(Phase::Connecting), std::memory_order_release);
-    UE_LOGI("join_progress: BeginConnect -- loading screen up (connecting to '%s', stage %s)",
-            hostLabel.c_str(), StageName(first));
+    UE_LOGI("join_progress: BeginConnect -- loading screen up (stage %s)", StageName(first));
 }
 
 void BeginHostBoot(const std::string& worldLabel) {

@@ -369,7 +369,8 @@ DWORD WINAPI TimelineThread(LPVOID param) {
                                   netCfg.peerIp.empty() ? "127.0.0.1" : netCfg.peerIp.c_str(),
                                   static_cast<unsigned>(netCfg.port));
                     if (!coop::session_manager::ConnectDirect(hostPort)) {
-                        UE_LOGW("harness: env ConnectDirect('%s') rejected", hostPort);
+                        UE_LOGW("harness: env ConnectDirect('%s') rejected",
+                                ue_wrap::log::Addr(hostPort).c_str());
                     }
                 }
             }

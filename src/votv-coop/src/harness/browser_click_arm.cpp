@@ -26,7 +26,8 @@ void FireFromEnv() {
     char cdEnv[64] = {};
     if (::GetEnvironmentVariableA("VOTVCOOP_TEST_CONNECT_DIRECT", cdEnv, sizeof(cdEnv)) > 0 && cdEnv[0]) {
         coop::session_manager::ConnectDirect(cdEnv);
-        UE_LOGI("harness: VOTVCOOP_TEST_CONNECT_DIRECT=%s -- queued a browser-path session start (test)", cdEnv);
+        UE_LOGI("harness: VOTVCOOP_TEST_CONNECT_DIRECT=%s -- queued a browser-path session start (test)",
+                ue_wrap::log::Addr(cdEnv).c_str());
     }
     // POST /v1/host to the chosen master, then a P2P host session in whatever world is loaded.
     char hlEnv[8] = {};

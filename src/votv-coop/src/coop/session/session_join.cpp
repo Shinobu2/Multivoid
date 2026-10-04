@@ -137,8 +137,10 @@ bool JoinLobby(const std::string& masterUrl, const std::string& lobbyId,
     // Raise the browser-only loading state before the master round trip, so "Connecting to <name>"
     // shows at once; on a master failure the worker Fails it (drops the cover, reopens the
     // browser).
-    coop::join_progress::BeginConnect(displayName.empty() ? std::string("the server") : displayName,
-                                      coop::join_progress::Stage::FindingHost);
+    const std::string label = displayName.empty() ? std::string("the server") : displayName;
+    UE_LOGI("session_manager: JoinLobby '%s' -- connecting to lobby '%s'", lobbyId.c_str(),
+            label.c_str());
+    coop::join_progress::BeginConnect(label, coop::join_progress::Stage::FindingHost);
     std::thread([masterUrl, lobbyId] {
         try {
             // Shutdown race: BeginConnect raised the cover before this worker spawned, so every
@@ -159,8 +161,8 @@ bool JoinLobby(const std::string& masterUrl, const std::string& lobbyId,
                     uint16_t port = 0;
                     if (!ParseHostPort(info.addr, host, port)) {
                         UE_LOGW("session_manager: JoinLobby '%s' -- bad direct addr '%s'",
-                                lobbyId.c_str(), info.addr.c_str());
-                        coop::join_progress::Fail(net::EndReason::BadAddress, info.addr);
+                                lobbyId.c_str(), ue_wrap::log::Addr(info.addr).c_str());
+                        coop::join_progress::Fail(net::EndReason::BadAddress, "");
                         g_actionBusy.store(false);
                         return;
                     }
@@ -226,9 +228,10 @@ bool ConnectDirect(const std::string& hostPort) {
         coop::join_progress::BeginConnect(host, coop::join_progress::Stage::Dialing);
         QueueStart(cfg);
         UE_LOGI("session_manager: DIRECT connect queued -> %s:%u (session boot = harness Tier 2)",
-                host.c_str(), static_cast<unsigned>(port));
+                ue_wrap::log::Addr(host).c_str(), static_cast<unsigned>(port));
     } else {
-        UE_LOGW("session_manager: bad direct address '%s'", hostPort.c_str());
+        UE_LOGW("session_manager: bad direct address '%s'",
+                ue_wrap::log::Addr(hostPort).c_str());
     }
     g_actionBusy.store(false);
     return ok;

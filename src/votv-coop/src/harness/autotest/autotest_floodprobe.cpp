@@ -64,7 +64,8 @@ void RunFloodProbe() {
     SteamNetworkingIPAddr addr{};
     addr.Clear();
     if (!addr.ParseString(peerIp.c_str())) {
-        UE_LOGW("flood_probe: INCONCLUSIVE -- net.peer '%s' did not parse", peerIp.c_str());
+        UE_LOGW("flood_probe: INCONCLUSIVE -- net.peer '%s' did not parse",
+                ue_wrap::log::Addr(peerIp).c_str());
         return;
     }
     addr.m_port = static_cast<uint16>(port);
@@ -79,7 +80,8 @@ void RunFloodProbe() {
     for (int i = 1; i <= kJunkConnections; ++i) {
         const HSteamNetConnection h = sockets->ConnectByIPAddress(addr, 0, nullptr);
         UE_LOGI("flood_probe: junk connection %d of %d to %s:%ld -- h=0x%08x (says nothing)",
-                i, kJunkConnections, peerIp.c_str(), port, static_cast<unsigned>(h));
+                i, kJunkConnections, ue_wrap::log::Addr(peerIp).c_str(), port,
+                static_cast<unsigned>(h));
         ::Sleep(kJunkGapMs);
     }
     UE_LOGI("flood_probe: waiting %lu s for the refusal to lift",
