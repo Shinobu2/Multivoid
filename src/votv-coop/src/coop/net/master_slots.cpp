@@ -4,6 +4,7 @@
 
 #include "coop/config/config.h"
 #include "coop/config/config_registry.h"
+#include "coop/net/endpoint_log.h"
 #include "coop/net/protocol.h"   // kOfficialMasterSlots, kSignalingPort
 #include "ue_wrap/core/log.h"
 
@@ -207,17 +208,18 @@ void InitOnce() {
         if (EqualsNoCase(slots[i].label, want)) { selected = static_cast<int>(i); found = true; }
     if (!found)
         UE_LOGI("master_slots: net.master='%s' is not in the list -- showing %s", want.c_str(),
-                slots[0].label.c_str());
-    // Labels only for the official masters; an address someone configured is theirs to see.
+                LogLabel(slots[0]).c_str());
+    // Labels only for the official masters; a configured address is its owner's: marked, so a
+    // report replaces it.
     std::string names;
     for (const Slot& s : slots) {
         if (!names.empty()) names += ", ";
-        names += s.label;
-        if (!IsOfficial(s.url)) names += " (" + s.url + ")";
+        names += LogLabel(s);
+        if (!IsOfficial(s.url)) names += " (" + endpoint_log::LogEndpoint(s.url) + ")";
     }
     UE_LOGI("master_slots: %zu master(s)%s: %s -- showing %s", slots.size(),
             fromEnv ? " from the environment" : "", names.c_str(),
-            slots[static_cast<size_t>(selected)].label.c_str());
+            LogLabel(slots[static_cast<size_t>(selected)]).c_str());
     std::lock_guard<std::mutex> lk(g_mu);
     g_state.slots = std::move(slots);
     g_state.selected = selected;
@@ -247,7 +249,8 @@ std::vector<Slot> Parse(const std::string& text, std::vector<std::string>* rejec
         if (why.empty() && out.size() >= kMaxSlots)
             why = "more than " + std::to_string(kMaxSlots) + " masters";
         if (!why.empty()) {
-            if (rejected) rejected->push_back("'" + entry + "': " + why);
+            if (rejected)
+                rejected->push_back("'" + endpoint_log::LogEndpoint(entry) + "': " + why);
             continue;
         }
         out.push_back(std::move(s));
@@ -277,30 +280,31 @@ Slot Selected() {
 
 bool Select(int index) {
     EnsureInit();
-    std::string label;
+    Slot chosen;
     bool fromEnv = false;
     {
         std::lock_guard<std::mutex> lk(g_mu);
         if (index < 0 || index >= static_cast<int>(g_state.slots.size())) return false;
         if (index == g_state.selected) return true;   // the list already shown: nothing to write
         g_state.selected = index;
-        label = g_state.slots[static_cast<size_t>(index)].label;
+        chosen = g_state.slots[static_cast<size_t>(index)];
         fromEnv = g_state.fromEnv;
     }
+    const std::string& label = chosen.label;
     // A test's list is not the player's: a choice made on it lasts the run, or a lab click would
     // overwrite the master the player picked with a label their own list does not have.
     if (fromEnv) {
         UE_LOGI("master_slots: showing %s for this run (the list is the environment's, so "
-                "net.master is left as it was)", label.c_str());
+                "net.master is left as it was)", LogLabel(chosen).c_str());
         return true;
     }
     // Outside the lock: the ini write is file I/O under the config layer's own mutex.
     if (::coop::config::SetValue(::coop::config_registry::rows::net_master, label.c_str()) ==
         ::coop::config::SetResult::Saved)
-        UE_LOGI("master_slots: showing %s (remembered in net.master)", label.c_str());
+        UE_LOGI("master_slots: showing %s (remembered in net.master)", LogLabel(chosen).c_str());
     else
         UE_LOGW("master_slots: showing %s, but multivoid.ini could not remember it -- the next "
-                "launch opens on the list it had", label.c_str());
+                "launch opens on the list it had", LogLabel(chosen).c_str());
     return true;
 }
 
@@ -318,6 +322,24 @@ std::string DisplayName(const std::string& endpoint) {
         if (EqualsNoCase(endpoint, s.url) || (!host.empty() && EqualsNoCase(host, HostOf(s.url))))
             return s.label;
     return endpoint;
+}
+
+std::string LogLabel(const Slot& s) {
+    if (endpoint_log::IsOfficialHost(endpoint_log::HostPart(s.url))) return s.label;
+    return ue_wrap::log::Addr(s.label);
+}
+
+std::string LogName(const std::string& endpoint) {
+    EnsureInit();
+    const std::string host = HostOf(endpoint);
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        for (const Slot& s : g_state.slots)
+            if (EqualsNoCase(endpoint, s.url) ||
+                (!host.empty() && EqualsNoCase(host, HostOf(s.url))))
+                return LogLabel(s);
+    }
+    return endpoint_log::LogEndpoint(endpoint);
 }
 
 std::string DefaultSignalingUrl() {

@@ -1,6 +1,7 @@
 // coop/net/http_client.cpp -- see coop/net/http_client.h.
 
 #include "coop/net/http_client.h"
+#include "coop/net/endpoint_log.h"
 
 #include "ue_wrap/core/log.h"
 
@@ -81,7 +82,7 @@ Response Request(const std::string& hostPort, const std::string& path,
     uint16_t port = 0;
     bool secure = true;
     if (!SplitHostPort(hostPort, host, port, secure)) {
-        UE_LOGW("http: bad host:port '%s'", hostPort.c_str());
+        UE_LOGW("http: bad host:port '%s'", endpoint_log::LogEndpoint(hostPort).c_str());
         return out;
     }
 
@@ -128,10 +129,11 @@ Response Request(const std::string& hostPort, const std::string& path,
         if (err == ERROR_WINHTTP_SECURE_FAILURE) {
             UE_LOGW("http: TLS validation FAILED for %s (untrusted/expired cert, or the "
                     "name does not match -- an IP address never matches a certificate)",
-                    host.c_str());
+                    endpoint_log::LogEndpoint(host).c_str());
         } else if (secure && err == ERROR_WINHTTP_CANNOT_CONNECT) {
-            UE_LOGW("http: cannot connect to %s:%u -- is the TLS port right?",
-                    host.c_str(), static_cast<unsigned>(port));
+            UE_LOGW("http: cannot connect to %s -- is the TLS port right?",
+                    endpoint_log::LogEndpoint(
+                        endpoint_log::JoinHostPort(host, std::to_string(port))).c_str());
         }
         return out;
     }

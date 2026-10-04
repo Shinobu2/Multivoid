@@ -2,6 +2,7 @@
 
 #include "ice_config.h"
 
+#include "coop/net/endpoint_log.h"
 #include "coop/net/net_clock.h"  // NowMs, the net layer's one steady clock
 #include "ue_wrap/core/log.h"
 
@@ -133,8 +134,8 @@ bool ApplyGlobalIceConfig(const IceConfig& ice) {
 
     UE_LOGI("ice: applied policy=%s stun='%s' turn='%s'",
             ice.relayOnly ? "relay" : "all",
-            ice.stunList.empty() ? "(none)" : ice.stunList.c_str(),
-            ice.turnList.empty() ? "(none)" : ice.turnList.c_str());
+            ice.stunList.empty() ? "(none)" : endpoint_log::LogEndpointList(ice.stunList).c_str(),
+            ice.turnList.empty() ? "(none)" : endpoint_log::LogEndpointList(ice.turnList).c_str());
     // Counted from here, not from the mint: the mint came first, so a lapse printed by this count
     // is never early.
     const bool timed = !ice.turnList.empty() && ice.turnTtlS > 0;

@@ -9,6 +9,7 @@
 #include "coop/config/config.h"           // Resolve* for the rows below
 #include "coop/config/config_registry.h"  // rows: the fake-link knobs, the connect cap
 #include "coop/net/connect_history.h"
+#include "coop/net/endpoint_log.h"
 #include "coop/net/ice_policy.h"         // what the player's net.ice refuses
 #include "coop/net/master_slots.h"       // an empty relay is the chosen master's
 #include "coop/net/peer_admission.h"
@@ -387,7 +388,8 @@ bool Session::StartP2P(bool relayOnly) {
     }
     signaling_ = SignalingClient::Create(cfg_.signalingUrl, cfg_.signalingToken, sockets);
     if (!signaling_) {
-        UE_LOGE("net: failed to create signaling client for '%s'", cfg_.signalingUrl.c_str());
+        UE_LOGE("net: failed to create signaling client for '%s'",
+                endpoint_log::LogEndpoint(cfg_.signalingUrl).c_str());
         return false;
     }
 
@@ -413,7 +415,8 @@ bool Session::StartP2P(bool relayOnly) {
         hPollGroup_.store(hPoll);
         UE_LOGI("net: P2P host listening as '%s' via signaling %s "
                 "(hListen=0x%08x hPoll=0x%08x), capacity=%d clients",
-                peer_identity::LocalIdentityString().c_str(), cfg_.signalingUrl.c_str(),
+                peer_identity::LocalIdentityString().c_str(),
+                endpoint_log::LogEndpoint(cfg_.signalingUrl).c_str(),
                 static_cast<unsigned>(hListen), static_cast<unsigned>(hPoll),
                 kMaxPeers - 1);
     } else {  // Client
@@ -461,7 +464,8 @@ bool Session::StartP2P(bool relayOnly) {
         peerConns_[0].store(hConn);
         linkStage_.store(static_cast<uint8_t>(LinkStage::Dialing), std::memory_order_release);
         UE_LOGI("net: P2P client dialing '%s' via signaling %s (hConn=0x%08x slot=0)",
-                cfg_.hostIdentity.c_str(), cfg_.signalingUrl.c_str(),
+                cfg_.hostIdentity.c_str(),
+                endpoint_log::LogEndpoint(cfg_.signalingUrl).c_str(),
                 static_cast<unsigned>(hConn));
     }
     return true;

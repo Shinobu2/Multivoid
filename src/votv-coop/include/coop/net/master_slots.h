@@ -56,6 +56,12 @@ bool ChoiceIsRemembered();
 // such a line does not spell out an address the player did not type; anything else as written.
 std::string DisplayName(const std::string& endpoint);
 
+// How a log line prints a slot's label: as is for a master on the project's domain, marked
+// (ue_wrap::log::Addr) otherwise, since an entry without `=` is labelled with its own host.
+// LogName is DisplayName's log twin: the matching slot's LogLabel, else endpoint_log::LogEndpoint.
+std::string LogLabel(const Slot& s);
+std::string LogName(const std::string& endpoint);
+
 // The signaling relay on the chosen master's host, for a P2P session dialled with no master in
 // the loop (a test, or a `gen:` line); empty when no master is chosen. A lobby's own rendezvous
 // comes from its master's answer.

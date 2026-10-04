@@ -8,6 +8,7 @@
 
 #include "coop/config/config.h"           // Resolve* -- the join password and host identity rows
 #include "coop/config/config_registry.h"
+#include "coop/net/endpoint_log.h"
 #include "coop/net/master_slots.h"  // DefaultSignalingUrl -- a P2P connect's relay when none is named
 #include "coop/net/protocol.h"      // kProtocolVersion, kDefaultPort, kReleasesUrl
 #include "coop/session/join_progress.h"
@@ -264,7 +265,9 @@ bool ConnectP2PDirect(const std::string& hostIdentity, const net::Config& p2pFie
         QueueStart(cfg);
         UE_LOGI("session_manager: P2P connect queued -> host '%s' via signaling %s "
                 "(session boot = harness Tier 2)", hostIdentity.c_str(),
-                cfg.signalingUrl.empty() ? "(the chosen master's)" : cfg.signalingUrl.c_str());
+                cfg.signalingUrl.empty()
+                    ? "(the chosen master's)"
+                    : coop::net::endpoint_log::LogEndpoint(cfg.signalingUrl).c_str());
         ok = true;
     }
     g_actionBusy.store(false);

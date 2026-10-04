@@ -484,7 +484,7 @@ bool HostWithSave(const SaveChoice& choice, const std::string& name, bool locked
                                                    "master unreachable, NOT listed", locked,
                                                    directPort));
                 UE_LOGW("session_manager: HOST-WITH-SAVE ready (DIRECT, UNLISTED -- master '%s' unreachable, port %u)",
-                        slots::DisplayName(masterUrl).c_str(), static_cast<unsigned>(directPort));
+                        slots::LogName(masterUrl).c_str(), static_cast<unsigned>(directPort));
             } else {
                 // The line describes what happened: a DIRECT listen, joinable by address.
                 SetHostStatus(UnlistedDirectStatus("Hosting",
@@ -492,7 +492,7 @@ bool HostWithSave(const SaveChoice& choice, const std::string& name, bool locked
                                                    directPort));
                 UE_LOGW("session_manager: HOST-WITH-SAVE ready (UNLISTED -- master '%s' unreachable) "
                         "-- fell back to a DIRECT listen on port %u so the session stays joinable",
-                        slots::DisplayName(masterUrl).c_str(), static_cast<unsigned>(directPort));
+                        slots::LogName(masterUrl).c_str(), static_cast<unsigned>(directPort));
             }
             // Published LAST: the harness takes the pending host on its next tick and may refuse
             // it before the world loads (harness/world_boot.cpp), withdrawing the lobby and

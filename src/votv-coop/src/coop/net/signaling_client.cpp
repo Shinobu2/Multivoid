@@ -11,6 +11,7 @@
 
 #include "signaling_client.h"
 
+#include "coop/net/endpoint_log.h"
 #include "coop/net/peer_identity.h"
 #include "signaling_proof.h"
 #include "ue_wrap/core/log.h"
@@ -211,7 +212,8 @@ std::shared_ptr<SignalingClient> SignalingClient::Create(const std::string& serv
         host.erase(colon);
     }
     if (host.empty() || service.empty()) {
-        UE_LOGE("signaling: bad server address '%s'", serverAddr.c_str());
+        UE_LOGE("signaling: bad server address '%s'",
+                endpoint_log::LogEndpoint(serverAddr).c_str());
         return nullptr;
     }
     // The private constructor is reachable here; the shared_ptr wires enable_shared_from_this.
@@ -228,7 +230,8 @@ std::shared_ptr<SignalingClient> SignalingClient::Create(const std::string& serv
         return nullptr;
     }
     if (!client->resolved_) {
-        UE_LOGE("signaling: could not resolve signaling server '%s'", serverAddr.c_str());
+        UE_LOGE("signaling: could not resolve signaling server '%s'",
+                endpoint_log::LogEndpoint(serverAddr).c_str());
         return nullptr;
     }
     return client;
@@ -325,8 +328,9 @@ void SignalingClient::ResolveServerAddr() {
     addrinfo* res = nullptr;
     const int gai = getaddrinfo(host_.c_str(), service_.c_str(), &hints, &res);
     if (gai != 0 || !res) {
-        UE_LOGW("signaling: getaddrinfo('%s:%s') failed (%d)",
-                host_.c_str(), service_.c_str(), gai);
+        UE_LOGW("signaling: getaddrinfo('%s') failed (%d)",
+                endpoint_log::LogEndpoint(endpoint_log::JoinHostPort(host_, service_)).c_str(),
+                gai);
         if (res) freeaddrinfo(res);
         resolved_ = false;
         return;
@@ -338,7 +342,8 @@ void SignalingClient::ResolveServerAddr() {
     std::memcpy(resolvedAddr_, res->ai_addr, n);
     resolved_ = true;
     freeaddrinfo(res);
-    UE_LOGI("signaling: resolved %s:%s (family=%d)", host_.c_str(), service_.c_str(),
+    UE_LOGI("signaling: resolved %s (family=%d)",
+            endpoint_log::LogEndpoint(endpoint_log::JoinHostPort(host_, service_)).c_str(),
             resolvedFamily_);
 }
 
@@ -414,8 +419,9 @@ void SignalingClient::ConnectLocked() {
                                            static_cast<unsigned>(kKeepAliveIdleMs),
                                            static_cast<unsigned>(kKeepAliveProbeMs));
     else                      std::snprintf(kaWhat, sizeof(kaWhat), "on, OS default idle");
-    UE_LOGI("signaling: connecting to %s:%s as '%s' (keepalive %s)",
-            host_.c_str(), service_.c_str(), selfIdentity_.c_str(), kaWhat);
+    UE_LOGI("signaling: connecting to %s as '%s' (keepalive %s)",
+            endpoint_log::LogEndpoint(endpoint_log::JoinHostPort(host_, service_)).c_str(),
+            selfIdentity_.c_str(), kaWhat);
 }
 
 void SignalingClient::Enqueue(const std::string& line) {
@@ -563,9 +569,10 @@ void SignalingClient::Poll() {
         // us wrong. Here it reads what the previous pass finished parsing.
         if (sock_ != kInvalidSock && echoDeadline_ != std::chrono::steady_clock::time_point{} &&
             std::chrono::steady_clock::now() > echoDeadline_) {
-            UE_LOGW("signaling: the relay at %s:%s stopped routing our own name back to us -- our "
+            UE_LOGW("signaling: the relay at %s stopped routing our own name back to us -- our "
                     "registration is gone while this socket still looks healthy, so no joiner can "
-                    "reach us. Dropping it to re-register.", host_.c_str(), service_.c_str());
+                    "reach us. Dropping it to re-register.",
+                    endpoint_log::LogEndpoint(endpoint_log::JoinHostPort(host_, service_)).c_str());
             CloseSocketLocked();
         }
 
@@ -661,9 +668,9 @@ void SignalingClient::Poll() {
         if (sock_ != kInvalidSock && !greetingSent_ &&
             connectDeadline_ != std::chrono::steady_clock::time_point{} &&
             std::chrono::steady_clock::now() > connectDeadline_) {
-            UE_LOGW("signaling: the connect to %s:%s did not complete -- closing it so the "
+            UE_LOGW("signaling: the connect to %s did not complete -- closing it so the "
                     "reconnect can retry (a socket stuck mid-connect is registered nowhere)",
-                    host_.c_str(), service_.c_str());
+                    endpoint_log::LogEndpoint(endpoint_log::JoinHostPort(host_, service_)).c_str());
             CloseSocketLocked();
         }
 
@@ -673,12 +680,12 @@ void SignalingClient::Poll() {
         if (sock_ != kInvalidSock && regState_ == RegState::AwaitingChallenge &&
             challengeDeadline_ != std::chrono::steady_clock::time_point{} &&
             std::chrono::steady_clock::now() > challengeDeadline_) {
-            UE_LOGE("signaling: the relay at %s:%s never sent a registration "
+            UE_LOGE("signaling: the relay at %s never sent a registration "
                     "challenge -- it is older than this build and cannot verify "
                     "who registers a name. REFUSING to register unproved. Update "
                     "the signaling server (see docs/release.md). P2P is "
                     "unavailable; LAN and direct-IP are unaffected.",
-                    host_.c_str(), service_.c_str());
+                    endpoint_log::LogEndpoint(endpoint_log::JoinHostPort(host_, service_)).c_str());
             CloseSocketLocked();
         }
 
