@@ -155,6 +155,9 @@ CFG_FLAG(chat_no_retain, "chat_no_retain", "dev", false, "VOTVCOOP_CHAT_NO_RETAI
     "Developer: never keep a chat line in history (the chat drill's history red).")
 CFG_FLAG(chat_seed_suppress, "chat_seed_suppress", "dev", false, "VOTVCOOP_CHAT_SEED_SUPPRESS",
     "Developer: send a joiner no chat history (the seed red).")
+CFG_FLAG(quit_decision_red, "quit_decision_red", "dev", false, "VOTVCOOP_QUIT_DECISION_RED",
+    "Developer: the quit decision does NOT end the session (the pause-quit drill's red: the menu "
+    "world's destroys go out).")
 CFG_FLAG(wire_census, "wire_census", "dev", false, "VOTVCOOP_WIRE_CENSUS",
     "Developer: log the wire census every second (the wirewindow probe).")
 CFG_FLAG(ban_drill, "ban_drill", "dev", false, "VOTVCOOP_BAN_DRILL",

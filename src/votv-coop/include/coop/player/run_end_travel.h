@@ -23,8 +23,15 @@ namespace coop::net { class Session; }
 
 namespace coop::player::run_end_travel {
 
-// Register the watch on `lib_C::loadLevel` and cache the session the verdict tests. Idempotent;
-// safe every tick. The watch is registered whatever the role: both peers end their own runs.
+// Register the watch on `lib_C::loadLevel` and cache the session the verdict tests and the leave
+// stops. Idempotent; safe every tick. The watch is registered whatever the role: both peers end
+// their own runs.
+//
+// A menu travel the watch lets through with a live session (the pause menu's own quit, or a
+// run-ending it cannot answer with a revive) ends the session at the decision: the leave is
+// posted as the watch's own task (net_pump::FleeAfterNativeMenuTravel), so the session stops
+// before the menu world's start-up runs. registry_reaper's scan is the fallback for a menu
+// arrival that did not pass here.
 void Install(coop::net::Session* session);
 
 // Publish the seam's readiness to the revive's arm while a session runs; the name resolve is
