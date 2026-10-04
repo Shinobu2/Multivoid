@@ -6,7 +6,8 @@
 // so any peer rebuilds another's line from a role and a number. history: host + c1, the HOST
 // judges the retained tier and the open history. seed: host + c1, then c2, which JUDGES the
 // joiner's seed and the lines said while it loaded. i18n: all four, EVERY peer judges the others'
-// lines, in four scripts, and nicknames. Lines tagged [CHAT-DRILL]: "<role> PASS", "<role> FAIL:
+// lines, in four scripts, and nicknames; its wait restarts its budget at each new line and its
+// ABORT names the lines still missing. Lines tagged [CHAT-DRILL]: "<role> PASS", "<role> FAIL:
 // <why>" (roles, indices, counts; never chat text), "<role> ABORT: <why>" (not a measurement: a
 // wait ran out or the case could not be exercised), and the seed arm's rig cue "host HAS c1 4".
 // Reds: chat_no_retain (history), chat_seed_suppress (seed), chat_drill_bad_nick (i18n, on c1).

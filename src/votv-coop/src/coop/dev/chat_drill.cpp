@@ -8,6 +8,7 @@
 #include "coop/config/config_registry.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
+#include "coop/player/roster_ledger.h"
 #include "coop/session/join_progress.h"
 #include "coop/session/net_pump.h"  // HasAnnouncedWorldReady
 #include "coop/session/player_handshake.h"
@@ -96,6 +97,7 @@ uint64_t g_nextWindowMs = 0;
 uint64_t g_holdStartMs = 0;
 int g_windowN = 0;
 unsigned g_appeared = 0;  // history: bit n set once `host n` has been seen in the feed
+int g_i18nHeld = 0;       // i18n: the most expected lines held at once; a rise restarts the budget
 
 uint64_t NowMs() {
     using namespace std::chrono;
@@ -235,15 +237,47 @@ bool ClientReady(coop::net::Session* s) {
            coop::join_progress::CurrentPhase() == coop::join_progress::Phase::Idle;
 }
 
-// Each other role's lines, all of them, and its nick line: the i18n verdict's inputs.
-bool HoldsOthers() {
+constexpr int kExpectedPerRole = 1 + kSampleCount;  // a role's nick line and its numbered lines
+
+// How many of the other roles' expected lines the feed holds: the i18n wait's progress.
+int HeldOthers() {
+    int held = 0;
     for (int r = 0; r < kRoles; ++r) {
         if (r == g_role) continue;
-        if (g_scan.nickLen[r] < 0) return false;
+        if (g_scan.nickLen[r] >= 0) ++held;
         for (int n = 0; n < kSampleCount; ++n)
-            if (Present(r, n) == 0) return false;
+            if (Present(r, n) > 0) ++held;
     }
+    return held;
+}
+
+// A slot's roster name comes with the join and can land after the role's chat lines. The
+// ledger's display name is never empty (a placeholder stands in), so this reads the row.
+bool RosterNameKnown(int slot) { return !coop::roster_ledger::Get(slot).nick.empty(); }
+
+bool RosterNamesKnown() {
+    for (int r = 0; r < kRoles; ++r)
+        if (r != g_role && !RosterNameKnown(r)) return false;
     return true;
+}
+
+// What the i18n wait still lacks, by role and index: "c1 nick, c2 0, c3 name".
+std::string MissingOthers() {
+    std::string out;
+    const auto add = [&out](int role, const std::string& what) {
+        if (!out.empty()) out += ", ";
+        out += kRoleName[role];
+        out += ' ';
+        out += what;
+    };
+    for (int r = 0; r < kRoles; ++r) {
+        if (r == g_role) continue;
+        if (g_scan.nickLen[r] < 0) add(r, "nick");
+        for (int n = 0; n < kSampleCount; ++n)
+            if (Present(r, n) == 0) add(r, std::to_string(n));
+        if (!RosterNameKnown(r)) add(r, "name");
+    }
+    return out;
 }
 
 void JudgeI18n() {
@@ -295,6 +329,7 @@ bool Begin(coop::net::Session* session) {
         g_phase = Phase::Done;
         return false;
     }
+    g_i18nHeld = 0;
     switch (ArmNow()) {
     case Arm::History:
         if (g_role == 0) Enter(Phase::HWaitSlot, kJoinWaitS, "slot 1 world-ready");
@@ -455,10 +490,21 @@ void Tick(coop::net::Session* session) {
         if (g_scan.endN >= 0) JudgeSeed();
         else if (BudgetOut()) AbortBudget();
         return;
-    case Phase::IWaitLines:
-        if (HoldsOthers()) JudgeI18n();
-        else if (BudgetOut()) AbortBudget();
+    case Phase::IWaitLines: {
+        // A progress budget: each new expected line restarts it; a roster name turning up does not.
+        const int held = HeldOthers();
+        if (held > g_i18nHeld) {
+            g_i18nHeld = held;
+            g_phaseStartMs = now;
+        }
+        if (held == (kRoles - 1) * kExpectedPerRole && RosterNamesKnown()) {
+            JudgeI18n();
+        } else if (BudgetOut()) {
+            AbortCase(("no new line in " + std::to_string(g_budgetS) + " s; missing " +
+                       MissingOthers()).c_str());
+        }
         return;
+    }
     case Phase::Ready:
     case Phase::Done:
         return;
@@ -471,6 +517,7 @@ void OnDisconnect() {
     g_phase = Phase::Ready;
     g_windowN = 0;
     g_appeared = 0;
+    g_i18nHeld = 0;
 }
 
 }  // namespace coop::dev::chat_drill
