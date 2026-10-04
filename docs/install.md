@@ -26,9 +26,12 @@
 > deal, but it is far from finished and some game systems are untouched
 > entirely.
 >
-> If something breaks, a report genuinely helps. Say what you were doing, and
-> attach `multivoid.log` from the folder that contains the game's executable.
-> Testers who send good reports get credited, permanently.
+> If something breaks, a report genuinely helps: press F1, open Report a bug,
+> describe what you were doing and press Save report. It writes a zip file in
+> the `multivoid_reports` folder beside the game's executable; open it to see
+> what is inside, then attach it to your message. Other players' addresses,
+> player ids and your Windows user folder are replaced by placeholders. Testers
+> who send good reports get credited, permanently.
 
 Multivoid is a co-op mod for **Voices of the Void**. It does not modify any
 game files. It ships as **one zip** that every route below installs -- the
@@ -145,7 +148,8 @@ executable unless noted (all optional — they only store mod settings and logs)
 `multivoid.ini`, `multivoid.ini.example`, `multivoid.log`, `multivoid.prev.log`,
 `multivoid-loaded.txt`, `multivoid-compat-report.txt`, `multivoid-players.txt`,
 `multivoid-banlist.txt` (from builds before this one, no longer read), the folder
-`multivoid_servers` (it holds your hosted server's folder), the skin-pak folder
+`multivoid_servers` (it holds your hosted server's folder), the folder `multivoid_reports`
+(your saved bug reports), the skin-pak folder
 `VotV\Content\Paks\LogicMods\multivoid` if you created one, and, from builds before this
 one, a folder `%LOCALAPPDATA%\Multivoid` (no longer read). Your identity is a separate
 file beside the executable, `multivoid_identity.key`, which only your Windows account can

@@ -125,7 +125,8 @@ game bind.
 F1 opens the menu: a category tree whose developer categories are hidden unless the developer
 switch is on (`ui/dev_menu`). For every player it holds Cosmetics (skins on a live mannequin,
 the nameplate preference, the nickname colour, the font and size), Network (the live statistics
-panel), World (the rules this peer runs under), Voice, and on the host Administration (online,
+panel), World (the rules this peer runs under), Voice, Report a bug (saves a report file with
+your logs; nothing is sent), and on the host Administration (online,
 offline and banned players with teleport, kick, ban and unban, and the server's settings, changed
 through the same `/set` and `/reset` commands a person types). The config review panel shows the
 boot sweep's findings on the ini before any session exists.
@@ -240,6 +241,6 @@ scoreboard fills as roster rows arrive; nameplates appear with each puppet's fir
 | the fallback browser | `ui/server_browser` |
 | joining and failing | `ui/loading_screen`, `ui/join_curtain`, `ui/end_reason_dialog`, `ui/boot_warning_dialog`, `ui/console` |
 | the overlay host | `ui/imgui_overlay`, `ui/overlay_backend`, `ui/overlay_backend_dx11`, `ui/overlay_backend_dx12`, `ui/overlay_cursor`, `ui/input_focus`, `ui/fonts`, `ui/atlas_watch`, `ui/scale`, `ui/style` |
-| the F1 panels | `ui/dev_menu`, `ui/skins_panel`, `ui/voice_panel`, `ui/world_rules_panel`, `ui/net_stats_panel`, `ui/admin_panel`, `ui/server_settings_pane`, `ui/config_review_panel` |
+| the F1 panels | `ui/dev_menu`, `ui/skins_panel`, `ui/voice_panel`, `ui/world_rules_panel`, `ui/net_stats_panel`, `ui/admin_panel`, `ui/server_settings_pane`, `ui/bug_report_pane`, `ui/config_review_panel` |
 | the HUD | `ui/hud`, `ui/chat_input`, `ui/chat_view`, `ui/scoreboard`, `ui/voice_icons`, `ui/menu_sfx`, `ui/link_format` |
 | tests | the browser screenshot run and the four-peer scoreboard capture, both scripted on the rig |

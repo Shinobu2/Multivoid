@@ -28,6 +28,7 @@
 #include "ui/world_rules_panel.h"  // F1 > World > Rules (shown to everyone)
 #include "ui/net_stats_panel.h"
 #include "ui/scale.h"
+#include "ui/bug_report_pane.h"
 #include "ui/server_settings_pane.h"
 #include "ui/skins_panel.h"
 
@@ -544,6 +545,9 @@ const std::vector<Cat>& Tree() {
             { "Nameplate", { { &RenderNameplatePref, false } }, false },
             { "Chat",      { { &RenderChatPref, false } }, false },
             { "Interface", { { &RenderFontPref, false } }, false },
+        }, false },
+        { "Report a bug", {
+            { "Report", { { &ui::bug_report_pane::Render, false } }, false },
         }, false },
     };
     return kTree;
