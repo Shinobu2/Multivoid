@@ -3,7 +3,8 @@
 // The order of a dispatch: split, find the root (an alias becomes its expansion), walk to the
 // sub-verb, refuse a console-only verb to anyone else, ask the policy about the reached verb's
 // node, parse and resolve the arguments, ask about the selector node when `@a` or `@r` was used,
-// apply the qualifiers (the host as a target, an offline target, an exempt target, who is told),
+// apply the qualifiers (the host as a target, an offline target and whether the host knows its id,
+// an exempt target, who is told),
 // run the handler. Each refusal is one reply line and sets no `ran`.
 
 #include "coop/commands/command_dispatcher.h"
@@ -171,6 +172,11 @@ std::string ApplyQualifiers(Context& ctx) {
             if (!Passes(ctx.registry, policy, caller, offlineNode))
                 return "You do not have permission for /" + ctx.registry.PathOf(spec) +
                        " on an offline player (" + offlineNode + ").";
+            // An id the host never saw is the console's to act on: a caller holding the offline
+            // node could otherwise add a persisted record per line at the bucket rate.
+            if (!caller.isOperator && (policy.known == nullptr || !policy.known(t.offlineId)))
+                return ShortId(t.offlineId) +
+                       " has never played here; only the host can ban an unknown id.";
         }
 
         const Qualifier* exempt = FindQualifier(spec, QualKind::Exempt);

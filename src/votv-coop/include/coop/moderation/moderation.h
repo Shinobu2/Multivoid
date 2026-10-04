@@ -1,7 +1,8 @@
 // coop/moderation/moderation.h -- host-side player-admin actions: kick, ban, unban, teleport-to-me.
 //
 // The command handlers (coop/commands/moderation_commands) are the callers, and the dispatcher
-// decides who may run them: a verb here never asks the permission system. Each verb runs on the
+// decides who may run them, on an offline id, and on an id no record names (the console alone):
+// a verb here never asks the permission system. Each verb runs on the
 // GAME THREAD, synchronously, and returns a ModResult the handler turns into the caller's reply.
 //
 // A verb acts only inside a running HOSTED session (HostedSessionRunning): defence in depth,

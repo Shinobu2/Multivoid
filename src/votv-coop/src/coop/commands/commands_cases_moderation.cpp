@@ -42,6 +42,7 @@ struct Rec {
     std::vector<std::string> prefixIds;
     std::string prefixAsked;
     std::string nick;  // what recordNick answers
+    bool known = false;  // what the policy's known answers (Fakes<1> only)
     std::vector<Told> told;
     std::vector<uint32_t> toldGeneration;
 };
@@ -79,6 +80,7 @@ struct Fakes {
         return R().prefixIds;
     }
     static std::string RecordNick(std::string_view) { return R().nick; }
+    static bool Known(std::string_view) { return R().known; }
     static void Notify(const Caller& to, std::string_view line) {
         R().told.emplace_back(to.slot, std::string(line));
         R().toldGeneration.push_back(to.generation);
@@ -127,6 +129,7 @@ Policy MakePolicy() {
     p.check = &AllowAll;
     p.holds = &HoldsDee;
     p.isExplicit = &ExplicitNobody;
+    p.known = &Fakes<1>::Known;
     return p;
 }
 
@@ -231,21 +234,41 @@ void BanCases(Checker& check, const Registry& reg, const Caller& console, const 
     check(Said(Run<1>(reg, console, ("banid " + eve).c_str()), "Banned eeeeeeee (offline).") &&
               !F::R().byAddress && F::R().told == std::vector<Told>{{3, "Host banned eeeeeeee"}},
           "moderation: /banid of an unseated id with no record names it by its first eight");
-    check(Said(Run<1>(reg, bob, ("ban " + eve).c_str()),
-               "eeeeeeee has never played here; only the host can ban an unknown id.") &&
+    check(Refused(Run<1>(reg, bob, ("ban " + eve).c_str()),
+                  "eeeeeeee has never played here; only the host can ban an unknown id.") &&
               F::R().calls == 0 && F::R().told.empty(),
-          "moderation: a client's offline /ban of an id with no record is refused before the verb");
-    check(Said(Run<1>(reg, bob, ("banid " + eve).c_str()),
-               "eeeeeeee has never played here; only the host can ban an unknown id.") &&
+          "moderation: the dispatcher refuses a client's offline /ban of an id with no record");
+    check(Refused(Run<1>(reg, bob, ("banid " + eve).c_str()),
+                  "eeeeeeee has never played here; only the host can ban an unknown id.") &&
               F::R().calls == 0,
-          "moderation: a client's offline /banid of an id with no record is refused before the verb");
+          "moderation: the dispatcher refuses a client's offline /banid of an id with no record");
     {
         Fakes<1>::R() = Rec{};
+        F::R().known = true;
         F::R().nick = "Eve";
         const DispatchResult r = Dispatch(reg, bob, ("ban " + eve).c_str(), Seated(), MakePolicy());
         check(Said(r, "Banned Eve (offline).") && F::R().verb == "banOffline" && F::R().id == eve &&
                   F::R().told == std::vector<Told>{{3, "Bob banned Eve"}, {0, "Bob banned Eve"}},
               "moderation: a client's offline /ban of an id with a record still bans it");
+    }
+    {
+        Fakes<1>::R() = Rec{};
+        F::R().known = true;
+        const DispatchResult r = Dispatch(reg, bob, ("banid " + eve).c_str(), Seated(), MakePolicy());
+        check(Said(r, "Banned eeeeeeee (offline).") && F::R().verb == "banOffline",
+              "moderation: a record with an empty nick is a known id, named by its first eight");
+    }
+    {
+        Fakes<1>::R() = Rec{};
+        Policy noKnown = MakePolicy();
+        noKnown.known = nullptr;
+        const DispatchResult r = Dispatch(reg, bob, ("ban " + eve).c_str(), Seated(), noKnown);
+        check(Refused(r, "eeeeeeee has never played here; only the host can ban an unknown id.") &&
+                  F::R().calls == 0,
+              "moderation: a policy with no known treats every offline id as unseen");
+        const DispatchResult c = Dispatch(reg, console, ("ban " + eve).c_str(), Seated(), noKnown);
+        check(Said(c, "Banned eeeeeeee (offline).") && F::R().verb == "banOffline",
+              "moderation: the console bans an unseen id whatever known answers");
     }
     check(Said(RunAs<1>(reg, console, ("ban " + eve).c_str(), ModResult::NoSession),
                "There is no hosted session."),

@@ -4,9 +4,9 @@
 // asked: it splits the line, walks to the verb (an alias through its expansion), asks the
 // caller's Policy, parses and resolves the arguments, calls the handler and collects its reply
 // lines. A handler checks nothing itself (the one exception is /help, which lists what the caller
-// may use). A command's qualifiers -- who may act on an offline player, who cannot be acted on,
-// who is told -- are checked here, before the handler; a handler receives their answers and never
-// asks the permission system. MTA's shape: one command table, checked once at dispatch, the command's default
+// may use). A command's qualifiers -- who may act on an offline player (and on an id the host has
+// no record of, only the console), who cannot be acted on, who is told -- are checked here, before
+// the handler; a handler receives their answers and never asks the permission system. MTA's shape: one command table, checked once at dispatch, the command's default
 // passed into the check (reference/mtasa-blue/Server/mods/deathmatch/logic/CConsole.cpp:68-69).
 
 #pragma once
@@ -33,6 +33,10 @@ struct Policy {
     // Whether `node` is set on the player or a group it inherits, a wildcard not counting, for an
     // Exempt qualifier. Null: an Exempt target is refused as "identity is not proved yet".
     bool (*isExplicit)(std::string_view playerId, std::string_view node) = nullptr;
+    // Whether the host has any record of the player id, for a GateOffline qualifier: an offline
+    // target the host never saw is refused to a caller that is not the console. Null: every id is
+    // unseen.
+    bool (*known)(std::string_view playerId) = nullptr;
 };
 
 // What a handler sees, for the handler call only. The caller, the spec, the players, the registry

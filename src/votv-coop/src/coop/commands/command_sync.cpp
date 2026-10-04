@@ -95,8 +95,14 @@ int Pick(int count) {
     return std::uniform_int_distribution<int>(0, count - 1)(rng);
 }
 
+// Whether a seen-players record exists for the id, whatever nick it holds.
+bool SeenBefore(std::string_view id) {
+    coop::seen_players::Entry e;
+    return coop::seen_players::FindByGuid(std::string(id).c_str(), e);
+}
+
 const coop::commands::Policy g_policy{&PermissionCheck, &Pick, &HoldsNode,
-                                      &coop::permissions::host::HoldsExplicitly};
+                                      &coop::permissions::host::HoldsExplicitly, &SeenBefore};
 
 // The nick a seen-players record holds for an id; empty when there is none.
 std::string RecordNick(std::string_view id) {

@@ -473,6 +473,8 @@ bool NoOfflineNode(const Caller&, std::string_view node, bool) {
     return node.size() < 8 || node.substr(node.size() - 8) != ".offline";
 }
 bool HoldsAnyone(std::string_view, std::string_view, bool) { return true; }
+// The host has a record of the ids of 32 `d` and of 32 `e`.
+bool KnownDAndE(std::string_view id) { return id == Repeat("d", 32) || id == Repeat("e", 32); }
 // Bob (slot 1) and the id of 32 `e` hold zap.exempt explicitly.
 bool ExplicitBobAndE(std::string_view id, std::string_view node) {
     return node == "multivoid.zap.exempt" && (id == Repeat("b1", 16) || id == Repeat("e", 32));
@@ -501,6 +503,7 @@ void QualifierCases(Checker& check) {
     Policy full = everything;
     full.holds = &HoldsAnyone;
     full.isExplicit = &ExplicitBobAndE;
+    full.known = &KnownDAndE;
     Policy noOffline = full;
     noOffline.check = &NoOfflineNode;
     const std::string offlineId = Repeat("d", 32);
@@ -554,6 +557,24 @@ void QualifierCases(Checker& check) {
     }
     check(Run(reg, who, "zap bobby", players, noOffline).ran,
           "qualifier: a seated target needs no .offline node");
+    {
+        const std::string unseenId = Repeat("f", 32);
+        const char* unseen = "ffffffff has never played here; only the host can ban an unknown id.";
+        check(SaidOnly(Run(reg, who, ("zap " + unseenId).c_str(), players, full), unseen),
+              "qualifier: a caller that is not the console is refused an offline id the host never saw");
+        check(Run(reg, console, ("zap " + unseenId).c_str(), players, full).ran,
+              "qualifier: the console is not stopped by an offline id the host never saw");
+        Policy noKnown = full;
+        noKnown.known = nullptr;
+        check(SaidOnly(Run(reg, who, ("zap " + offlineId).c_str(), players, noKnown),
+                       "dddddddd has never played here; only the host can ban an unknown id."),
+              "qualifier: a null known treats every offline id as unseen");
+        check(Run(reg, who, ("zap " + offlineId).c_str(), players, full).ran,
+              "qualifier: a caller that is not the console may act on an offline id the host knows");
+        check(SaidOnly(Run(reg, who, ("zap " + unseenId).c_str(), players, noOffline),
+                       "You do not have permission for /zap on an offline player (multivoid.zap.offline)."),
+              "qualifier: the offline node is asked before the known id");
+    }
 
     check(SaidOnly(Run(reg, who, "zap Bob", players, full), "Bob cannot be zapped."),
           "qualifier: an explicit exempt holder cannot be acted on");
