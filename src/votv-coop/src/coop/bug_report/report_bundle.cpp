@@ -319,6 +319,21 @@ detail::ReadPlan PlanFor(const Entry& e) {
     return plan;
 }
 
+// Moves the finished .part to report-<stamp>.zip; a name already taken (two saves in one UTC
+// second) gets -2, -3 ... -99 and an existing report is never overwritten. Returns the final
+// path, or empty with the Win32 error in `err`.
+std::wstring MoveToFreeName(const std::wstring& part, const std::wstring& base, DWORD& err) {
+    constexpr int kLastSuffix = 99;
+    const std::wstring stem = base.substr(0, base.size() - 4);  // base ends in ".zip"
+    for (int n = 1; n <= kLastSuffix; ++n) {
+        const std::wstring target = n == 1 ? base : stem + L"-" + std::to_wstring(n) + L".zip";
+        if (::MoveFileExW(part.c_str(), target.c_str(), 0)) return target;
+        err = ::GetLastError();
+        if (err != ERROR_ALREADY_EXISTS && err != ERROR_FILE_EXISTS) return {};
+    }
+    return {};
+}
+
 Status Build(const Form& form, const Capture& cap) {
     constexpr const char* kWriteFailed = "Could not write the report file.";
     constexpr const char* kReadLog = "Could not read the log.";
@@ -419,13 +434,15 @@ Status Build(const Form& form, const Capture& cap) {
     if (!zip.AddMem(kMadeEntries[2], meta.dump(2, ' ', false, Json::error_handler_t::replace)))
         return Fail(kWriteFailed, "adding meta.json to the zip: " + zip.Cause());
     if (!zip.Finish()) return Fail(kWriteFailed, "finishing the zip: " + zip.Cause());
-    if (!::MoveFileExW(cleanup.part.c_str(), zipPath.c_str(), 0))
-        return Fail(kWriteFailed, "MoveFileExW of the .part file: error " + std::to_string(::GetLastError()));
+    DWORD moveErr = 0;
+    const std::wstring finalPath = MoveToFreeName(cleanup.part, zipPath, moveErr);
+    if (finalPath.empty())
+        return Fail(kWriteFailed, "MoveFileExW of the .part file: error " + std::to_string(moveErr));
 
     Status done;
     done.phase = Phase::Done;
-    done.zipPath = zipPath;
-    done.zipBytes = fs::file_size(fs::path(zipPath), ec);
+    done.zipPath = finalPath;
+    done.zipBytes = fs::file_size(fs::path(finalPath), ec);
     if (ec) done.zipBytes = 0;
     done.counts = counts;
     return done;
