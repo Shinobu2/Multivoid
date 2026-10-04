@@ -152,7 +152,8 @@ struct RowView {
 void ForEachRow(const std::function<void(const RowView&)>& fn);
 
 // The chat surface's open and close edge, pushed in by the chat input from whichever thread
-// closed it (the window-procedure Escape path, the render-thread submit, the fault unlatch).
+// closed it (the window-procedure Escape path, the render-thread submit, the fault unlatch) and
+// by the chat drill, which restores it on every exit.
 // Writes atomics only, never the line store.
 void SetChatOpen(bool open);
 

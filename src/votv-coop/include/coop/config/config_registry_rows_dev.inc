@@ -145,6 +145,11 @@ CFG_ENUM(command_drill, "command_drill", "dev", "off", "off|on|red|grant|grantre
     "line, so it must fail. grant / grantred: a client runs a command and reports whether the host's "
     "permissions allowed it (grant: one the rig's fixture grants; grantred: one it does not); hostdeny: "
     "the host runs a command its own permission file denies it and reports the refusal.")
+CFG_ENUM(chat_drill, "chat_drill", "dev", "off", "off|history|seed|i18n", "VOTVCOOP_CHAT_DRILL",
+    "Developer: chat checks judged in memory -- history (the host), seed (the second joiner), i18n "
+    "(every peer); each prints [CHAT-DRILL] PASS, FAIL or ABORT.")
+CFG_FLAG(chat_drill_bad_nick, "chat_drill_bad_nick", "dev", false, "VOTVCOOP_CHAT_DRILL_BAD_NICK",
+    "Developer: the chat drill announces a wrong nickname (the i18n red).")
 CFG_FLAG(chat_no_retain, "chat_no_retain", "dev", false, "VOTVCOOP_CHAT_NO_RETAIN",
     "Developer: never keep a chat line in history (the chat drill's history red).")
 CFG_FLAG(chat_seed_suppress, "chat_seed_suppress", "dev", false, "VOTVCOOP_CHAT_SEED_SUPPRESS",

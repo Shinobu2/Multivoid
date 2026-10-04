@@ -34,6 +34,7 @@
 #include "coop/dev/end_play_probe.h"  // [dev] every end of play against the K2_DestroyActor seam
 #include "coop/dev/event_drill.h"  // [dev] the event lanes: a scheduler fire, a dev fire, the join snapshot
 #include "coop/dev/command_drill.h"  // [dev] a typed command is run by the host and answered privately
+#include "coop/dev/chat_drill.h"  // [dev] the chat checks, judged in memory
 #include "coop/dev/ban_drill.h"  // [dev] the host bans a joined client by the moderation verb
 #include "coop/dev/settings_drill.h"  // [dev] the host sets its own rows and the modules show they followed
 #include "coop/dev/mannequin_drill.h"  // [dev] the walking mannequin's spawn and baseline drill
@@ -145,6 +146,7 @@ void EndSession() {
     coop::dev::desk_crossing_drill::OnDisconnect();  // [dev] the legs start over, a held host step let go
     coop::dev::desk_ping_drill::OnDisconnect();  // [dev] the legs start over
     coop::dev::command_drill::OnDisconnect();  // [dev] the phases start over, the reply observer cleared
+    coop::dev::chat_drill::OnDisconnect();  // [dev] the drill starts over, a chat it opened is closed
     coop::dev::ban_drill::OnSessionEnd();  // [dev] empty by design: its one state, the step, stands
     coop::dev::order_selftest::OnDisconnect();  // [dev] a rejoin's peers run their legs again
     coop::dev::meadow_selftest::OnDisconnect();  // [dev] a rejoin's peers run their legs again
@@ -220,6 +222,7 @@ void TickDrills(coop::net::Session& session) {
     coop::dev::desk_crossing_drill::Tick(&session);  // [dev] the needle's crossing drill (a latched read when off)
     coop::dev::desk_ping_drill::Tick(&session);  // [dev] the ping verdict drill (a latched read when off)
     coop::dev::command_drill::Tick(&session);  // [dev] the commands drill (a latched read when off)
+    coop::dev::chat_drill::Tick(&session);  // [dev] the chat drill (a latched read when off)
     coop::dev::ban_drill::Tick(&session);  // [dev] the host ban drill (a latched read when off)
     coop::dev::drive_selftest::Tick();  // [dev] rack-lane e2e circles (single bool read when off; 5 s self-throttle)
     coop::dev::floppy_selftest::Tick();  // [dev] disc/server episodes (single bool read when off; 6 s census period)

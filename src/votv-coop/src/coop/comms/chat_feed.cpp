@@ -53,8 +53,8 @@ std::atomic<int> g_count{0};
 
 // The reveal state, the one place that answers whether the history is on screen. Written from
 // whichever thread closed the chat surface (the window-procedure escape path, the render-thread
-// submit, the SEH unlatch), so atomics only; it never touches the line store, which stays
-// game-thread-only.
+// submit, the SEH unlatch, the game-thread chat drill), so atomics only; it never touches the line
+// store, which stays game-thread-only.
 std::atomic<bool>     g_chatOpen{false};
 std::atomic<uint64_t> g_closeAtMs{0};
 std::atomic<bool>     g_retentionFrozen{false};
@@ -67,7 +67,8 @@ uint64_t NowMs() {
 
 // The suspended TTL clock, game thread. While the reveal is up the TTL must not advance, or a
 // player reading history watches it expire under them. Stamping the birth forward is not
-// available, since the open and close edges arrive on three different threads while the store
+// available, since the open and close edges arrive on different threads (the window procedure, the
+// render thread, the game thread's chat drill) while the store
 // is game-thread-only; so wall time keeps running and the suspended portion is accumulated,
 // then subtracted. The subtraction is the trap: a line born during a reveal has a near-zero
 // wall age while the accumulator is large, so a global total would underflow an unsigned age
