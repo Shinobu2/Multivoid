@@ -538,7 +538,7 @@ private:
     // thread (frees the slot inline) from any other (queues the free).
     std::atomic<std::thread::id> netThreadId_{};
     // Slots an off-thread kick claimed and tore down but could not free: the net thread drains
-    // them in RunPendingFrees. teardownMutex_ is a leaf lock, held for the push or the swap only.
+    // them in RunPendingFrees. teardownMutex_ is a leaf lock, held for a push, a pop or a clear.
     struct PendingFree { int slot; uint32_t hConn; };
     std::mutex teardownMutex_;
     std::vector<PendingFree> pendingFrees_;

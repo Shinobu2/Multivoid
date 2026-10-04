@@ -22,8 +22,8 @@ namespace coop::dev::ban_drill {
 void Tick(coop::net::Session* s);
 
 // The session ended. The wait for ARMED holds no per-session state, and a drill that has banned
-// (POSTED) or reported (DONE) is left alone: its own kick ends the host's session, and it never
-// re-arms in the process.
+// (POSTED, waiting for the seat's free) or reported (DONE) is left alone, and it never re-arms in
+// the process.
 void OnSessionEnd();
 
 }  // namespace coop::dev::ban_drill

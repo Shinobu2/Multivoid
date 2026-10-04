@@ -1,7 +1,7 @@
 // coop/net/session_status.cpp -- the connection state machine: the GNS status callback
 // (Connecting, Connected, closed), the pending band an unproved socket waits in, admission into a
 // seat, the close path's per-slot teardown, and the kick and leave entry points (their shared
-// teardown, and the session's aggregate state, are session_teardown.cpp).
+// teardown, and the session's all-peers-gone edge, are session_teardown.cpp).
 
 #include "coop/net/session.h"
 
@@ -605,9 +605,10 @@ void Session::HandleConnStatusChanged(void* info) {
             peerGenBySlot_[slot].store(0, std::memory_order_release);
         }
 
-        // The session's aggregate state is not written here: this close only marks it due, and
-        // UpdateAggregateState writes it at the top of the net loop's next pass, the one place
-        // that does (a seat admitted in this pass is counted by then, never raced).
+        // The all-peers-gone edge is not written here: this close only marks it due, and
+        // UpdateAggregateState writes it at the top of the net loop's next pass, the only writer
+        // of that edge (a seat admitted in this pass is counted by then, never raced). state_ has
+        // other writers: Start, Stop, and the admission's Connected store (FinishPeerConnected).
         aggregateDue_.store(true);
     }
 }
@@ -626,9 +627,10 @@ bool Session::KickWithToken(int peerSlot, uint32_t expectedGeneration, EndReason
                 static_cast<unsigned>(expectedGeneration), static_cast<unsigned>(liveGen));
         return false;
     }
-    // GEN: clear -- the claim only; the generation itself is cleared by the net thread, after the
-    // inbox erase, exactly like the other two close paths: at the end of KickClaimed's teardown
-    // when this runs there, from RunPendingFrees when it does not. Claim by handle,
+    // GEN: clear -- the claim only; the generation itself is cleared after the inbox erase,
+    // exactly like the other two close paths: by the net thread at the end of KickClaimed's
+    // teardown when this runs there, from RunPendingFrees when it does not (Stop clears the
+    // rest after the net thread's join). Claim by handle,
     // not by slot: the generation check can go stale between these two instructions (the net
     // thread closes and re-accepts), and a plain exchange(0) would hand us the successor's
     // connection; the CAS fails on a different handle.

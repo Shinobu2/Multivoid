@@ -22,6 +22,8 @@ namespace {
 
 constexpr int kSlot = 1;  // the pair's client
 
+// Posted: the ban is issued; the drill waits for the net thread to free the seat (the slot's
+// generation changing), then reports.
 enum class Step : uint8_t { Armed, Posted, Done };
 Step g_step = Step::Armed;
 // What the poll waits on: the kicked occupancy's generation, and the id its ban is stored under.

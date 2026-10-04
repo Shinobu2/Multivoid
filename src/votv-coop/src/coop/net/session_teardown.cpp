@@ -1,6 +1,6 @@
 // coop/net/session_teardown.cpp -- the slot teardown family: the one close every kick, ban and
 // leave runs for a connection whose slot the caller has claimed, the net thread's freeing of a slot
-// an off-thread kick queued, and the session's aggregate state, which only the net thread writes.
+// an off-thread kick queued, and the session's all-peers-gone edge, which only the net thread writes.
 
 #include "coop/net/session.h"
 
@@ -59,8 +59,8 @@ bool Session::KickClaimed(int peerSlot, uint32_t hConn, EndReason code, const ch
     SetProvedGuidForSlot(peerSlot, 0, std::string());
     if (onNetThread) {
         peerGenBySlot_[peerSlot].store(0, std::memory_order_release);
-        // The session's aggregate is written by UpdateAggregateState and nowhere else; this close
-        // only marks it due.
+        // The all-peers-gone edge (Connected or linked to Disconnected) is written by
+        // UpdateAggregateState and nowhere else; this close only marks it due.
         aggregateDue_.store(true);
     } else {
         std::lock_guard<std::mutex> lk(teardownMutex_);
