@@ -349,6 +349,9 @@ void KindCases(Checker& check) {
               SaidOnly(Run(reg, who, "set a.b =x", policy),
                        ("'=x' is not key=value. Usage: " + setUsage).c_str()),
           "grammar: a bare word, an empty value and an empty key are not contexts");
+    check(SaidOnly(Run(reg, who, "set a.b server=a\x01", policy),
+                   "'server=a\x01' is not a valid context."),
+          "grammar: a context whose value holds a control byte is refused as not valid");
     {
         const DispatchResult r = Run(reg, who, "set a.b server=global", policy);
         check(r.ran && g_grammar.contexts.empty(), "grammar: server=global is no context");
