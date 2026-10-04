@@ -98,6 +98,15 @@ bool IsHost() {
     return s && s->role() == coop::net::Role::Host;
 }
 
+// The dev injection, the must-fail control for the join seed. Read once: with the environment
+// variable unset, every read scans the ini on disk under the config mutex, and the seed runs at
+// every join on the game thread.
+bool SeedSuppressed() {
+    static const bool v =
+        coop::config::ResolveFlag(::coop::config_registry::rows::chat_seed_suppress);
+    return v;
+}
+
 // Render one committed row into this peer's feed; seeded rows land retained.
 void ApplyRow(uint8_t slot, const std::string& nick, uint32_t custom,
               const std::string& text, uint32_t lineSeq, bool seeded) {
@@ -115,10 +124,9 @@ void ApplyRow(uint8_t slot, const std::string& nick, uint32_t custom,
     // rather than by a flag at the far end: replaying a joiner's whole history through it would
     // put bubbles over peers for conversations that happened before that player existed.
     if (!seeded) coop::chat_bubbles::OnChatLine(slot, text.c_str());
-    // The lane's only order observable: a drill cannot read a sort key off a screenshot, and "the
-    // lines appeared" is not "they appeared in the order the lobby said them", which is the half a
-    // seed interleaving with live traffic breaks. One line per applied row, carrying no text: a
-    // log is not where a player's chat belongs.
+    // One log line per applied row: the lobby's sequence number, whether the row came from the
+    // join seed, and the byte length of the rendered line. It carries no text: a log is not where
+    // a player's chat belongs.
     UE_LOGI("chat: applied line %u seeded=%d textBytes=%zu", lineSeq, seeded ? 1 : 0,
             line.size());
 }
@@ -425,10 +433,10 @@ void QueueConnectBroadcastForSlot(int slot) {
     // rows, and a gate that only opens when there was history to send stays shut for the first
     // conversation.
     g_seeded[slot] = true;
-    // The dev injection, the must-fail control for the join seed: the slot is opened for live
-    // traffic but the history is never sent, precisely the empty-history-with-no-error failure the
-    // contiguous range was introduced to prevent.
-    if (coop::config::ResolveFlag(::coop::config_registry::rows::chat_seed_suppress)) {
+    // With the dev injection set, the slot is opened for live traffic but the history is never
+    // sent, precisely the empty-history-with-no-error failure the contiguous range was
+    // introduced to prevent.
+    if (SeedSuppressed()) {
         UE_LOGW("chat: [dev] connect-seed SUPPRESSED for slot %d (%d line(s) withheld)",
                 slot, coop::chat_log::Count());
         return;
