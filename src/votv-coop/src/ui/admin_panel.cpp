@@ -196,7 +196,8 @@ void RenderOfflineSection() {
         }
         ImGui::EndTable();
     }
-    if (g_offline.empty()) ImGui::TextDisabled("Nobody in the registry yet (players are recorded when they join).");
+    if (g_seen.empty()) ImGui::TextDisabled("Nobody in the registry yet (players are recorded when they join).");
+    else if (g_offline.empty()) ImGui::TextDisabled("Everyone in the registry is online.");
 }
 
 void RenderBannedSection() {
