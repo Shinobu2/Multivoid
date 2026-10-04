@@ -7,8 +7,8 @@
 // reliable individually plus per-second aggregated stream counts, each line stamped with
 // GetTickCount64(). That stamp is machine-global, so on one test machine the census lines up
 // exactly against the quitting client's own transition marker in the other log. Each second's
-// flush opens with a bare `wire_census: tick=<t>` line, printed whether or not a counter moved,
-// so a reader can wait for the census to pass a tick.
+// flush opens with a bare tick line, printed whether or not a counter moved, so a reader can wait
+// for the census to pass a tick.
 //
 // All entry points are NET-THREAD only (Session::HandleMessage and the NetThread loop); state is
 // plain statics on that single thread.
