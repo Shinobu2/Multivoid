@@ -149,6 +149,8 @@ CFG_FLAG(chat_no_retain, "chat_no_retain", "dev", false, "VOTVCOOP_CHAT_NO_RETAI
     "Developer: never keep a chat line in history (the chat drill's history red).")
 CFG_FLAG(chat_seed_suppress, "chat_seed_suppress", "dev", false, "VOTVCOOP_CHAT_SEED_SUPPRESS",
     "Developer: send a joiner no chat history (the seed red).")
+CFG_FLAG(wire_census, "wire_census", "dev", false, "VOTVCOOP_WIRE_CENSUS",
+    "Developer: log the wire census every second (the wirewindow probe).")
 CFG_FLAG(ban_drill, "ban_drill", "dev", false, "VOTVCOOP_BAN_DRILL",
     "Ban drill (host only): when a client has finished joining, ban slot 1 once through the "
     "moderation verb and report whether the ban was stored and the seat closed. It writes the "

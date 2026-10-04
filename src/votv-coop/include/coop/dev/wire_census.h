@@ -1,12 +1,14 @@
-// coop/dev/wire_census.h -- env-gated inbound-wire census (DEV diagnostic; probe family,
-// exempt from the no-migration-baggage rule).
+// coop/dev/wire_census.h -- row-gated inbound-wire census (the dev row wire_census, env twin
+// VOTVCOOP_WIRE_CENSUS; DEV diagnostic; probe family, exempt from the no-migration-baggage rule).
 //
 // Purpose: measure whether a peer whose world is DYING -- an exit to menu with the layer still
 // live, before the flee poll notices -- leaks wire traffic about dying-world actors that the
-// receiving peer then applies. Armed on the HOST with VOTVCOOP_WIRE_CENSUS=1, it logs every
-// inbound reliable individually plus per-second aggregated stream counts, each line stamped with
+// receiving peer then applies. Armed on the HOST with wire_census=1, it logs every inbound
+// reliable individually plus per-second aggregated stream counts, each line stamped with
 // GetTickCount64(). That stamp is machine-global, so on one test machine the census lines up
-// exactly against the quitting client's own transition marker in the other log.
+// exactly against the quitting client's own transition marker in the other log. Each second's
+// flush opens with a bare `wire_census: tick=<t>` line, printed whether or not a counter moved,
+// so a reader can wait for the census to pass a tick.
 //
 // All entry points are NET-THREAD only (Session::HandleMessage and the NetThread loop); state is
 // plain statics on that single thread.
@@ -15,7 +17,7 @@
 
 namespace coop::dev::wire_census {
 
-// Latched read of VOTVCOOP_WIRE_CENSUS=1 (first call latches).
+// Latched read of the wire_census row (first call latches).
 bool Enabled();
 
 // Per-second flush of the aggregated stream counters, called from the NetThread
