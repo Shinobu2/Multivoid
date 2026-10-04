@@ -97,9 +97,10 @@ bool Tick(coop::net::Session& session) {
         coop::prop_element_tracker::SetReaperInGameplayWorld(inGameplayWorld);
         // The one case this reader is worse than the walk: an unresolvable world is Unknown, not
         // Gameplay, so five things stop (the purge reap, the world-change re-seed, the steady
-        // re-seed and with it SeedGeneration, and the quit-to-menu flee). Treating Unknown as
-        // gameplay would resume the reap at the menu; leaving it keeps the session running at the
-        // menu, the same balloon by another route, but cannot re-seed on the menu's actors. After a
+        // re-seed and with it SeedGeneration, and the reaper's flee for a menu arrival that did not
+        // pass the quit decision). Treating Unknown as gameplay would resume the reap at the menu;
+        // leaving it keeps such a peer's session running at the menu, the same balloon by another
+        // route, but cannot re-seed on the menu's actors. After a
         // recook the mod needs a port either way; what it must not do is degrade quietly, so a
         // sustained Unknown alarms. Keyed on the symptom, not on Degraded(): a failed class resolve
         // leaves that flag false while the world resolves to null forever. sEverKnown keeps a slow
@@ -117,8 +118,9 @@ bool Tick(coop::net::Session& session) {
                         "(world_identity degraded=%d). While it stays that way FIVE things are "
                         "off: the dead-Prop-Element reap, the world-change re-seed, the steady "
                         "re-seed (so SeedGeneration is FROZEN and deferred joiners never wake), "
-                        "and the quit-to-menu flee -- so a peer that leaves to the menu keeps its "
-                        "session, and prop tracking breaks silently after ~7 world transitions "
+                        "and the reaper's flee for a menu arrival that did not pass the quit "
+                        "decision -- such a peer keeps its session, and prop tracking breaks "
+                        "silently after ~7 world transitions "
                         "(the 16384 caps). This is a version-surface break: see the world_identity "
                         "resolution line and docs/versioning.md.",
                         kUnknownScansBeforeAlarm * 4,
