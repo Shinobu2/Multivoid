@@ -10,6 +10,7 @@
 #include "coop/commands/command_dispatcher.h"
 
 #include "coop/commands/command_line.h"
+#include "coop/permissions/grants_core.h"
 
 #include <algorithm>
 #include <charconv>
@@ -306,6 +307,12 @@ DispatchResult Dispatch(const Registry& reg, const Caller& caller, std::string_v
 bool RegisterBuiltins(Registry& reg) {
     if (!reg.DeclareNode({kSelectorNode, false, "Use @a and @r in a command's target."}, nullptr))
         return false;
+    // The nodes a machine shows locally (the dev features): declared from the core's table, the
+    // one place that names them.
+    for (const coop::permissions::grants::Entry& entry : coop::permissions::grants::kProjected) {
+        if (!reg.DeclareNode({entry.node, entry.defaultGranted, entry.description}, nullptr))
+            return false;
+    }
     CommandSpec help;
     help.name = "help";
     help.defaultGranted = true;

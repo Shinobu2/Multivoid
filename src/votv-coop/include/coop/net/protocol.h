@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 212;
+inline constexpr uint16_t kProtocolVersion = 213;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -946,6 +946,10 @@ enum class ReliableKind : uint8_t {
     // answer to a line typed while loading still arrives. Late join: none. Trust: only the host sends it; a line
     // from any other slot is dropped. CommandReplyPayload.
     CommandReply = 167,
+
+    // host -> one client, not relayed, the host trusted: this machine's local dev grants
+    // (coop/session/grants_sync); a late joiner gets them at its proof
+    PermissionGrants = 168,
 };
 
 #pragma pack(push, 1)
@@ -2689,6 +2693,15 @@ struct CommandReplyPayload {
 static_assert(sizeof(CommandReplyPayload) == 204, "CommandReplyPayload must be 204 bytes");
 static_assert(sizeof(CommandReplyPayload) <= 256 - 20 - 8,
               "CommandReplyPayload must fit in one reliable datagram");
+
+// PermissionGrantsPayload -- the receiving machine's own local dev grants (PermissionGrants). Host to one
+// client. `count` is the number of projected nodes the host's table holds, `bits` one bit per node in table
+// order (coop/permissions/grants_core.h); a client whose own table has another count refuses the message.
+struct PermissionGrantsPayload {
+    uint8_t  count;
+    uint32_t bits;
+};
+static_assert(sizeof(PermissionGrantsPayload) == 5, "PermissionGrantsPayload must be 5 bytes");
 
 // ChatSpeakerPayload -- WHO the ChatLine that immediately follows is from
 // (ChatSpeaker). Host to client only.

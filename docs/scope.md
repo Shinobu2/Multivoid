@@ -22,6 +22,7 @@ the commit that ships the change.
 | Saves | the joiner boots from the host's world; the host is the only peer that saves | the host |
 | Vehicles | the ATV: a peer that is not driving runs the vehicle's physics natively and is corrected toward the driver's pose; its condition travels; vitals, configuration and the act-as-host intents are in scope and not all built | the driver authors the pose; the host the rest |
 | Sleep, damage and hazards | sleep state, hazard damage, the resulting vitals | the host for shared effects; each peer for its own vitals |
+| Local dev grants | which local dev features (the free camera, the position readout, the overlays, one's own stamina) each client may use | the host decides per player; the client's own dev switch shows them |
 
 ## Not synced
 

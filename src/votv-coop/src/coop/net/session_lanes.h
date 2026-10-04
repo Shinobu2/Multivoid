@@ -325,6 +325,8 @@ inline bool IsPreWorldSendableKind(ReliableKind k) {
     // A server-scope setting is pre-world by design: the joiner's snapshot goes when its slot is
     // ready, and the receiver only fills the config layer's session values, touching no world.
     case ReliableKind::ServerSetting:
+    // The machine's own local dev grants: the receiver fills one atomic word, touching no world.
+    case ReliableKind::PermissionGrants:
     // A command's answer is a private text line; the receiver touches no world.
     case ReliableKind::CommandReply:
     // PropDriveEnd stays gated: it names a prop by eid, which a joiner has only after its world is up,
