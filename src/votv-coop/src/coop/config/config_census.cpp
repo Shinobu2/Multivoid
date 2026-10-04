@@ -21,6 +21,8 @@
 #include "coop/config/config_report.h"
 #include "ue_wrap/core/log.h"
 
+#include <windows.h>
+
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -152,16 +154,25 @@ std::vector<std::string> IniLinesForReport(const std::vector<std::string>& lines
     return out;
 }
 
-bool IniTextForReport(std::string& out) {
+IniReport IniTextForReport(std::string& out) {
+    // A file that is not there is not a fault: the ini is optional, and a report says so.
+    const std::wstring path = internal::LiveIniPath();
+    WIN32_FILE_ATTRIBUTE_DATA attrs{};
+    if (path.empty()) return IniReport::NotPresent;
+    if (!::GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attrs)) {
+        const DWORD err = ::GetLastError();
+        if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) return IniReport::NotPresent;
+    }
     std::vector<std::string> lines;
     IniFault fault = IniFault::None;
-    if (ListLiveIniLines(lines, &fault) != 0) return false;
-    out.clear();
+    if (ListLiveIniLines(lines, &fault) != 0) return IniReport::Unreadable;
+    std::string text;
     for (const std::string& line : IniLinesForReport(lines)) {
-        if (!out.empty()) out += '\n';
-        out += line;
+        if (!text.empty()) text += '\n';
+        text += line;
     }
-    return true;
+    out = std::move(text);
+    return IniReport::Ok;
 }
 
 }  // namespace coop::config

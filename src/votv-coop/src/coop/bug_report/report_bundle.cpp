@@ -329,7 +329,8 @@ Status Build(const Form& form, const Capture& cap) {
 
     RedactContext ctx = ReadThisMachine(cap.selfId, cap.selfKey);
     std::string iniText;
-    bool iniOk = coop::config::IniTextForReport(iniText);
+    const coop::config::IniReport iniRead = coop::config::IniTextForReport(iniText);
+    const bool iniOk = iniRead == coop::config::IniReport::Ok;
     std::vector<Entry> entries = ListEntries();
     if (!entries[0].leftOut.empty())
         return Fail("Could not find the log.", "multivoid.log is " + entries[0].leftOut);
@@ -404,7 +405,8 @@ Status Build(const Form& form, const Capture& cap) {
     Json leftOut = Json::object();
     for (const Entry& e : entries)
         if (!e.leftOut.empty()) leftOut[e.name] = e.leftOut;
-    if (!iniOk) leftOut[kMadeEntries[1]] = "could not be read";
+    if (iniRead == coop::config::IniReport::NotPresent) leftOut[kMadeEntries[1]] = "not present";
+    else if (!iniOk) leftOut[kMadeEntries[1]] = "could not be read";
     meta["left_out"] = leftOut;
     if (!zip.AddMem(kMadeEntries[2], meta.dump(2, ' ', false, Json::error_handler_t::replace)))
         return Fail(kWriteFailed, "adding meta.json to the zip: " + zip.Cause());

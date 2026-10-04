@@ -17,9 +17,12 @@ namespace coop::config {
 // String reader cooks it), every other line is dropped.
 std::vector<std::string> IniLinesForReport(const std::vector<std::string>& lines);
 
+// What reading the live ini for a report found.
+enum class IniReport { Ok, NotPresent, Unreadable };
+
 // The live ini's report form as text: IniLinesForReport of the live ini's lines, joined by '\n'
-// into `out`. False when the ini is absent or cannot be read (`out` untouched). Any thread: it
-// takes the ini's mutex and nothing else.
-bool IniTextForReport(std::string& out);
+// into `out`, Ok. NotPresent when the file does not exist, Unreadable when reading it faulted;
+// `out` is untouched in both. Any thread: it takes the ini's mutex and nothing else.
+IniReport IniTextForReport(std::string& out);
 
 }  // namespace coop::config

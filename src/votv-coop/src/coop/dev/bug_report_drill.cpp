@@ -116,12 +116,22 @@ void Judge(bool host) {
     }
     mz_zip_reader_end(&z);
 
-    for (const char* need : {"report.txt", "meta.json", "multivoid.log", "multivoid.ini"})
+    for (const char* need : {"report.txt", "meta.json", "multivoid.log"})
         if (!Find(items, need)) return Fail(std::string(need) + " is missing");
-    if (Find(items, "report.txt")->body.find(g_happened) == std::string::npos)
-        return Fail("report.txt lacks the form's text");
     const nlohmann::json meta = nlohmann::json::parse(Find(items, "meta.json")->body, nullptr, false);
     if (meta.is_discarded() || !meta.is_object()) return Fail("meta.json does not parse");
+    // An install with no multivoid.ini leaves it out and says so; any other absence is a failure.
+    if (!Find(items, "multivoid.ini")) {
+        bool notPresent = false;
+        const auto left = meta.find("left_out");
+        if (left != meta.end() && left->is_object()) {
+            const auto why = left->find("multivoid.ini");
+            notPresent = why != left->end() && why->is_string() && why->get<std::string>() == "not present";
+        }
+        if (!notPresent) return Fail("multivoid.ini is missing");
+    }
+    if (Find(items, "report.txt")->body.find(g_happened) == std::string::npos)
+        return Fail("report.txt lacks the form's text");
     const std::string role = meta.value("role", std::string());
     if (role != (host ? "host" : "client")) return Fail("meta.json names the role '" + role + "'");
 
