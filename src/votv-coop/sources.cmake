@@ -337,6 +337,9 @@ set(VOTVCOOP_SOURCES
     src/coop/config/config_session.cpp
     src/coop/config/config_selftest.cpp
     src/coop/config/config_review.cpp
+    src/coop/bug_report/report_redact.cpp
+    src/coop/bug_report/report_form.cpp
+    src/coop/bug_report/report_selftest.cpp
     src/coop/element/element.cpp
     src/coop/element/object_scan_hub.cpp
     src/coop/element/element_deleter.cpp

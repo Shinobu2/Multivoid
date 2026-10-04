@@ -8,6 +8,7 @@
 #include "harness/pump.h"
 #include "harness/world_boot.h"
 
+#include "coop/bug_report/report_core.h"
 #include "coop/commands/commands_selftest.h"
 #include "coop/comms/chat_sync.h"
 #include "coop/config/config.h"
@@ -202,6 +203,9 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // And the commands' line splitter, target resolver, registry and dispatcher: a resolver that
     // picks the wrong player kicks the wrong player, and a wrong pick reads as working until then.
     coop::commands::RunSelftest();
+    // And the bug report's redactor, form check and the printed forms it rests on: a redactor that
+    // misses a shape leaves a stranger's address in a file a player sends, and nothing else notices.
+    coop::bug_report::RunSelftest();
     // And the newest-wins latch every received stream keeps: no LAN run reorders a datagram, so the
     // batch that arrives behind one already taken is refused here, on pinned sequences.
     coop::net::stream_slot::RunSelftest();

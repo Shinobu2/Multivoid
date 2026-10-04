@@ -18,10 +18,12 @@
 
 #include "config_internal.h"
 #include "coop/config/config_registry.h"
+#include "coop/config/config_report.h"
 #include "ue_wrap/core/log.h"
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace coop::config {
 namespace {
@@ -128,6 +130,24 @@ void ReportEffectiveConfig() {
                 IniFaultWords(fault));
     else
         UE_LOGI("config: EFFECTIVE end -- %d row(s) configured", configured);
+}
+
+std::vector<std::string> IniLinesForReport(const std::vector<std::string>& lines) {
+    std::vector<std::string> out;
+    for (const std::string& raw : lines) {
+        const std::string line = internal::TrimEdgesStr(raw);
+        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
+        if (line[0] == '[') {
+            out.push_back(line);
+            continue;
+        }
+        std::string key, value;
+        if (!internal::ParseIniKeyValue(line, key, value)) continue;
+        out.push_back(key + "=" +
+                      config_registry::ValueForLog(config_registry::FindRow(key.c_str()),
+                                                   internal::CookIniValue(value, true)));
+    }
+    return out;
 }
 
 }  // namespace coop::config
