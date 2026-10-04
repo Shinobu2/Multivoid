@@ -44,7 +44,8 @@ and sorts the rest, a small gap is concealed by the decoder and a large one rese
 prebuffers about a hundred milliseconds after silence, and a playback callback mixes the slots
 with linear distance attenuation, a vertical fade and a stereo pan
 (`coop/voice/voice_playback`). Whispering halves the radius. The voice range is the host's
-setting (`voice.distance_cm` in the host's multivoid.ini until the settings page); 0 is unlimited,
+setting (`voice.distance_cm`, in centimetres: `/set` or F1's Administration > Server settings,
+or the host's multivoid.ini); 0 is unlimited,
 and a whisper stays local `[?]`. A peer is drawn as talking when a
 frame of theirs decoded within the last quarter second; mute, disabled and whisper are presence
 states relayed on change. A developer flag replaces the microphone with a test tone.
