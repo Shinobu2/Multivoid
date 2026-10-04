@@ -116,9 +116,10 @@ void ApplyRow(uint8_t slot, const std::string& nick, uint32_t custom,
     if (!seeded) coop::chat_bubbles::OnChatLine(slot, text.c_str());
     // The lane's only order observable: a drill cannot read a sort key off a screenshot, and "the
     // lines appeared" is not "they appeared in the order the lobby said them", which is the half a
-    // seed interleaving with live traffic breaks. One line per applied row.
-    UE_LOGI("chat: applied line %u seeded=%d \"%.40s\"", lineSeq, seeded ? 1 : 0,
-            line.c_str());
+    // seed interleaving with live traffic breaks. One line per applied row, carrying no text: a
+    // log is not where a player's chat belongs.
+    UE_LOGI("chat: applied line %u seeded=%d textBytes=%zu", lineSeq, seeded ? 1 : 0,
+            line.size());
 }
 
 void SendSpeaker(coop::net::Session& s, int toSlot, uint16_t speakerId, uint8_t slot,

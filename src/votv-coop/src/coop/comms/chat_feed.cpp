@@ -147,31 +147,36 @@ bool NoRetain() {
 // fade-out tail, the cannot-happen detector. The probe keys on the key, not the birth stamp:
 // two lines promoted in one tick carry the same birth stamp. A retired line is not noted as
 // expired, since it still exists and a legitimate re-push must not read as a resurrection.
+// No feed log line carries a line's text: each names the entry's key and its byte count, and the
+// record keeps the destroyed entry's key so a RESURRECT line pairs with that entry's retire line.
 struct Expired {
-    char     text[64] = {};
-    uint64_t atMs = 0;
+    char               text[64] = {};
+    uint64_t           atMs = 0;
+    unsigned long long key = 0;
 };
 Expired g_expired[8];
 int     g_expiredNext = 0;
 
-void NoteDestroyed(const std::string& text, uint64_t now) {
+void NoteDestroyed(const std::string& text, uint64_t key, uint64_t now) {
     Expired& x = g_expired[g_expiredNext];
     g_expiredNext = (g_expiredNext + 1) % 8;
     std::snprintf(x.text, sizeof(x.text), "%s", text.c_str());
     x.atMs = now;
+    x.key = key;
 }
 
 void ProbeOnPush(const char* via, const Entry& e, size_t linesNow) {
-    UE_LOGI("feed: push via=%s keep=%s nickLen=%u lines=%zu text=\"%.40s\"",
+    UE_LOGI("feed: push via=%s keep=%s nickLen=%u lines=%zu key=%llu textBytes=%zu",
             via, e.keep == Keep::History ? "history" : "transient",
-            static_cast<unsigned>(e.nickLen), linesNow, e.text.c_str());
+            static_cast<unsigned>(e.nickLen), linesNow,
+            static_cast<unsigned long long>(e.key), e.text.size());
     for (const Expired& x : g_expired) {
         if (!x.text[0] || x.atMs == 0) continue;
         if (e.bornMs - x.atMs > 60000) continue;
         if (std::strncmp(x.text, e.text.c_str(), sizeof(x.text) - 1) == 0) {
             UE_LOGW("feed: RESURRECT -- same text re-pushed %.1f s after it was destroyed "
-                    "(via=%s) text=\"%.40s\"",
-                    static_cast<double>(e.bornMs - x.atMs) / 1000.0, via, e.text.c_str());
+                    "(via=%s) key=%llu textBytes=%zu",
+                    static_cast<double>(e.bornMs - x.atMs) / 1000.0, via, x.key, e.text.size());
         }
     }
 }
@@ -246,13 +251,14 @@ private:
     void Retire(const char* via, uint64_t now) {
         Entry& f = live_.front();
         const bool keep = (f.keep == Keep::History) && !NoRetain();
-        UE_LOGI("feed: retire via=%s %s age=%.1fs text=\"%.40s\"", via,
+        UE_LOGI("feed: retire via=%s %s age=%.1fs key=%llu textBytes=%zu", via,
                 keep ? "-> history" : "(destroyed)",
-                static_cast<double>(EffectiveAgeMs(f, now)) / 1000.0, f.text.c_str());
+                static_cast<double>(EffectiveAgeMs(f, now)) / 1000.0,
+                static_cast<unsigned long long>(f.key), f.text.size());
         if (keep) {
             InsertRetained(std::move(f));
         } else {
-            NoteDestroyed(f.text, now);
+            NoteDestroyed(f.text, f.key, now);
         }
         live_.pop_front();
         CapRetained();
@@ -285,7 +291,7 @@ private:
                 UE_LOGW("feed: retained ceiling hit while paged back (%zu > %zu) -- "
                         "evicting the oldest history line", retained_.size(), cap);
             }
-            NoteDestroyed(retained_.front().text, NowMs());
+            NoteDestroyed(retained_.front().text, retained_.front().key, NowMs());
             retained_.pop_front();
             retainedDirty_ = true;
         }
@@ -360,9 +366,8 @@ void Republish(uint64_t now) {
             for (int p = 0; p < g_prevLiveCount; ++p) {
                 if (g_prevLive[p].key == e.key && g_prevLive[p].alpha < 0.5f &&
                     a > g_prevLive[p].alpha + 0.25f) {
-                    UE_LOGW("feed: ALPHA-JUMP -- \"%.40s\" (key=%llu) published alpha %.2f -> %.2f",
-                            g_pub.lines[n].text, static_cast<unsigned long long>(e.key),
-                            g_prevLive[p].alpha, a);
+                    UE_LOGW("feed: ALPHA-JUMP -- (key=%llu) published alpha %.2f -> %.2f",
+                            static_cast<unsigned long long>(e.key), g_prevLive[p].alpha, a);
                 }
             }
         }
