@@ -7,6 +7,7 @@
 // clear the in-flight flag, so a Request that sees the flag clear sees the final status.
 
 #include "coop/bug_report/report_bundle.h"
+#include "report_stream.h"
 
 #include "coop/config/config_report.h"
 #include "coop/net/peer_identity.h"
@@ -32,6 +33,7 @@
 #include <ctime>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <system_error>
 #include <thread>

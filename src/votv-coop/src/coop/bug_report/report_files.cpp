@@ -2,6 +2,7 @@
 // ReadThisMachine and the chunked line reader. See coop/bug_report/report_bundle.h.
 
 #include "coop/bug_report/report_bundle.h"
+#include "report_stream.h"
 
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/paths.h"

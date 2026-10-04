@@ -5,17 +5,17 @@
 // Request is called from any thread; the part that reads game state runs on the game thread, the
 // part that reads, redacts and zips files on ONE detached worker that touches no UObject. Each
 // entry streams in kChunkBytes chunks, twice: a first pass teaches the Redactor every player id,
-// a second applies it line by line into a temporary file that miniz deflates, so memory stays at
-// a chunk and miniz's buffers whatever the log's size.
+// a second applies it line by line into a temporary file that miniz deflates. Memory is a chunk,
+// the longest line (a line is carried whole, so a file with no '\n' is read whole), the
+// Redactor's tables (one entry per distinct id, key and address) and miniz's buffers, whatever
+// the log's size.
 
 #pragma once
 
 #include "coop/bug_report/report_core.h"
 
 #include <cstdint>
-#include <functional>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace coop::bug_report {
@@ -54,30 +54,5 @@ Status GetStatus();
 
 // This machine's folders and the reporter's own ids, as the Redactor takes them. Any thread.
 RedactContext ReadThisMachine(std::string selfPlayerId, std::string selfKey);
-
-// What report_files.cpp gives report_bundle.cpp.
-namespace detail {
-
-struct ReadPlan {
-    bool tailOnly = false;           // the last kUe4ssTailBytes, from the first '\n' inside them
-    bool completeLinesOnly = false;  // a last line with no '\n' is not part of the entry (a live log)
-};
-
-// The bytes of a file one reading covered: pass 1 finds them, pass 2 reads exactly them, so a
-// file that grew between the passes is the same text in both.
-struct Span {
-    uint64_t start = 0, bytes = 0;
-};
-
-using LineFn = std::function<void(std::string_view)>;
-
-// Reads `path` through its own handle (shared with a writer) in kChunkBytes chunks and calls `fn`
-// with each line, its '\n' removed (a CR stays), a line crossing a chunk carried whole. Pass 1
-// (replay false) decides `span`; pass 2 (replay true) reads `span` as it stands. False when the
-// file cannot be opened or read.
-bool StreamLines(const std::wstring& path, const ReadPlan& plan, bool replay, Span& span,
-                 const LineFn& fn);
-
-}  // namespace detail
 
 }  // namespace coop::bug_report
