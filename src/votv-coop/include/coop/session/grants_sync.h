@@ -3,10 +3,11 @@
 // the host's permission model and past an expiry in it; the client stores what it is sent
 // (coop/session/local_grants). The projected table and its rules are coop/permissions/grants_core.h.
 // Precedents for sending a client its own answer: Source replicates sv_cheats, the server owns the
-// value and the client reads its local copy for its local debug features (reference/source-sdk-2013/
-// src/public/tier1/iconvar.h:51,57-62 FCVAR_CHEAT, FCVAR_REPLICATED; src/game/client/view.h:65-90);
-// MTA pushes a per-client switch (reference/mtasa-blue/Client/mods/deathmatch/logic/rpc/
-// COutputRPCs.cpp:21-27 TOGGLE_DEBUGGER). Shapes only.
+// value and the client reads its local copy for its local debug features (FCVAR_CHEAT and
+// FCVAR_REPLICATED, reference/source-sdk-2013/src/public/tier1/iconvar.h:51,57-62; WireFrameMode,
+// reference/source-sdk-2013/src/game/client/view.h:65-90); MTA pushes a per-client switch
+// (TOGGLE_DEBUGGER, reference/mtasa-blue/Client/mods/deathmatch/logic/rpc/COutputRPCs.cpp:21-27).
+// Shapes only.
 #pragma once
 
 #include "coop/net/session.h"
