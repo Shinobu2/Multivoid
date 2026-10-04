@@ -133,12 +133,13 @@ enum RowFlag : unsigned {
     kRowLive = 1u << 2,
 };
 
-// The wire's two limits for a replicated row, the registry's facts so that this file needs no
-// other header.
-// A replicated row's key, at most (bytes).
+// The limits of a replicated row, the registry's facts so that this file needs no other header.
+// A replicated row's key, at most (bytes): the wire's own key limit.
 inline constexpr size_t kServerSettingKeyMax = 24;
-// A replicated row's value, at most (bytes).
-inline constexpr size_t kServerSettingTextMax = 200;
+// A replicated row's value, at most (bytes): what a `/set <key> <value>` line can carry after the
+// word, the key and the space (command_sync.cpp pins the sum), which is less than the wire's value
+// limit; the smaller bound rules.
+inline constexpr size_t kServerSettingTextMax = 174;
 
 // The flags of `row` (a pointer into the row table; null or any other pointer: 0), and the
 // questions asked of them. Reads of one constexpr array, no walk.

@@ -69,6 +69,11 @@ constexpr uint64_t kSayEveryMs = 10000;
 constexpr size_t kLogWordMax = 32;
 // The longest line a request carries, and so the longest line a peer may type.
 constexpr size_t kLineMax = sizeof(coop::net::CommandRequestPayload::text);
+// A `/set <key> <value>` line must be able to carry the longest value a replicated row may hold:
+// the registry's value limit is this line less "set ", the longest key and one space.
+static_assert(coop::config_registry::kServerSettingTextMax ==
+                  kLineMax - (sizeof("set ") - 1) - coop::config_registry::kServerSettingKeyMax - 1,
+              "a replicated row's value limit must equal what a /set line carries after its key");
 
 coop::net::IntentBucket g_bucket[kMaxPeers];
 uint64_t g_nextSayMs[kMaxPeers] = {};

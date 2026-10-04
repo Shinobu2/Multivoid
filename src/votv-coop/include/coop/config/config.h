@@ -45,8 +45,8 @@ bool EnsureIniSkeleton();
 bool WriteIniValue(const config_registry::IdentityRow& row, const char* value);
 
 // What SetValue did. Refused: the value is one the reader would refuse, the call came from
-// inside a subscriber, or a replicated row's value is longer than the wire carries
-// (kServerSettingTextMax bytes); nothing changed. HeldNotSaved: held for this run, but the ini
+// inside a subscriber, or a replicated row's value is longer than
+// kServerSettingTextMax bytes; nothing changed. HeldNotSaved: held for this run, but the ini
 // could not be written. Saved: held and written.
 enum class SetResult : unsigned char { Refused, HeldNotSaved, Saved };
 

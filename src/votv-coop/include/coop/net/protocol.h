@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 211;
+inline constexpr uint16_t kProtocolVersion = 212;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -1984,8 +1984,8 @@ static_assert(sizeof(DeskPingVerdictPayload) <= 228, "DeskPingVerdictPayload mus
 
 // A server-scope setting's session value (ServerSetting): the row's key, then its value as text,
 // `keyLen + valueLen` bytes of `text`, no terminator, sent as `2 + keyLen + valueLen` bytes. The two
-// limits repeat config_registry::kServerSettingKeyMax and kServerSettingTextMax, which this catalog
-// cannot include; the sender's file asserts that they agree.
+// limits mirror config_registry::kServerSettingKeyMax (equal) and kServerSettingTextMax (the
+// registry's is at most this one), which this catalog cannot include; the sender's file asserts it.
 inline constexpr uint8_t kServerSettingKeyMax  = 24;
 inline constexpr uint8_t kServerSettingTextMax = 200;
 struct ServerSettingPayload {

@@ -146,7 +146,7 @@ SetResult SetValueAt(const std::wstring& iniPath, const Row* row, const char* va
         return SetResult::Refused;
     }
     if (config_registry::IsReplicated(row) && v.size() > config_registry::kServerSettingTextMax) {
-        UE_LOGW("config: SET %s REFUSED -- longer than the wire carries (%zu bytes)", row->key,
+        UE_LOGW("config: SET %s REFUSED -- longer than a server setting may be (%zu bytes)", row->key,
                 config_registry::kServerSettingTextMax);
         return SetResult::Refused;
     }

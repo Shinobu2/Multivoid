@@ -25,10 +25,12 @@ using coop::net::ServerSettingPayload;
 using coop::net::Session;
 
 // The protocol catalog includes nothing of the config, so the wire's two limits are stated in both
-// and tied here.
-static_assert(reg::kServerSettingTextMax == net::kServerSettingTextMax &&
+// and tied here. The key limit is the wire's own. The registry's value limit is the smaller: a
+// `/set` line bounds it (command_sync.cpp), so the wire never carries more than the registry lets
+// a row hold.
+static_assert(reg::kServerSettingTextMax <= net::kServerSettingTextMax &&
                   reg::kServerSettingKeyMax == net::kServerSettingKeyMax,
-              "the registry's and the wire's bounds for a replicated row must agree");
+              "a replicated row's value must fit the wire, and the two key limits must agree");
 
 namespace {
 
