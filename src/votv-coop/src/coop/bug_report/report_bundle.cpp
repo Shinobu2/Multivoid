@@ -3,8 +3,8 @@
 //
 // Thread map: Request, GetStatus and ListEntries run on any thread; the capture closure on the
 // game thread (the role, slot, player count, game mode and ids live there); the worker on its own
-// detached thread, touching no UObject. The order at every worker exit: publish the Status, then
-// clear the in-flight flag, so a Request that sees the flag clear sees the final status.
+// detached thread, touching no UObject. A Building status is the report in flight; the worker's
+// final Publish (Done or Failed) is its release.
 
 #include "coop/bug_report/report_bundle.h"
 #include "report_stream.h"
@@ -26,7 +26,6 @@
 
 #include <windows.h>
 
-#include <atomic>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -46,11 +45,20 @@ using Json = nlohmann::json;
 
 std::mutex g_statusMu;
 Status g_status;
-std::atomic<bool> g_inFlight{false};
 
 void Publish(Status s) {
     std::lock_guard<std::mutex> lk(g_statusMu);
     g_status = std::move(s);
+}
+
+// The check and the claim are one step: a Building status is the report in flight, and the final
+// Publish (Done or Failed) is its release, so a Request that sees a final status is never refused.
+bool ClaimBuilding() {
+    std::lock_guard<std::mutex> lk(g_statusMu);
+    if (g_status.phase == Phase::Building) return false;
+    g_status = Status{};
+    g_status.phase = Phase::Building;
+    return true;
 }
 
 // The Failed status a player sees: the sentence only. `cause` is the internal reason, written
@@ -425,11 +433,10 @@ Status Build(const Form& form, const Capture& cap) {
 
 void FailToStart(const std::string& cause) {
     Publish(Fail("Could not start the report.", cause));
-    g_inFlight.store(false, std::memory_order_release);
 }
 
 // The worker thread's whole body. An exception escaping a detached thread is std::terminate, so
-// nothing leaves it; the flag is cleared outside the inner try, as session_manager's workers do.
+// nothing leaves it, as in session_manager's workers.
 void WorkerMain(const Form& form, const Capture& cap) {
     // A report reads two logs twice and deflates them while the game runs: the game's own threads
     // come first.
@@ -447,21 +454,17 @@ void WorkerMain(const Form& form, const Capture& cap) {
         }
         Publish(std::move(result));
     } catch (...) {
-        // Publish itself failed: the status stays Building and the flag below is all that can be done.
+        // Publish itself failed: all that can be done is to say so; the status stays Building.
         UE_LOGW("bug_report: the final status could not be published; the report stays Building");
     }
-    g_inFlight.store(false, std::memory_order_release);
 }
 
 }  // namespace
 
 bool Request(Form form) {
     if (ValidateForm(form) != nullptr) return false;
-    if (g_inFlight.exchange(true, std::memory_order_acq_rel)) return false;
     try {
-        Status building;
-        building.phase = Phase::Building;
-        Publish(std::move(building));
+        if (!ClaimBuilding()) return false;
         ue_wrap::game_thread::Post([form = std::move(form)]() mutable {
             try {
                 Capture cap = CaptureOnGameThread();
