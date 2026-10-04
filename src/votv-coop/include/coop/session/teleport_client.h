@@ -7,7 +7,8 @@
 // overwrote that placement, since world-ready arrives after the client has already spawned.
 //
 // Direction: HOST -> CLIENT only. The action self-gates on Session::Role::Host and no-ops on a
-// client. It mirrors MTA's `!tphere` chat command as a menu button.
+// client. It mirrors MTA's `!tphere` chat command: /tphere is the command, and the scoreboard's
+// Teleport button submits that line.
 
 #pragma once
 

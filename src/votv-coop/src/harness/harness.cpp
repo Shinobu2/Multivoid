@@ -337,9 +337,9 @@ DWORD WINAPI TimelineThread(LPVOID param) {
                 ::Sleep(100);
             }
             };  // runAutotestTeleport
-            // A client never teleports to a fixed checkpoint: it appears at the host's position,
-            // which the world-ready connect replay sends (net_pump,
-            // teleport_client::ApplyLocally).
+            // A client never teleports to a fixed checkpoint: net_pump places it itself at its
+            // first body of the session (TakeJoinPlacement: the profile's pose, the start point,
+            // or the host's position under join_at_host).
             if (!saveTransferClient) {
                 runAutotestTeleport();
                 session_runtime::StartCoopSession(netCfg);
