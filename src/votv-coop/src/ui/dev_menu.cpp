@@ -502,8 +502,9 @@ void RenderWorldRules() { ui::world_rules_panel::Render(); }
 // ---- the strict nested taxonomy (refined as features land) -------------------
 // Organized by the GAME'S OWN DOMAINS: Player (the person) ; World (the simulation
 // state: rules/weather/clock/economy) ; Content (the game's spawnable/triggerable
-// content: entities + events) ; Network ; Administration ; Cosmetics -- there is no
-// catch-all category, per the folder-concept rule. Network subs are placeholders.
+// content: entities + events) ; Network ; Administration ; Cosmetics ; Report a bug
+// (the bug-report form) -- there is no catch-all category, per the folder-concept
+// rule. Network subs are placeholders.
 const std::vector<Cat>& Tree() {
     static const std::vector<Cat> kTree = {
         { "Player", {
