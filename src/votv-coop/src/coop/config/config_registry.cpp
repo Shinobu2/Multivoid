@@ -1,8 +1,8 @@
 // coop/config/config_registry.cpp -- the declarative per-key row table.
 //
 // See config_registry.h. The row LIST lives in config_registry_rows.inc (ONE
-// list); this TU expands it six times -- index enum, Row table, font-role row
-// indices, row flags, typed handle definitions, font-role handle array -- so
+// list); this TU expands it seven times -- index enum, Row table, font-role row
+// indices, row flags, row labels, typed handle definitions, font-role handle array -- so
 // the artifacts cannot drift. ValidateRows() is the permanent constexpr
 // compile gate on the table's own coherence (arc 3); the flag asserts below
 // the credential list are the same gate for the rows' scope marks.
@@ -46,7 +46,9 @@ enum RowIndex : size_t {
 #define CFG_IDENTITY(ident, key, section, desc) RowIndex_##ident,
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) RowIndex_##ident,
 #define CFG_ROWFLAGS(ident, flags)
+#define CFG_LABEL(ident, text)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_LABEL
 #undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
@@ -79,7 +81,9 @@ constexpr Row kRows[] = {
     Row{key, "ui", Kind::Enum, kNoRange, kNoRange, kFontFamilyTokensJoined, nullptr, false, false, 0, 0.0f, \
         kFontFamilyTokens[defFam], desc},
 #define CFG_ROWFLAGS(ident, flags)
+#define CFG_LABEL(ident, text)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_LABEL
 #undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
@@ -108,7 +112,9 @@ constexpr std::array<unsigned, kRowCountIndex> BuildRowFlags() {
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc)
 #define CFG_ROWFLAGS(ident, flags) \
     a[RowIndex_##ident] = (a[RowIndex_##ident] != 0 ? throw "a row is marked twice" : (flags));
+#define CFG_LABEL(ident, text)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_LABEL
 #undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
@@ -121,6 +127,46 @@ constexpr std::array<unsigned, kRowCountIndex> BuildRowFlags() {
     return a;
 }
 constexpr auto kRowFlags = BuildRowFlags();
+
+// ---- the row labels (CFG_LABEL lines, by row identifier) ----------------------
+// The pairs of a row and its plain-English name, from the CFG_LABEL lines alone. A line naming no
+// row does not compile (RowIndex_<ident>), and a row labelled twice throws in constant evaluation,
+// which is a compile error.
+struct RowLabelEntry {
+    const Row* row;
+    const char* label;
+};
+constexpr RowLabelEntry kRowLabels[] = {
+#define CFG_FLAG(ident, key, section, defB, envVar, desc)
+#define CFG_INT(ident, key, section, defI, lo, hi, envVar, desc)
+#define CFG_FLOAT(ident, key, section, defF, lo, hi, envVar, desc)
+#define CFG_ENUM(ident, key, section, defS, tokens, envVar, desc)
+#define CFG_ENUM_FAILCLOSED(ident, key, section, defS, tokens, envVar, desc)
+#define CFG_STRING(ident, key, section, defS, envVar, seeded, desc)
+#define CFG_IDENTITY(ident, key, section, desc)
+#define CFG_FONTROLE(ident, key, suffix, defFam, desc)
+#define CFG_ROWFLAGS(ident, flags)
+#define CFG_LABEL(ident, text) {&kRows[RowIndex_##ident], text},
+#include "coop/config/config_registry_rows.inc"
+#undef CFG_LABEL
+#undef CFG_ROWFLAGS
+#undef CFG_FLAG
+#undef CFG_INT
+#undef CFG_FLOAT
+#undef CFG_ENUM
+#undef CFG_ENUM_FAILCLOSED
+#undef CFG_STRING
+#undef CFG_IDENTITY
+#undef CFG_FONTROLE
+};
+constexpr size_t kRowLabelCount = sizeof(kRowLabels) / sizeof(kRowLabels[0]);
+constexpr bool RowsLabelledOnce() {
+    for (size_t i = 0; i < kRowLabelCount; ++i)
+        for (size_t j = i + 1; j < kRowLabelCount; ++j)
+            if (kRowLabels[i].row == kRowLabels[j].row) throw "a row is labelled twice";
+    return true;
+}
+static_assert(RowsLabelledOnce(), "a row is labelled twice");
 
 // ---- the constexpr compile gate (arc 3) -------------------------------------
 constexpr bool CEq(const char* a, const char* b) {
@@ -164,7 +210,9 @@ constexpr size_t kFontRoleRowIndex[] = {
 #define CFG_IDENTITY(ident, key, section, desc)
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) RowIndex_##ident,
 #define CFG_ROWFLAGS(ident, flags)
+#define CFG_LABEL(ident, text)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_LABEL
 #undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
@@ -267,7 +315,9 @@ namespace rows {
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) \
     const EnumRow ident{&kRows[RowIndex_##ident], detail::RegistryDef::K()};
 #define CFG_ROWFLAGS(ident, flags)
+#define CFG_LABEL(ident, text)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_LABEL
 #undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
@@ -291,7 +341,9 @@ const EnumRow* const kFontRoleRows[] = {
 #define CFG_IDENTITY(ident, key, section, desc)
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) &rows::ident,
 #define CFG_ROWFLAGS(ident, flags)
+#define CFG_LABEL(ident, text)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_LABEL
 #undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
@@ -426,6 +478,14 @@ unsigned RowFlags(const Row* row) {
 bool IsServerScope(const Row* row) { return (RowFlags(row) & kRowServer) != 0; }
 
 bool IsReplicated(const Row* row) { return (RowFlags(row) & kRowReplicated) != 0; }
+
+bool IsLive(const Row* row) { return (RowFlags(row) & kRowLive) != 0; }
+
+const char* RowLabel(const Row* row) {
+    for (const RowLabelEntry& e : kRowLabels)
+        if (e.row == row) return e.label;
+    return nullptr;
+}
 
 bool IsKnownKey(const char* key) {
     // Since arc 3 the ui.font.<role> family are REAL rows -- one lookup.

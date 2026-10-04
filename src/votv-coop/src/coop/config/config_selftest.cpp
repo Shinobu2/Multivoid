@@ -260,6 +260,27 @@ int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)()) {
                    !SelftestReadValue(scratch, P.row->key).found &&
                    g_subscriberCalls.load() == 4);
     }
+    // 10 and 11: a label and the live mark are read from the row list; the probe row is a dev row
+    // that has neither.
+    expect("label of a labelled row",
+           reg::RowLabel(reg::rows::voice_distance_cm.row) != nullptr &&
+               std::string(reg::RowLabel(reg::rows::voice_distance_cm.row)) == "Voice range");
+    expect("no label on a dev row", reg::RowLabel(P.row) == nullptr);
+    expect("live mark", reg::IsLive(reg::rows::voice_distance_cm.row) && !reg::IsLive(P.row));
+    // 12: a by-name setter refuses a null row, a pointer outside the table and a local row before it
+    // writes anything. The Saved path is not here: a server row's set changes live state.
+    {
+        const reg::Row stray{};
+        const bool refused =
+            SetServerRow(nullptr, "1") == SetResult::Refused &&
+            ResetServerRow(nullptr) == SetResult::Refused &&
+            SetServerRow(&stray, "1") == SetResult::Refused &&
+            ResetServerRow(&stray) == SetResult::Refused &&
+            SetServerRow(P.row, "1") == SetResult::Refused &&
+            ResetServerRow(P.row) == SetResult::Refused;
+        expect("by-name setters refuse a row that is not server-scope",
+               refused && !SelftestReadLiveValue(P.row->key).found && ResolveInt(P) == 3);
+    }
 
     ::SetEnvironmentVariableA(kEnv, (oldLen > 0 && oldLen < sizeof(old)) ? old : nullptr);
     ::DeleteFileW(scratch.c_str());

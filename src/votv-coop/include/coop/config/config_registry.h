@@ -90,10 +90,10 @@ const Row* Rows(size_t& count);
 
 // The first row whose key equals `key` case-insensitively, or null. For the schema's own
 // machinery only (the unknown-key sweep, the writer and the panel classify keys discovered
-// in the file, inherently by string), and for the one receiver of a row named on the wire by
-// its key, as Source finds a cvar by name (one walk per received message, which is a
-// person's act: cold). Its result feeds no read API, since typed handles cannot be built
-// from it outside the registry TU.
+// in the file, inherently by string), for the one receiver of a row named on the wire by
+// its key, and for a server setting a person names (`/set`), as Source finds a cvar by name
+// (one walk per received message or typed command, which is a person's act: cold). Its result
+// feeds no read API, since typed handles cannot be built from it outside the registry TU.
 const Row* FindRow(const char* key);
 
 // True if `key` is a registry key (case-insensitive). The unknown-key report is the
@@ -119,14 +119,18 @@ const char* RetiredKeyNote(const char* key);
 bool IsCredentialKey(const char* key);
 const char* const* CredentialKeys(size_t& count);
 
-// A row's scope, declared with the row by CFG_ROWFLAGS in the row list: kRowServer = it belongs to
-// the server being hosted; kRowReplicated = its session value is sent to every client (Source's
-// FCVAR_REPLICATED, iconvar.h:55-62); replicated implies server. A replicated row is never a
-// credential, and its key and its default fit the wire (static_asserts in config_registry.cpp);
-// a value longer than kServerSettingTextMax is refused by SetValue at run time.
+// A row's scope and whether its readers follow a set, declared with the row by CFG_ROWFLAGS in the
+// row list: kRowServer = it belongs to the server being hosted; kRowReplicated = its session value
+// is sent to every client (Source's FCVAR_REPLICATED, iconvar.h:55-62); replicated implies server.
+// A replicated row is never a credential, and its key and its default fit the wire (static_asserts
+// in config_registry.cpp); a value longer than kServerSettingTextMax is refused by SetValue at run
+// time. kRowLive = every reader of the row follows a set (subscribed, or re-resolving at each use):
+// a pane draws it without "Takes effect at the next session" (a server row) or "... next launch"
+// (a local row).
 enum RowFlag : unsigned {
     kRowServer = 1u << 0,
     kRowReplicated = 1u << 1,
+    kRowLive = 1u << 2,
 };
 
 // The wire's two limits for a replicated row, the registry's facts so that this file needs no
@@ -136,11 +140,18 @@ inline constexpr size_t kServerSettingKeyMax = 24;
 // A replicated row's value, at most (bytes).
 inline constexpr size_t kServerSettingTextMax = 200;
 
-// The flags of `row` (a pointer into the row table; null or any other pointer: 0), and the two
+// The flags of `row` (a pointer into the row table; null or any other pointer: 0), and the
 // questions asked of them. Reads of one constexpr array, no walk.
 unsigned RowFlags(const Row* row);
 bool IsServerScope(const Row* row);
 bool IsReplicated(const Row* row);
+bool IsLive(const Row* row);
+
+// A plain-English name for a row a generated pane draws; the row's desc is its tooltip. A row
+// without one is never drawn by a pane. Null for a row with no label, for null, and for any pointer
+// not in the table. Declared with the row by CFG_LABEL in the row list; a walk of a handful of
+// entries, cold.
+const char* RowLabel(const Row* row);
 
 // The typed handles.
 
@@ -202,7 +213,9 @@ namespace rows {
 #define CFG_IDENTITY(ident, key, section, desc) extern const IdentityRow ident;
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) extern const EnumRow ident;
 #define CFG_ROWFLAGS(ident, flags)
+#define CFG_LABEL(ident, text)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_LABEL
 #undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
@@ -243,7 +256,9 @@ inline constexpr int kFontRoleDefaultFamily[] = {
 #define CFG_IDENTITY(ident, key, section, desc)
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) defFam,
 #define CFG_ROWFLAGS(ident, flags)
+#define CFG_LABEL(ident, text)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_LABEL
 #undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT

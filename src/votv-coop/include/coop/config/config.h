@@ -83,6 +83,12 @@ SetResult ResetValue(const config_registry::FloatRow& row);
 SetResult ResetValue(const config_registry::EnumRow& row);
 SetResult ResetValue(const config_registry::StringRow& row);
 
+// A server setting named by a person (Source finds a cvar by its name): exactly SetValue /
+// ResetValue for a row FindRow returned. Refused, with nothing changed, for a null row, a row not
+// in the table, or a row that is not server-scope -- so a local row cannot be set by name.
+SetResult SetServerRow(const config_registry::Row* row, const char* value);
+SetResult ResetServerRow(const config_registry::Row* row);
+
 // Call `onChange` after each SetValue or ResetValue of `row` that was not Refused; it re-resolves
 // what it needs. It runs through the notifier (below): on the game thread in the game. Registering
 // the same (row, function) pair again is a no-op. Any thread. Subscribe before the first read of

@@ -1,17 +1,17 @@
 // coop/config/config_registry_rows.inc -- the one registry row list, X-macro'd:
-// config_registry.h expands it into the typed handle declarations and the font-role defaults,
-// and config_registry.cpp expands it six times (the index enum, the row table, the font-role
-// row indices, the row flags, the handle definitions, the font-role handle array), so every
-// artifact comes from one list with no transcription. The entry forms (ident is the C++ handle
-// name, key the canonical ini spelling, desc the catalog's human text, semantics only, since
-// the allowed tokens, ranges and env twin are generator-emitted from the columns): CFG_FLAG
-// (ident, key, section, default, envVar, desc); CFG_INT and CFG_FLOAT add a range; CFG_ENUM
-// takes the token list, an empty default being the unset sentinel allowed only for the role
-// and ICE rows; CFG_STRING adds the seeded flag; CFG_IDENTITY is minted with no default;
-// CFG_FONTROLE takes the role suffix and the default family index. A default is either the
-// value the code used before the registry or an alias of the one owning constant.
-// CFG_ROWFLAGS(ident, flags) marks the row `ident` with RowFlag bits, by convention directly
-// under it, as Source declares FCVAR_REPLICATED with the cvar (config_registry.h).
+// config_registry.h expands it into the typed handle declarations and the font-role defaults, and
+// config_registry.cpp expands it seven times (index enum, row table, font-role row indices, row
+// flags, row labels, handle definitions, font-role handle array), so every artifact comes from one
+// list with no transcription. The entry forms (ident is the C++ handle name, key the canonical ini
+// spelling, desc the catalog's human text, semantics only, since the allowed tokens, ranges and env
+// twin are generator-emitted from the columns): CFG_FLAG (ident, key, section, default, envVar,
+// desc); CFG_INT and CFG_FLOAT add a range; CFG_ENUM takes the token list, an empty default being
+// the unset sentinel allowed only for the role and ICE rows; CFG_STRING adds the seeded flag;
+// CFG_IDENTITY is minted with no default; CFG_FONTROLE takes the role suffix and the default family
+// index. A default is either the value the code used before the registry or an alias of the one
+// owning constant. CFG_ROWFLAGS(ident, flags) marks the row `ident` with RowFlag bits and
+// CFG_LABEL(ident, "text") gives it a plain-English name for a generated pane (a row without one
+// is never drawn), each directly under the row as Source declares FCVAR_REPLICATED (config_registry.h).
 
 // The [net] section.
 CFG_STRING(net_nick, "net.nick", "net", kMyNameDefault, "VOTVCOOP_NET_NICK", true,
@@ -217,7 +217,8 @@ CFG_FLOAT(voice_distance_cm, "voice.distance_cm", "voice", 4800.0f, 0, 1000000, 
     "Maximum voice audibility distance in centimeters (4800 = 48 m); 0 = unlimited (a whisper "
     "stays local); the host's setting in a session. A value of 1..99 is a near-mute range, the "
     "host's to choose.")
-CFG_ROWFLAGS(voice_distance_cm, kRowServer | kRowReplicated)
+CFG_ROWFLAGS(voice_distance_cm, kRowServer | kRowReplicated | kRowLive)
+CFG_LABEL(voice_distance_cm, "Voice range")
 CFG_INT(voice_jitter_threshold, "voice.jitter_threshold", "voice", 3, 0, 60, nullptr,
     "Jitter buffer: late-packet tolerance in frames before a reset.")
 CFG_INT(voice_prebuffer_frames, "voice.prebuffer_frames", "voice", 5, 0, 60, nullptr,

@@ -255,6 +255,15 @@ SetResult ResetValue(const config_registry::StringRow& row) {
     return internal::ResetValueAt(internal::LiveIniPath(), row.row);
 }
 
+SetResult SetServerRow(const config_registry::Row* row, const char* value) {
+    if (!config_registry::IsServerScope(row)) return SetResult::Refused;
+    return internal::SetValueAt(internal::LiveIniPath(), row, value);
+}
+SetResult ResetServerRow(const config_registry::Row* row) {
+    if (!config_registry::IsServerScope(row)) return SetResult::Refused;
+    return internal::ResetValueAt(internal::LiveIniPath(), row);
+}
+
 void Subscribe(const config_registry::FlagRow& row, void (*onChange)()) {
     AddSubscriber(row.row, onChange);
 }
