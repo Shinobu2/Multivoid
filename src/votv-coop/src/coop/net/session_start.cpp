@@ -14,6 +14,7 @@
 #include "coop/net/master_slots.h"       // an empty relay is the chosen master's
 #include "coop/net/peer_admission.h"
 #include "coop/net/peer_identity.h"
+#include "coop/net/session_serial.h"
 #include "coop/player/nickname_arbiter.h"
 #include "coop/session/player_handshake.h"
 #include "coop/text/case_fold.h"
@@ -173,6 +174,9 @@ bool Session::Start(const Config& cfg, Refusal* why) {
         std::random_device rd;
         do { ownEpoch_ = rd(); } while (ownEpoch_ == 0);
     }
+    // This start's serial, before running_ is set: what the process keeps per session (the local
+    // grants) is stamped with it, and a running session's serial is already current.
+    coop::net::session_serial::Next();
     // The per-slot occupancy generations: a reused Session must not open with slots that look
     // occupied. The counter is not reset, so generations stay unique across cycles and a stale
     // captured token can never alias a fresh occupant.

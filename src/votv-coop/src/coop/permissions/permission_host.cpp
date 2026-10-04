@@ -38,6 +38,8 @@ Model g_model;
 ContextSet g_subject;
 bool g_broken = false;
 std::optional<Checker> g_checker;
+// Counted at each adoption of a published model; Revision() hands it out.
+uint64_t g_revision = 0;
 
 Checker& LiveChecker() {
     if (g_published.exchange(false, std::memory_order_acq_rel)) {
@@ -51,15 +53,29 @@ Checker& LiveChecker() {
             g_subject = std::move(adopted->subject);
             g_broken = adopted->broken;
             g_checker.emplace(g_model);  // its cache belongs to the old model
+            ++g_revision;
         }
     }
     if (!g_checker) g_checker.emplace(g_model);
     return *g_checker;
 }
 
+}  // namespace
+
 int64_t NowSeconds() { return static_cast<int64_t>(::time(nullptr)); }
 
-}  // namespace
+uint64_t Revision() {
+    UE_ASSERT_GAME_THREAD("permission_host::Revision");
+    LiveChecker();  // adopts a pending publish, as the first check would
+    return g_revision;
+}
+
+int64_t NextExpiry(const std::string& playerId) {
+    UE_ASSERT_GAME_THREAD("permission_host::NextExpiry");
+    Checker& checker = LiveChecker();
+    if (g_broken) return 0;  // nothing is loaded, so nothing expires
+    return checker.Get(playerId, g_subject, NowSeconds())->validUntil;
+}
 
 void OnHostStart(const std::wstring& serverDir, std::string serverId) {
     auto fresh = std::make_unique<Published>();

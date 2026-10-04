@@ -12,6 +12,7 @@
 // Nothing here is called outside a running hosted session (the console passes every node there).
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -34,5 +35,18 @@ bool Allows(std::string_view playerId, std::string_view node, bool defaultGrante
 // True when `node` is set on the player or a group it inherits, with value true; a wildcard that
 // implies it does not count (IsSetExplicitly). Always false with a broken store. GAME THREAD.
 bool HoldsExplicitly(std::string_view playerId, std::string_view node);
+
+// The clock the checks use: unix seconds. Any thread.
+int64_t NowSeconds();
+
+// A counter of the live model's replacements: it advances when the game thread adopts a model a host
+// start published (adopting a pending one first, as the first check does), so a changed value means
+// every answer must be asked again. GAME THREAD.
+uint64_t Revision();
+
+// The earliest second at which an answer for `playerId` changes by itself (the resolved chain's
+// validUntil), 0 for none and for a broken store. It resolves the player, which allocates: ask it only
+// while computing the answers, never per tick. GAME THREAD.
+int64_t NextExpiry(const std::string& playerId);
 
 }  // namespace coop::permissions::host

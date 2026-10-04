@@ -370,6 +370,7 @@ set(VOTVCOOP_SOURCES
     src/coop/net/session_trashcarry.cpp
     src/coop/net/session_propdrive.cpp
     src/coop/net/session_start.cpp
+    src/coop/net/session_serial.cpp
     src/coop/net/session_status.cpp
     src/coop/net/session_teardown.cpp
     src/coop/net/link_kind.cpp
@@ -399,6 +400,7 @@ set(VOTVCOOP_SOURCES
     src/coop/session/join_progress.cpp
     src/coop/session/join_seed.cpp
     src/coop/session/server_settings_sync.cpp
+    src/coop/session/local_grants.cpp
     src/coop/session/net_pump.cpp
     src/coop/player/puppet_drive.cpp
     src/coop/props/registry_reaper.cpp

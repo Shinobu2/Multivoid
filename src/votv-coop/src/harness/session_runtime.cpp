@@ -48,6 +48,7 @@
 #include "coop/save/save_transfer.h"
 #include "coop/session/join_beacon.h"
 #include "coop/session/join_progress.h"
+#include "coop/session/local_grants.h"
 #include "coop/session/net_pump.h"
 #include "coop/session/player_handshake.h"
 #include "coop/session/rig_ready.h"
@@ -254,6 +255,7 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     coop::teleport_client::SetSession(&g_session);
     coop::dev::force_weather::SetSession(&g_session);
     coop::dev_gate::SetSession(&g_session);  // the strict CLIENT lockout for every dev feature
+    coop::session::local_grants::Install(&g_session);
     coop::moderation::SetSession(&g_session);
     // The per-player inventory subsystem installs pre-world, here, not through the world-gated
     // subsystems::Install: its receiver buffers the host's pushed blob during the menu-mode
