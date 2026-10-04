@@ -125,10 +125,11 @@ bool Tick(coop::net::Session& session) {
                         ue_wrap::world_identity::Degraded() ? 1 : 0);
             }
         }
-        // The RAM-balloon guard: VOTV's own quit-to-menu travels to the menu without our flee, so
-        // the session stayed running and the whole layer churned at the menu. Once this session has
-        // been in gameplay, a transition to a non-gameplay world (matched positively, so a cave or
-        // a streamed sublevel never trips it) means the local peer left: the session stops and the
+        // The RAM-balloon guard, the fallback for a menu arrival that did not pass the quit decision
+        // (run_end_travel ends the session there, before the travel): a travel to the menu with the
+        // session still running churned the whole layer at the menu. Once this session has been in
+        // gameplay, a transition to a non-gameplay world (matched positively, so a cave or a
+        // streamed sublevel never trips it) means the local peer left: the session stops and the
         // dormancy bypass arms. It rides this 4 s scan, well inside the minute the balloon takes.
         if (inGameplayWorld) {
             g_everInGameplayThisSession = true;
@@ -141,9 +142,11 @@ bool Tick(coop::net::Session& session) {
                     "ending the session + stopping the layer churn (RAM-balloon guard)");
             coop::prop_element_tracker::SetInPurgeEpisode(false);  // left gameplay
             // The full teardown first: skipping the disconnect fan-out left stale weather, time and
-            // sky caches and pending applies armed over the teardown. travel=false: the user's own
-            // menu transition is already in flight, and a second dispatch loaded the menu twice.
-            coop::net_pump::FleeAfterNativeMenuTravel(session);
+            // sky caches and pending applies armed over the teardown. The menu transition is
+            // already in flight here, and a second dispatch loaded the menu twice, so the flee does
+            // not travel. The world is already gone on this route; the decision's route ends the
+            // session while it is still live.
+            coop::net_pump::FleeAfterNativeMenuTravel(session, "left gameplay to the menu (native quit)");
             return true;
         }
         // Positive Other here too: a gate that ends something may not fire on Unknown. Inside an
