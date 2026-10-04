@@ -166,7 +166,7 @@ void DestroySeamBody(void* self) {
 // call runs on the actor), and the frame's object is merely the caller -- which the birth probe
 // names. Game thread only, the same contract the observer had.
 void OnK2DestroyFunc(void* context, void* srcObj, void* /*result*/) {
-    coop::dev::prop_birth_key_probe::NoteDestroy(context, srcObj);
+    coop::dev::prop_birth_key_probe::NoteDestroy(context, srcObj, LoadSession());
     DestroySeamBody(context);
 }
 

@@ -122,6 +122,11 @@ std::wstring WireToWide(const uint8_t len, const char* data, size_t cap) {
 // dispatching thread; the finish spawn is game-thread only in UE4 (actor construction).
 void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
     if (!GT::IsGameThread()) return;
+    // The probe's birth record comes before the session gates: the menu world's births after a quit
+    // happen with no session, and they are what the pause-quit drill measures.
+    if (coop::dev::prop_birth_key_probe::IsEnabled() && result && R::IsLive(result) &&
+        ue_wrap::prop::IsDescendantOfProp(result))
+        coop::dev::prop_birth_key_probe::NoteBirth(result);
     auto* s = LoadSession();
     if (!s || !s->connected()) return;
     if (s->role() != coop::net::Role::Client) return;      // host places broadcast via host_spawn_watcher

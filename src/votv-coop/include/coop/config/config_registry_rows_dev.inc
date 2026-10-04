@@ -551,9 +551,11 @@ CFG_FLAG(rehost_rejoin, "rehost_rejoin", "dev", false, "VOTVCOOP_REHOST_REJOIN",
     "deleted and net.peer:net.port dialed through the direct connect, once per file. The rig's "
     "host-restart arm drops it when the relaunched host is up.")
 CFG_FLAG(prop_birth_key_probe, "prop_birth_key_probe", "dev", false, "VOTVCOOP_PROP_BIRTH_KEY_PROBE",
-    "Diagnostic probe (CLIENT): the place/birth seam -- how many drain ticks the save Key takes to "
-    "restore after a spawn, and which of the seven drain exits each pending spawn leaves by. Set it "
-    "on the CLIENT; the host places through a different path.")
+    "Diagnostic probe (both roles): the place/birth seam -- how many drain ticks the save Key takes "
+    "to restore after a spawn, and which of the seven drain exits each pending spawn leaves by; and "
+    "every keyed prop it saw born that a script then destroys, with the session's state at the "
+    "destroy, even with no session. The drain exits are the client's; the host places through a "
+    "different path.")
 CFG_FLAG(spawn_match_probe, "spawn_match_probe", "dev", false, nullptr,
     "Diagnostic probe: the OnSpawn fuzzy-match candidate set -- every same-class prop inside the "
     "30 cm radius with its slot, distance, own key and mirror binding, plus a watch that reports a "
