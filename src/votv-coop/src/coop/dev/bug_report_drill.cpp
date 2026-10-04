@@ -160,7 +160,12 @@ void Judge(bool host) {
 }  // namespace
 
 void Tick(coop::net::Session* session) {
-    if (ModeNow() == Mode::Off || !session || !session->running()) return;
+    if (ModeNow() == Mode::Off) return;
+    if (!session || !session->running()) {
+        // A session that ended re-arms the host's pairing edge for the next one.
+        g_wasPaired = false;
+        return;
+    }
     const bool host = session->role() == coop::net::Role::Host;
     bool paired = true;
     if (host) {
