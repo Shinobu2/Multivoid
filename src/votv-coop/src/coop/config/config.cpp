@@ -529,7 +529,7 @@ std::string ReadPlayerSkin() {
     if (!coop::skins::IsValidSkinName(skin)) {
         skin = coop::skins::PickRandomStarterSkin();
         const std::string shownSkin =
-            config_registry::ValueForLog(config_registry::rows::player_skin.row, skin);
+            config_registry::ValueForLog(config_registry::FindRow("player_skin"), skin);
         if (st == IniScan::Unreadable) {
             g_identityNotDurable.store(true, std::memory_order_relaxed);
             UE_LOGW("config: player_skin unreadable (multivoid.ini %s) -> '%s' "
