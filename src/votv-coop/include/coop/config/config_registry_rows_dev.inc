@@ -155,6 +155,10 @@ CFG_FLAG(chat_no_retain, "chat_no_retain", "dev", false, "VOTVCOOP_CHAT_NO_RETAI
     "Developer: never keep a chat line in history (the chat drill's history red).")
 CFG_FLAG(chat_seed_suppress, "chat_seed_suppress", "dev", false, "VOTVCOOP_CHAT_SEED_SUPPRESS",
     "Developer: send a joiner no chat history (the seed red).")
+CFG_ENUM(pause_quit_drill, "pause_quit_drill", "dev", "off", "off|client|host",
+    "VOTVCOOP_PAUSE_QUIT_DRILL",
+    "Developer: the named peer opens the pause menu and presses Main menu, as a player does, once it "
+    "is in the session; prints [PAUSE-QUIT] lines.")
 CFG_FLAG(quit_decision_red, "quit_decision_red", "dev", false, "VOTVCOOP_QUIT_DECISION_RED",
     "Developer: the quit decision does NOT end the session (the pause-quit drill's red: the menu "
     "world's destroys go out).")
