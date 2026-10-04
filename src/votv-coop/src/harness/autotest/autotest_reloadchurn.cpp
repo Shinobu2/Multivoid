@@ -348,7 +348,7 @@ void RunProbe() {
         return;
     }
 
-    const std::string arm = rejoin ? ("REJOIN -> " + addr)
+    const std::string arm = rejoin ? ("REJOIN -> " + ue_wrap::log::Addr(addr))
                                    : (slot.empty() ? std::string("SOLO <fresh new game>")
                                                    : ("SOLO save '" + slot + "'"));
     UE_LOGI("reloadchurn: === RE-LOAD CHURN probe START (cycles=%d dwell=%ds menu=%ds arm=%s) ===",

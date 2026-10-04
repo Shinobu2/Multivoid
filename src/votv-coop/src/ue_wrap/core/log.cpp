@@ -11,7 +11,9 @@
 #include <string>
 #include <ctime>
 #include <locale.h>
+#include <memory>
 #include <mutex>
+#include <new>
 #include <share.h>
 
 namespace ue_wrap::log {
@@ -167,7 +169,9 @@ void Write(Level level, const char* fmt, ...) {
     // format; a longer one is measured and formatted whole into `whole`, so a long line is never
     // cut and its address mark is never split.
     char msg[1024];
-    std::string whole;
+    // Write never throws, so the whole-line buffer is a nothrow allocation: a refusal leaves
+    // `whole` empty and the line takes the stack buffer and the trim.
+    std::unique_ptr<char[]> whole;
     // Not a full zero-initialisation: that clears a kilobyte on every log line. One byte is all
     // the failure paths below need, and without it the first byte and the length scan read
     // uninitialised stack whenever the formatter returns without writing.
@@ -195,22 +199,19 @@ void Write(Level level, const char* fmt, ...) {
             // keeps as it was.
             const int need = ::_vscprintf_l(fmt, loc, measure);
             if (need >= 0) {
-                std::string big(static_cast<size_t>(need) + 1, '\0');
+                const size_t size = static_cast<size_t>(need) + 1;
+                whole.reset(new (std::nothrow) char[size]);
 #pragma warning(suppress : 4996)
-                if (::_vsnprintf_l(&big[0], big.size(), fmt, loc, again) >= 0) {
-                    big.resize(static_cast<size_t>(need));
-                    whole.swap(big);
-                }
+                if (whole && ::_vsnprintf_l(whole.get(), size, fmt, loc, again) < 0) whole.reset();
+                if (whole) whole[need] = '\0';
             }
         }
     } else {
         wrote = std::vsnprintf(msg, sizeof(msg), fmt, args);
         if (wrote >= static_cast<int>(sizeof(msg))) {
-            std::string big(static_cast<size_t>(wrote) + 1, '\0');
-            if (std::vsnprintf(&big[0], big.size(), fmt, again) >= 0) {
-                big.resize(static_cast<size_t>(wrote));
-                whole.swap(big);
-            }
+            const size_t size = static_cast<size_t>(wrote) + 1;
+            whole.reset(new (std::nothrow) char[size]);
+            if (whole && std::vsnprintf(whole.get(), size, fmt, again) < 0) whole.reset();
         }
     }
     msg[sizeof(msg) - 1] = '\0';
@@ -220,11 +221,11 @@ void Write(Level level, const char* fmt, ...) {
     // A line must never disappear because of its arguments: a conversion failure can leave the
     // buffer empty, and an empty message is indistinguishable from a bug that never logged. Fall
     // back to the format string, which names the site, the half worth keeping.
-    if (!whole.empty()) {
+    if (whole) {
         // Formatted whole above: nothing to trim.
     } else if (wrote < 0 && msg[0] == '\0') {
         std::snprintf(msg, sizeof(msg), "%s [args unformattable]", fmt);
-    } else if (wrote < 0) {
+    } else if (wrote < 0 || wrote >= static_cast<int>(sizeof(msg))) {
         // Stopped mid-string (a conversion the formatter could not finish, or a line the heap
         // format above could not take). Drop a trailing UTF-8 sequence only if it is incomplete:
         // walking back past continuations and dropping the lead loses a whole valid character
@@ -243,7 +244,7 @@ void Write(Level level, const char* fmt, ...) {
         }
         msg[n] = '\0';
     }
-    const char* const line = whole.empty() ? msg : whole.c_str();
+    const char* const line = whole ? whole.get() : msg;
 
     char ts[32] = {};
     {

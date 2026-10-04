@@ -131,7 +131,8 @@ void ReportEffectiveConfig() {
 }
 
 // Section headers and `key=value` lines only: a comment is free text, so a line starting with `;`
-// or `#`, a note, and a line with an empty key are dropped. Each value is its printed form, so a
+// or `#`, a note, and a line with an empty key are dropped. A header is kept through its closing
+// `]` and nothing after it (an unclosed one is dropped). Each value is its printed form, so a
 // credential is `<set>`, an address is marked and an unknown key's value is `<not shown>`.
 std::vector<std::string> IniLinesForReport(const std::vector<std::string>& lines) {
     std::vector<std::string> out;
@@ -139,7 +140,8 @@ std::vector<std::string> IniLinesForReport(const std::vector<std::string>& lines
         const std::string line = internal::TrimEdgesStr(raw);
         if (line.empty() || line[0] == ';' || line[0] == '#') continue;
         if (line[0] == '[') {
-            out.push_back(line);
+            const size_t close = line.find(']');
+            if (close != std::string::npos) out.push_back(line.substr(0, close + 1));
             continue;
         }
         std::string key, value;

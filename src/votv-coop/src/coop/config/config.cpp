@@ -528,17 +528,19 @@ std::string ReadPlayerSkin() {
     std::string skin = ReadLiveIniWithScan("player_skin", st, fault);
     if (!coop::skins::IsValidSkinName(skin)) {
         skin = coop::skins::PickRandomStarterSkin();
+        const std::string shownSkin =
+            config_registry::ValueForLog(config_registry::rows::player_skin.row, skin);
         if (st == IniScan::Unreadable) {
             g_identityNotDurable.store(true, std::memory_order_relaxed);
             UE_LOGW("config: player_skin unreadable (multivoid.ini %s) -> '%s' "
                     "SESSION-ONLY; mint gate refuses to write over an unreadable ini",
-                    IniFaultWords(fault), skin.c_str());
+                    IniFaultWords(fault), shownSkin.c_str());
         } else {
             // The log says whether the persist happened; on a locked file it does not.
             const bool persisted = WriteIniValue(config_registry::rows::player_skin, skin.c_str());
             if (!persisted) g_identityNotDurable.store(true, std::memory_order_relaxed);
             UE_LOGI("config: player_skin absent/invalid -> random starter '%s' (%s)",
-                    skin.c_str(),
+                    shownSkin.c_str(),
                     persisted ? "persisted to multivoid.ini" : "SESSION-ONLY -- ini write failed");
         }
     }
