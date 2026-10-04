@@ -427,6 +427,11 @@ constexpr bool ReplicatedImpliesServer() {
         if ((kRowFlags[i] & kRowReplicated) && !(kRowFlags[i] & kRowServer)) return false;
     return true;
 }
+constexpr bool NoLabelledIdentity() {
+    for (size_t i = 0; i < kRowLabelCount; ++i)
+        if (kRowLabels[i].row->kind == Kind::Identity) return false;
+    return true;
+}
 constexpr bool NoReplicatedCredential() {
     for (size_t i = 0; i < kRowCount; ++i) {
         if (!(kRowFlags[i] & kRowReplicated)) continue;
@@ -450,6 +455,7 @@ constexpr bool ReplicatedDefaultsFitTheWire() {
 }
 }  // namespace
 static_assert(ReplicatedImpliesServer(), "a kRowReplicated row must also be kRowServer");
+static_assert(NoLabelledIdentity(), "a labelled row must not be Kind::Identity: a pane has no drawer for it");
 static_assert(NoReplicatedCredential(), "a credential row must never be kRowReplicated");
 static_assert(ReplicatedKeysFitTheWire(),
               "a kRowReplicated row's key is longer than kServerSettingKeyMax");

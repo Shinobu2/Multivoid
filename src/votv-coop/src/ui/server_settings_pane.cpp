@@ -6,7 +6,11 @@
 //
 // The pane keeps, per row, the last value text it saw and the text of its input box. When the
 // row's value moves (a command's own reply, an ini edit, a session start) the box is brought to
-// it, unless the person is typing in it: their text stays until they apply or leave.
+// it, unless the person is typing in it: their text stays until they apply or leave. The box
+// counts as typed in only if the row was drawn on the previous frame, so a pane closed while a
+// box was active starts unfocused on reopen. A number or string row also draws its current value
+// as text beside the box, so an edit the server refused or the person abandoned is never mistaken
+// for the value in force.
 
 #include "ui/server_settings_pane.h"
 
@@ -39,6 +43,7 @@ struct RowState {
     std::string seen;           // the last EffectiveText this pane saw
     char edit[kEditMax] = {};   // the number or string box's text
     bool focused = false;       // the box was being typed in when last drawn
+    int lastFrame = -1;         // the ImGui frame this row was last drawn on
     bool primed = false;        // `seen` and `edit` hold the row's value at least once
 };
 std::unordered_map<const CR::Row*, RowState> g_state;
@@ -85,12 +90,14 @@ void DrawFlag(const CR::Row& row, const std::string& now) {
 }
 
 // A number or a free string: a box and an Apply button.
-void DrawTyped(const CR::Row& row, RowState& st) {
+void DrawTyped(const CR::Row& row, RowState& st, const std::string& now) {
     ImGui::SetNextItemWidth(S(180.0f));
     ImGui::InputText("##value", st.edit, sizeof(st.edit));
     st.focused = ImGui::IsItemActive();
     ImGui::SameLine();
     if (ImGui::SmallButton("Apply")) SubmitLine(std::string("set ") + row.key + " " + st.edit);
+    ImGui::SameLine();
+    ImGui::Text("now: %s", now.c_str());
 }
 
 // An enum: a combo of the row's tokens, the one equal to the cooked current value selected.
@@ -116,6 +123,9 @@ void DrawEnum(const CR::Row& row, const std::string& now) {
 void DrawRow(const CR::Row& row, const char* label) {
     ImGui::PushID(&row);
     RowState& st = g_state[&row];
+    const int frame = ImGui::GetFrameCount();
+    if (st.lastFrame != frame - 1) st.focused = false;
+    st.lastFrame = frame;
     const std::string now = CFG::EffectiveText(row);
     Sync(st, now);
 
@@ -135,9 +145,8 @@ void DrawRow(const CR::Row& row, const char* label) {
         case CR::Kind::Flag: DrawFlag(row, now); break;
         case CR::Kind::Int:
         case CR::Kind::Float:
-        case CR::Kind::String: DrawTyped(row, st); break;
+        case CR::Kind::String: DrawTyped(row, st, now); break;
         case CR::Kind::Enum: DrawEnum(row, now); break;
-        case CR::Kind::Identity: break;
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("Reset")) SubmitLine(std::string("reset ") + row.key);
@@ -157,7 +166,6 @@ void Render() {
         const char* label = CR::RowLabel(row);
         // A credential is changed in its own screen, never here or by a command.
         if (!CR::IsServerScope(row) || label == nullptr || CR::IsCredentialKey(row->key)) continue;
-        if (row->kind == CR::Kind::Identity) continue;
         DrawRow(*row, label);
         ++drawn;
     }
