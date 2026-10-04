@@ -1,6 +1,7 @@
 #include "coop/comms/chat_feed.h"
 
 #include "coop/config/config.h"
+#include "coop/config/config_registry.h"
 #include "coop/text/utf8_codec.h"
 
 #include "ue_wrap/core/hot_path_guard.h"
@@ -133,7 +134,7 @@ uint64_t WireKey(uint32_t lineSeq) { return static_cast<uint64_t>(lineSeq) << 32
 // working passes by construction; with this set, a retire drops instead of retaining, so the
 // drill must go red.
 bool NoRetain() {
-    static const bool v = coop::config::ReadEnv("VOTVCOOP_CHAT_NO_RETAIN") == "1";
+    static const bool v = coop::config::ResolveFlag(::coop::config_registry::rows::chat_no_retain);
     return v;
 }
 

@@ -11,6 +11,7 @@
 #include "coop/comms/chat_log.h"
 #include "coop/comms/chat_nick_color.h"
 #include "coop/config/config.h"
+#include "coop/config/config_registry.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/session/player_handshake.h"
@@ -427,7 +428,7 @@ void QueueConnectBroadcastForSlot(int slot) {
     // The dev injection, the must-fail control for the join seed: the slot is opened for live
     // traffic but the history is never sent, precisely the empty-history-with-no-error failure the
     // contiguous range was introduced to prevent.
-    if (coop::config::ReadEnv("VOTVCOOP_CHAT_SEED_SUPPRESS") == "1") {
+    if (coop::config::ResolveFlag(::coop::config_registry::rows::chat_seed_suppress)) {
         UE_LOGW("chat: [dev] connect-seed SUPPRESSED for slot %d (%d line(s) withheld)",
                 slot, coop::chat_log::Count());
         return;
