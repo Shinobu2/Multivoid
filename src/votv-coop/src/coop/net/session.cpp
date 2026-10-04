@@ -350,6 +350,8 @@ void Session::SampleLinkRates(uint64_t nowMs) {
 }
 
 void Session::NetThread() {
+    // First thing: KickClaimed reads it to tell this thread from the game thread.
+    netThreadId_.store(std::this_thread::get_id());
     const auto sendInterval = std::chrono::milliseconds(
         cfg_.sendHz > 0 ? 1000 / cfg_.sendHz : 33);
     auto nextSend = std::chrono::steady_clock::now();
@@ -374,6 +376,12 @@ void Session::NetThread() {
     size_t   pauseWorstDepth = 0;
 
     while (running_.load()) {
+        // 0a) The slots an off-thread kick queued are freed, and the session's aggregate state is
+        // written, before anything of this pass: this thread is the only one that frees a slot or
+        // writes the aggregate, so a seat and a close never interleave inside a pass.
+        RunPendingFrees();
+        UpdateAggregateState();
+
         // 0) P2P: pump the signaling transport (inbound ICE rendezvous blobs advance the handshake;
         // outbound is flushed), before RunCallbacks so a state advance a signal triggers is
         // dispatched in the same iteration. nullptr for LanDirect; set before this thread spawned
@@ -481,7 +489,8 @@ void Session::NetThread() {
                     msgs[i]->Release();
                     continue;
                 }
-                HandleMessage(peerSlot, msgs[i]->m_pData, static_cast<int>(msgs[i]->m_cbSize));
+                HandleMessage(peerSlot, static_cast<uint32_t>(msgs[i]->m_conn), msgs[i]->m_pData,
+                              static_cast<int>(msgs[i]->m_cbSize));
                 msgs[i]->Release();
             }
             drained += n;

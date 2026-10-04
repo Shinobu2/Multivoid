@@ -136,7 +136,7 @@ void Session::HandlePendingMessage(int pendIdx, uint32_t hConn, const void* data
     peer_admission::HostForgetPending(pendIdx);
 }
 
-void Session::HandleMessage(int peerSlot, const void* data, int len) {
+void Session::HandleMessage(int peerSlot, uint32_t hConn, const void* data, int len) {
     MsgType type;
     uint32_t seq;
     uint32_t senderEpoch;
@@ -359,6 +359,12 @@ void Session::HandleMessage(int peerSlot, const void* data, int len) {
         }
         {
             std::lock_guard<std::mutex> lk(reliableInboxMutex_);
+            // Only while the slot still holds the connection this arrived on, read under the
+            // inbox's own mutex: an off-thread kick zeroes the handle before it takes this mutex
+            // to erase the slot's entries, so a message that locked first is erased by it and one
+            // that locks after is dropped here -- none is left for the game thread to dispatch
+            // after the slot's teardown. The departed peer's message goes no further (no relay).
+            if (peerConns_[peerSlot].load() != hConn) return;
             // No hard cap here: a silent drop on an in-order reliable lane is permanent state
             // divergence. Growth is bounded upstream by the NetThread pause both roles share, which
             // stops receiving at kReliableInboxSoftPause while GNS buffers losslessly beneath; one

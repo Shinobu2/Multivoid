@@ -269,6 +269,10 @@ bool Session::Start(const Config& cfg, Refusal* why) {
         return false;
     }
 
+    // Nothing a previous session queued for the net thread carries across: its frees were run by
+    // Stop, and a close it marked is moot.
+    { std::lock_guard<std::mutex> lk(teardownMutex_); pendingFrees_.clear(); }
+    aggregateDue_.store(false);
     state_.store(ConnState::Handshaking);
     for (auto& r : rttMsBySlot_) r.store(-1, std::memory_order_relaxed);  // per-slot RTT reset
     running_.store(true);
@@ -476,6 +480,11 @@ void Session::Stop() {
     // linger, pump for about 200 ms so GNS flushes the queued reliable data, then destroy the poll
     // group and the listen socket.
     if (thread_.joinable()) thread_.join();
+    netThreadId_.store(std::thread::id{});
+
+    // The slots an off-thread kick queued and the loop's last pass never reached are freed here,
+    // after the join, before the slot loop below empties every slot.
+    RunPendingFrees();
 
     // After the join, never before: the client's admission state dies with the session (a stale
     // proved flag would let the next connection's slot assignment through unchallenged), and

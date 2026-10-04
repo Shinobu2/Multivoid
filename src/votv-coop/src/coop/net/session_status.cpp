@@ -1,6 +1,7 @@
 // coop/net/session_status.cpp -- the connection state machine: the GNS status callback
 // (Connecting, Connected, closed), the pending band an unproved socket waits in, admission into a
-// seat, the per-slot teardown shared by every close path, kick and ban.
+// seat, the close path's per-slot teardown, and the kick and leave entry points (their shared
+// teardown, and the session's aggregate state, are session_teardown.cpp).
 
 #include "coop/net/session.h"
 
@@ -256,7 +257,6 @@ int Session::AdmitPending(int pendingIdx, uint32_t hConn) {
         pendingConns_[pendingIdx].store(0, std::memory_order_release);
         pendingSinceMs_[pendingIdx].store(0, std::memory_order_release);
     }
-    if (state_.load() == ConnState::Disconnected) state_.store(ConnState::Handshaking);
     UE_LOGI("net: ADMITTED pending conn 0x%08x -> slot %d (%d/%d seated)",
             static_cast<unsigned>(hConn), slot, connectedPeerCount(), kMaxPeers - 1);
     return slot;
@@ -593,23 +593,22 @@ void Session::HandleConnStatusChanged(void* info) {
         // peer, and FindFreePeerSlotForClient hands the slot out only after it. It runs only for
         // the path that claimed the slot: a racing kick's teardown owns the clear otherwise, and a
         // second one would wipe a successor seated in between.
+        // A client's slots 1..3 are the other players as the host relayed them, and they end with
+        // the link: the host link's close resets every slot and empties the whole inbox.
+        if (owned && cfg_.role == Role::Client && slot == 0) {
+            { std::lock_guard<std::mutex> lk(remoteMutex_);
+              for (int i = 0; i < kMaxPeers; ++i) ResetPeerRemoteState(i); }
+            { std::lock_guard<std::mutex> lk(reliableInboxMutex_); reliableInbox_.clear(); }
+        }
         if (owned) {
             SetProvedGuidForSlot(slot, 0, std::string());  // the identity dies with the seat
             peerGenBySlot_[slot].store(0, std::memory_order_release);
         }
 
-        // Aggregate state: Connected while any peer remains, otherwise everything is cleared.
-        if (connectedPeerCount() == 0) {
-            // A full disconnect goes to Disconnected, not Handshaking, which the reconnect UI and
-            // the harness poll for.
-            state_.store(ConnState::Disconnected);
-            linkStage_.store(static_cast<uint8_t>(LinkStage::Idle), std::memory_order_release);
-            { std::lock_guard<std::mutex> lk(remoteMutex_);
-              for (int i = 0; i < kMaxPeers; ++i) ResetPeerRemoteState(i); }
-            { std::lock_guard<std::mutex> lk(reliableInboxMutex_); reliableInbox_.clear(); }
-            for (auto& r : rttMsBySlot_) r.store(-1, std::memory_order_relaxed);  // per-slot RTT reset
-            UE_LOGI("net: all peers gone -- session back to Disconnected");
-        }
+        // The session's aggregate state is not written here: this close only marks it due, and
+        // UpdateAggregateState writes it at the top of the net loop's next pass, the one place
+        // that does (a seat admitted in this pass is counted by then, never raced).
+        aggregateDue_.store(true);
     }
 }
 
@@ -627,8 +626,9 @@ bool Session::KickWithToken(int peerSlot, uint32_t expectedGeneration, EndReason
                 static_cast<unsigned>(expectedGeneration), static_cast<unsigned>(liveGen));
         return false;
     }
-    // GEN: clear -- the claim only; the generation itself is cleared at the end of KickClaimed's
-    // teardown, after the inbox erase, exactly like the other two close paths. Claim by handle,
+    // GEN: clear -- the claim only; the generation itself is cleared by the net thread, after the
+    // inbox erase, exactly like the other two close paths: at the end of KickClaimed's teardown
+    // when this runs there, from RunPendingFrees when it does not. Claim by handle,
     // not by slot: the generation check can go stale between these two instructions (the net
     // thread closes and re-accepts), and a plain exchange(0) would hand us the successor's
     // connection; the CAS fails on a different handle.
@@ -653,7 +653,8 @@ bool Session::GetPeerAddressWithToken(int peerSlot, uint32_t expectedGeneration,
 bool Session::Kick(int peerSlot, EndReason code, const char* reason) {
     // Slot 0 is the host itself, never kickable.
     if (peerSlot < 1 || peerSlot >= kMaxPeers) return false;
-    // GEN: clear -- deferred to the end of the teardown, exactly as the ClosedByPeer path does.
+    // GEN: clear -- deferred to the end of the teardown, exactly as the ClosedByPeer path does
+    // (on the net thread; an off-thread caller leaves it to RunPendingFrees).
     // Claim the slot atomically so a concurrent ClosedByPeer on the net thread and this kick
     // cannot both run the teardown (0 back means someone already closed it). This site is an
     // exchange, not a store: a census of `.store(` alone MISSES it, and missing it would leave a
@@ -684,8 +685,9 @@ void Session::FatalCloseSlot(int slot, const char* reason) {
 // host that tried to seat us unproved, an exchange that could not start, a fatal backlog) comes
 // through here. GNS posts no status callback for a connection we close, so a bare CloseConnection
 // left state_ at Handshaking forever and net_pump's connect-fail edge, the only consumer of the
-// reason, never fired: right on the wire, mute on screen. KickClaimed's tail downgrades the
-// aggregate state, so a departure we author and one we suffer leave the session the same.
+// reason, never fired: right on the wire, mute on screen. KickClaimed's tail marks the aggregate
+// state due, so a departure we author and one we suffer leave the session the same: the net
+// loop's next pass downgrades it. Net thread.
 void Session::LeaveHost(EndReason code, const char* why) {
     if (cfg_.role != Role::Client) return;
     {   // FIRST WRITER WINS, matching the ClosedByPeer branch: a refusal names the

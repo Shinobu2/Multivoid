@@ -385,9 +385,11 @@ public:
     void SetBanCheck(BanCheckFn fn) { banCheck_ = fn; }
 
     // Host: disconnect the client at peerSlot with no linger; `code` and `reason` reach the peer's
-    // status callback, the code as the transport's application end reason. Runs the ClosedByPeer
-    // teardown itself (GNS gives no callback for a connection we close). False if out of range,
-    // slot 0, or not connected. Thread-safe. MTA: CGame::QuitPlayer(QUIT_KICK).
+    // status callback, the code as the transport's application end reason. Runs the slot's
+    // teardown itself (GNS gives no callback for a connection we close): on the net thread all of
+    // it, from any other thread all but freeing the slot (its generation), which the net thread
+    // does at the top of its next pass. False if out of range, slot 0, or not connected.
+    // Thread-safe. MTA: CGame::QuitPlayer(QUIT_KICK).
     bool Kick(int peerSlot, EndReason code, const char* reason);
 
     // Kick only while `peerSlot` is still held by `expectedGeneration`'s owner; otherwise false. A
@@ -408,8 +410,20 @@ public:
 
   private:
     // Shared teardown for a slot the caller has already claimed (peerConns_ exchanged or CAS'd to
-    // 0).
+    // 0), in session_teardown.cpp. On the net thread it is the whole teardown, the generation clear
+    // included, and marks aggregateDue_. From any other thread it does every step but that clear,
+    // which it queues for the net thread's RunPendingFrees; the slot is free only after it.
     bool KickClaimed(int peerSlot, uint32_t hConn, EndReason code, const char* reason);
+    // Net thread, first in each loop pass (and Stop, after the join): frees every slot an
+    // off-thread kick queued -- re-sweeps the slot's remote state and inbox entries for what an
+    // in-flight receive wrote after the kick, then clears its generation last -- and marks
+    // aggregateDue_.
+    void RunPendingFrees();
+    // Net thread, right after RunPendingFrees, once per pass: when a close marked aggregateDue_,
+    // and the session has no peer left, state_ goes to Disconnected, linkStage_ to Idle and every
+    // slot's RTT to -1. The session's aggregate is written by this function, Start, Stop and the
+    // net thread's admission, and by nothing else.
+    void UpdateAggregateState();
 
   public:
 
@@ -432,8 +446,9 @@ private:
 
     void NetThread();
     // Per-peer message dispatch; peerSlot is the sender (from m_nConnUserData on the host, 0 on a
-    // client). A pending tag routes to HandlePendingMessage instead.
-    void HandleMessage(int peerSlot, const void* data, int len);
+    // client). A pending tag routes to HandlePendingMessage instead. `hConn` is the connection the
+    // message arrived on: the reliable inbox takes it only while the slot still holds that handle.
+    void HandleMessage(int peerSlot, uint32_t hConn, const void* data, int len);
     // Everything a pending (unadmitted) connection sends. Net thread, from the single drain site.
     void HandlePendingMessage(int pendIdx, uint32_t hConn, const void* data, int len);
     // NPC pose batch (session_npc.cpp): Serialize builds the body after the PacketHeader into `buf`
@@ -519,6 +534,17 @@ private:
     // SetStopListener's one slot; a plain function pointer, the transport knows nothing of its owner.
     std::atomic<void (*)()> stopListener_{nullptr};
     std::atomic<ConnState> state_{ConnState::Disconnected};
+    // The net thread's id, stored first thing in NetThread: KickClaimed compares it to tell the net
+    // thread (frees the slot inline) from any other (queues the free).
+    std::atomic<std::thread::id> netThreadId_{};
+    // Slots an off-thread kick claimed and tore down but could not free: the net thread drains
+    // them in RunPendingFrees. teardownMutex_ is a leaf lock, held for the push or the swap only.
+    struct PendingFree { int slot; uint32_t hConn; };
+    std::mutex teardownMutex_;
+    std::vector<PendingFree> pendingFrees_;
+    // Set by every close (an inline teardown, a ClosedByPeer, RunPendingFrees); UpdateAggregateState
+    // consumes it. Cleared by Start.
+    std::atomic<bool> aggregateDue_{false};
 
     // GNS handles as uint32_t, so this header does not include the GNS API.
     std::atomic<uint32_t> hListen_{0};     // host only
@@ -693,7 +719,10 @@ private:
     // next occupant re-latches. Under remoteMutex_.
     std::array<uint32_t, kMaxPeers> expectedEpoch_{};
 
-    // The reliable inbox (shared across peers; a FIFO of arrival order).
+    // The reliable inbox (shared across peers; a FIFO of arrival order). The receive path enqueues
+    // only while peerConns_[slot] still holds the arrival's handle, read under this mutex; an
+    // off-thread kick zeroes that handle before it takes the mutex to erase the slot's entries, so
+    // a message is either erased by the kick or never enqueued.
     std::mutex reliableInboxMutex_;
     std::deque<ReliableMessage> reliableInbox_;
     // The high-water of reliableInbox_ since the last ~1 Hz net-diag sample, stamped at the enqueue
@@ -741,8 +770,9 @@ private:
     // teardown of the host connection. Net thread.
     void FatalCloseSlot(int slot, const char* reason);
     // The client's only way to end its host link: records `code` and `why`, claims slot 0 and runs
-    // the KickClaimed teardown, which drives state_ to Disconnected, the edge net_pump needs to
-    // show the player a reason. Net thread.
+    // the KickClaimed teardown, which marks aggregateDue_; UpdateAggregateState, at the top of the
+    // next pass, drives state_ to Disconnected, the edge net_pump needs to show the player a
+    // reason. Net thread.
     void LeaveHost(EndReason code, const char* why);
     // Per-slot RTT in ms from GNS's m_nPing, sampled ~1 Hz on the net thread; -1 without a live
     // connection. event_feed fans it to each puppet.
