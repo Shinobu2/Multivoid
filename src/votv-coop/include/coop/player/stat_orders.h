@@ -18,12 +18,9 @@
 // (reference/source-sdk-2013/src/public/engine/iserverplugin.h:36-43, 110-113, 160). The closer
 // tagged-request and status-reply shape is MTA's takePlayerScreenShot
 // (reference/mtasa-blue/Server/mods/deathmatch/logic/CStaticFunctionDefinitions.cpp:3329-3349,
-// reference/mtasa-blue/Server/mods/deathmatch/logic/packets/CPlayerScreenShotPacket.cpp:16-60); ours
-// is stricter: the token, the slot and the generation must all match. The query is
-// a pull: MTA reads a server copy its own stream keeps fresh, while here the owner alone holds the
-// table. A client has no opt-out, unlike Source's FCVAR_SERVER_CANNOT_QUERY
-// (reference/source-sdk-2013/src/public/tier1/iconvar.h:75), because the host is the session's
-// admin. Shapes only.
+// reference/mtasa-blue/Server/mods/deathmatch/logic/packets/CPlayerScreenShotPacket.cpp:18-88); ours
+// is stricter: the token, the slot and the generation must all match. Shapes only; the pull and the
+// missing opt-out are explained at SendQuery.
 
 #include "coop/net/session.h"
 #include "coop/player/stat_orders_wire.h"
@@ -54,12 +51,23 @@ enum class Sent : uint8_t { Ok, NotHost, BadName, NotReady, NoGuid, Busy, SendFa
 // the slot's disconnect. Anything but Ok: nothing was sent and `done` is never called. A closure
 // owns what it touches.
 Sent SendOrder(uint8_t slot, const Order& order, OrderDone done);
+// The query is a pull. MTA's server holds health and armor fresh off the client's own puresync
+// (reference/mtasa-blue/Server/mods/deathmatch/logic/packets/CPlayerPuresyncPacket.cpp:199, 327)
+// and sets its stat array itself (reference/mtasa-blue/Server/mods/deathmatch/logic/CPed.h:199-203),
+// so it reads its own copy. Here the host's stored profile follows only the nine profile rows, up
+// to 30 s old; the other thirteen rows of the stat table and the status effects ride no stream, so
+// the live value is in the owner's process alone. A client has no opt-out, unlike Source's
+// FCVAR_SERVER_CANNOT_QUERY (reference/source-sdk-2013/src/public/tier1/iconvar.h:75) and MTA's
+// allow_screen_upload, which a client answers with a DISABLED status
+// (reference/mtasa-blue/Client/mods/deathmatch/logic/CClientGame.cpp:6339-6347), because the host is
+// the session's admin.
 Sent SendQuery(uint8_t slot, QueryDone done);
 
 // How many orders and queries of `slot` still wait for an answer.
 int PendingCount(uint8_t slot);
 
-// Keep the session the sends go through; called at every session start.
+// Keep the session the sends go through. It is called on every pump tick (subsystems::Install)
+// and by the order drill's Tick; an idempotent pointer store.
 void Install(coop::net::Session* session);
 // A slot's disconnect answers every token it holds with Left.
 void OnSlotDisconnected(uint8_t slot);
