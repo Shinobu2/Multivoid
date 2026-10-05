@@ -3,10 +3,13 @@
 
     python -I -B .github/ci/release_sign.py sign   --dll <path> --target <t> --build <n> --out <path> [--test-key]
     python -I -B .github/ci/release_sign.py verify --dll <path> --sig <path> [--trust-test-key]
+    python -I -B .github/ci/release_sign.py keygen --id <n> --repo <owner/name>
 
 `sign` writes the six-line `.sig` file the game parses (`coop/build_trust`): the DLL's SHA-256, the
 build it belongs to and an Ed25519 signature over `signed_message`. `verify` applies the same
-grammar and steps as the game, and prints which step refused. The game's check is the vendored
+grammar and steps as the game, and prints which step refused. `keygen` makes a key in memory, hands
+its private half straight to the `release` environment's secret through `gh`, and prints only the
+table row; it refuses first unless that environment is protected as the runbook sets it. The game's check is the vendored
 ed25519-donna `ed25519_sign_open` (src/votv-coop/third_party/GameNetworkingSockets/src/external/
 ed25519-donna/ed25519.c); `verify` is the same cofactorless, byte-exact check (RFC 8032 section
 5.1.7 allows it): it recomputes R' = [S]B - [k]A, encodes it and accepts only when those 32 bytes
@@ -25,14 +28,17 @@ coordinate addition, key generation, sign, verify) and checked against its secti
 This is NOT constant-time: it signs one DLL per release on a CI runner. The seed is read from the
 environment only, and no message and no exception text this file writes holds it.
 
-Exit codes: 0 done; 1 verification failed; 2 a usage or key-table error; 3 the environment (the seed).
+Exit codes: 0 done; 1 verification failed; 2 a usage or key-table error; 3 the environment (the seed,
+or `gh` and the repository's `release` environment).
 Every message is one line on stdout and starts `release_sign: `.
 """
 import argparse
 import hashlib
+import json
 import os
 import pathlib
 import re
+import subprocess
 import sys
 
 # The selftest key: its seed is public by design, it signs only rig and drill builds, and the game
@@ -362,6 +368,97 @@ def cmd_verify(args, out):
     return 0
 
 
+_REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", re.ASCII)
+_GH_MISSING = "release_sign: gh is not installed or cannot run"
+_BRANCH_POLICIES = {("v*", "tag"), ("main", "branch")}
+
+
+def _unprotected(check):
+    return SignError("protection", 3, "release_sign: the release environment is not protected as "
+                     "the runbook sets it (%s)" % check)
+
+
+def _gh_api(runner, path):
+    """One read of GitHub's REST answer through gh; its output holds no secret."""
+    try:
+        p = runner(["gh", "api", path], capture_output=True, text=True, encoding="utf-8")
+    except OSError:
+        raise SignError("gh", 3, _GH_MISSING) from None
+    if p.returncode != 0:
+        lines = (p.stderr or "").splitlines()
+        raise SignError("gh", 3,
+                        ("release_sign: gh api failed: " + (lines[0] if lines else "")).rstrip())
+    try:
+        return json.loads(p.stdout)
+    except (TypeError, ValueError):
+        raise SignError("gh", 3, "release_sign: gh api failed (the answer is not JSON)") from None
+
+
+def _check_protection(environment, policies):
+    """The runbook's protection, read from the REST answers; a reviewer's own fields are not read."""
+    if not isinstance(environment, dict) or environment.get("can_admins_bypass") is not False:
+        raise _unprotected("admins can bypass")
+    rules = environment.get("protection_rules")
+    rules = rules if isinstance(rules, list) else []
+    reviewer_rules = [r for r in rules
+                      if isinstance(r, dict) and r.get("type") == "required_reviewers"]
+    if not reviewer_rules:
+        raise _unprotected("required reviewers")
+    for rule in reviewer_rules:
+        reviewers = rule.get("reviewers")
+        if not isinstance(reviewers, list) or not reviewers:
+            raise _unprotected("no reviewer")
+        if rule.get("prevent_self_review") is not False:
+            raise _unprotected("self review")
+    branch_policy = environment.get("deployment_branch_policy")
+    if not (isinstance(branch_policy, dict)
+            and set(branch_policy) == {"protected_branches", "custom_branch_policies"}
+            and branch_policy["protected_branches"] is False
+            and branch_policy["custom_branch_policies"] is True):
+        raise _unprotected("deployment branch policy")
+    listed = policies.get("branch_policies") if isinstance(policies, dict) else None
+    pairs = ([(q.get("name"), q.get("type")) for q in listed if isinstance(q, dict)]
+             if isinstance(listed, list) else [])
+    if len(pairs) != len(_BRANCH_POLICIES) or set(pairs) != _BRANCH_POLICIES:
+        raise _unprotected("branch policies")
+
+
+def cmd_keygen(args, runner, out):
+    """The order is the custody: refuse an unprotected environment, then make the key, check its
+    row, hand the seed to gh's standard input, and print the row. No file is written."""
+    if _REPO.fullmatch(args.repo) is None:
+        raise SignError("usage", 2, "release_sign: --repo must be owner/name")
+    rows = _table_rows()
+    if not 1 <= args.id <= 254:
+        raise SignError("usage", 2, "release_sign: --id must be 1..254")
+    highest = max((row[0] for row in rows), default=0)
+    if args.id <= highest:
+        raise SignError("usage", 2, "release_sign: --id must be greater than %d" % highest)
+
+    base = "repos/%s/environments/release" % args.repo
+    environment = _gh_api(runner, base)
+    policies = _gh_api(runner, base + "/deployment-branch-policies")
+    _check_protection(environment, policies)
+
+    seed = os.urandom(32)
+    pub = ed25519_public(seed)
+    fixture = ed25519_sign(seed, signed_message("selftest-fixture", 0, bytes(32)))
+    row = format_row(args.id, pub, fixture)
+    if read_rows(row) != [(args.id, pub.hex(), fixture.hex())]:
+        raise SignError("row", 3, "release_sign: the new row did not read back")
+
+    # Never check=True: the exception it raises carries the input, which is the seed.
+    try:
+        p = runner(["gh", "secret", "set", SEED_ENV, "--env", "release", "--repo", args.repo],
+                   input=seed.hex(), capture_output=True, text=True, encoding="utf-8")
+    except OSError:
+        raise SignError("gh", 3, _GH_MISSING) from None
+    if p.returncode != 0:
+        raise SignError("secret", 3, "release_sign: gh secret set failed (exit %d)" % p.returncode)
+    out.write(row + "\n")
+    return 0
+
+
 def _parser():
     parser = argparse.ArgumentParser(prog="release_sign", allow_abbrev=False)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -375,6 +472,9 @@ def _parser():
     v.add_argument("--dll", required=True)
     v.add_argument("--sig", required=True)
     v.add_argument("--trust-test-key", action="store_true")
+    k = sub.add_parser("keygen", allow_abbrev=False)
+    k.add_argument("--id", required=True, type=int)
+    k.add_argument("--repo", required=True)
     return parser
 
 
@@ -385,6 +485,8 @@ def main(argv, environ=None, out=None):
     try:
         if args.command == "sign":
             return cmd_sign(args, environ, out)
+        if args.command == "keygen":
+            return cmd_keygen(args, subprocess.run, out)
         return cmd_verify(args, out)
     except SignError as e:
         out.write(str(e) + "\n")
