@@ -199,7 +199,7 @@ std::string ApplyQualifiers(Context& ctx) {
 
     const Qualifier* notify = FindQualifier(spec, QualKind::Notify);
     if (notify != nullptr && policy.holds != nullptr) {
-        const std::string notifyNode = node + "." + notify->name;
+        const std::string notifyNode = notify->node.empty() ? node + "." + notify->name : notify->node;
         for (const PlayerView& p : ctx.players)
             if (p.slot > 0 && p.slot != caller.slot && !p.playerId.empty() &&
                 policy.holds(p.playerId, notifyNode, false))
@@ -402,6 +402,9 @@ bool RegisterBuiltins(Registry& reg) {
         if (!reg.DeclareNode({entry.node, entry.defaultGranted, entry.description}, nullptr))
             return false;
     }
+    // The node a permission change's Notify qualifier names: told of every change.
+    if (!reg.DeclareNode({kAdminLogNode, false, "Told of every permission change."}, nullptr))
+        return false;
     CommandSpec help;
     help.name = "help";
     help.defaultGranted = true;

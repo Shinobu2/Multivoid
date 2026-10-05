@@ -3,8 +3,10 @@
 //
 // Engine-free (no ue_wrap include). A command may hold sub-verbs, each with its own node
 // `<parent's node>.<word>` (LuckPerms' per-sub-command nodes; EssentialsX derives the base node
-// from the command's name). The registry is THE declaration of every command node: a node is
-// declared once, here, and the dispatcher asks the policy about it.
+// from the command's name). Only a spec WITH a handler declares its node: a spec without one is a
+// path word whose derived node its sub-verbs build on and nothing asks about. The registry is THE
+// declaration of every command node: a node is declared once, here, and the dispatcher asks the
+// policy about it.
 //
 // The production registry has one owner and is filled once at start; a handler is a function
 // object that captures what it calls, the registry is static data.
@@ -61,6 +63,10 @@ enum class QualKind : uint8_t {
 struct Qualifier {
     std::string name;  // the node's last word: `offline`, `exempt`, `notify`
     QualKind kind;
+    // Notify only: a node `Registry::DeclareNode` declared (a non-command node), asked in place of
+    // `<the spec's node>.<name>`; such a qualifier declares no node of its own. Register refuses it
+    // on any other kind, and when it names a node DeclareNode did not declare.
+    std::string node;
 };
 
 // On a ROOT command. `presetWords` is split by SplitLine and put before the typed words that
@@ -98,7 +104,8 @@ struct CommandSpec {
     std::vector<Qualifier> qualifiers;
     Handler handler = nullptr;
     // A spec with sub-verbs may also have its own handler. Without one, its words are the verbs a
-    // line continues with, and its argument, if any, is read between its name and its sub-verb.
+    // line continues with, its argument, if any, is read between its name and its sub-verb, and it
+    // declares no node (its sub-verbs derive theirs from its path).
     std::vector<CommandSpec> subVerbs;
 
     // A targeted parent: no handler, one argument taken between its name and its sub-verb,
@@ -127,16 +134,17 @@ public:
     // content, admin, command or dev; a Rest argument not last; a required argument after an
     // optional one; a spec with neither handler nor sub-verbs; a spec with a notHost argument or an
     // Exempt qualifier and no pastTense; a qualifier name not 1..32 of [a-z0-9]; two qualifiers of
-    // one kind or name; a GateOffline or Exempt qualifier on a spec whose target arguments (Player,
-    // PlayerOrId, Players) are not exactly one Player or PlayerOrId; a GateOffline qualifier whose
-    // target is not a PlayerOrId; a PlayerOrId argument with no GateOffline qualifier; a qualifier
-    // node already declared as a non-qualifier node or by a qualifier of another kind. On success
-    // every spec without a nodeOf is declared as a node, and every qualifier node `<node>.<name>`
-    // not declared yet (default false, described "<the spec's description> -- <name>").
-    // The rules of a targeted parent: CommandSpec::Targeted; of the argument kinds: ArgKind.
+    // one kind or name; a GateOffline or Exempt qualifier on a spec whose target arguments are not
+    // exactly one Player or PlayerOrId; a GateOffline qualifier whose target is not a PlayerOrId; a
+    // PlayerOrId argument with no GateOffline qualifier; a qualifier node already declared as a
+    // non-qualifier node or by a qualifier of another kind; a node on a qualifier that is not
+    // Notify, or a Notify node DeclareNode did not declare. On success every spec WITH a handler
+    // and no nodeOf declares its node, and every qualifier node `<node>.<name>` not declared yet
+    // (default false, "<the spec's description> -- <name>"), but for a Notify with its own node.
     bool Register(CommandSpec spec, std::string* why);
 
-    // Adds a node that is not a command (`multivoid.command.selector`); refuses one declared.
+    // Adds a node that is not a command (`multivoid.command.selector`); refuses one declared. Only a
+    // node added here may be named by a Notify qualifier's `node`.
     bool DeclareNode(NodeDecl d, std::string* why);
 
     // ASCII case-insensitive over root names and aliases; *alias is the alias that matched, or
@@ -148,7 +156,12 @@ public:
 
     const NodeDecl* FindNode(std::string_view node) const;
 
-    // Read from the table filled at registration (a sub-verb has no parent link of its own);
+    // Calls `fn` for every declared node (commands', qualifiers' and DeclareNode's) in name order.
+    // The registry must not change inside `fn`.
+    void ForEachNode(const std::function<void(const NodeDecl&)>& fn) const;
+
+    // Read from the table filled at registration (a sub-verb has no parent link of its own); a
+    // spec without a handler answers the node its sub-verbs derive from, which no one declared;
     // empty for a spec this registry does not own.
     std::string NodeOf(const CommandSpec& c) const;
     std::string PathOf(const CommandSpec& c) const;  // the words from the root: `time set`
@@ -180,6 +193,7 @@ private:
     std::vector<std::unique_ptr<CommandSpec>> roots_;  // never moved or changed after Register
     std::map<std::string, NodeDecl, std::less<>> nodes_;
     std::map<std::string, QualKind> qualifierNodes_;  // the nodes of nodes_ a qualifier declared
+    std::set<std::string, std::less<>> plainNodes_;   // the nodes of nodes_ DeclareNode declared
     std::unordered_map<const CommandSpec*, SpecInfo> info_;
 };
 

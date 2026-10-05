@@ -36,11 +36,13 @@ bool Reserved(std::string_view name) {
 
 using NodeMap = std::map<std::string, NodeDecl, std::less<>>;
 using QualifierNodeMap = std::map<std::string, QualKind>;
+using PlainNodeSet = std::set<std::string, std::less<>>;
 
 // One walk over a tree that is not yet taken: the first broken rule stops it with a reason.
 struct TreeCheck {
     const NodeMap& declared;
     const QualifierNodeMap& declaredQualifiers;  // the qualifier nodes among `declared`
+    const PlainNodeSet& plainNodes;  // the nodes among `declared` that DeclareNode declared
     std::set<std::string> byThisTree;  // nodes declared by specs earlier in depth-first order
     QualifierNodeMap qualifiersByThisTree;  // the qualifier nodes among byThisTree
     std::string why;
@@ -88,6 +90,15 @@ struct TreeCheck {
                     return Fail("'" + s.name + "': two qualifiers of one kind");
                 if (s.qualifiers[j].name == q.name)
                     return Fail("'" + s.name + "': two qualifiers named '" + q.name + "'");
+            }
+            if (!q.node.empty()) {
+                if (q.kind != QualKind::Notify)
+                    return Fail("'" + s.name + "': only a Notify qualifier names a node");
+                // One test for every node that is not a plain one: a command's, a qualifier's, an
+                // undeclared one, the spec's own derived one.
+                if (plainNodes.find(q.node) == plainNodes.end())
+                    return Fail("'" + s.name + "': the notify node '" + q.node +
+                                "' is not a declared non-command node");
             }
             if (q.kind != QualKind::GateOffline && q.kind != QualKind::Exempt) continue;
             if (targets != 1 || targetKind == ArgKind::Players)
@@ -185,14 +196,18 @@ struct TreeCheck {
             node = s.nodeOf;
         } else {
             node = (isRoot ? std::string("multivoid") : parentNode) + "." + s.name;
-            if (IsDeclared(node)) return Fail("the node '" + node + "' is already declared");
-            byThisTree.insert(node);
+            // A spec without a handler declares no node: the string only roots its sub-verbs'.
+            if (s.handler != nullptr) {
+                if (IsDeclared(node)) return Fail("the node '" + node + "' is already declared");
+                byThisTree.insert(node);
+            }
         }
         // A qualifier node another spec already declared is not declared twice, and only a
         // qualifier of the same kind reuses it; a node that is not a qualifier node is never taken
         // over, and a command node later derived onto a qualifier node is refused as already
-        // declared.
+        // declared. A Notify qualifier that names a node of its own declares none.
         for (const Qualifier& q : s.qualifiers) {
+            if (!q.node.empty()) continue;
             const std::string qualNode = node + "." + q.name;
             if (IsDeclared(qualNode)) {
                 const QualKind* declaredKind = QualifierKindOf(qualNode);
@@ -240,7 +255,7 @@ bool Registry::Register(CommandSpec spec, std::string* why) {
         if (!own.insert(a.name).second) return refuse("alias '" + a.name + "' is named twice");
     }
 
-    TreeCheck check{nodes_, qualifierNodes_, {}, {}, {}};
+    TreeCheck check{nodes_, qualifierNodes_, plainNodes_, {}, {}, {}};
     if (!check.Spec(spec, std::string(), true, {})) return refuse(check.why);
 
     auto owned = std::make_unique<CommandSpec>(std::move(spec));
@@ -261,9 +276,11 @@ void Registry::Record(const CommandSpec& c, const std::string& parentPath,
         info.node = c.nodeOf;
     } else {
         info.node = (parentNode.empty() ? std::string("multivoid") : parentNode) + "." + c.name;
-        nodes_.emplace(info.node, NodeDecl{info.node, c.defaultGranted, c.description});
+        if (c.handler != nullptr)
+            nodes_.emplace(info.node, NodeDecl{info.node, c.defaultGranted, c.description});
     }
     for (const Qualifier& q : c.qualifiers) {
+        if (!q.node.empty()) continue;
         const std::string qualNode = info.node + "." + q.name;
         nodes_.emplace(qualNode, NodeDecl{qualNode, false, c.description + " -- " + q.name});
         qualifierNodes_.emplace(qualNode, q.kind);
@@ -289,6 +306,7 @@ bool Registry::DeclareNode(NodeDecl d, std::string* why) {
     if (nodes_.find(d.node) != nodes_.end()) return refuse("the node is already declared");
     const std::string key = d.node;
     nodes_.emplace(key, std::move(d));
+    plainNodes_.insert(key);
     return true;
 }
 
@@ -326,6 +344,10 @@ std::vector<const CommandSpec*> Registry::AllVerbs() const {
 const NodeDecl* Registry::FindNode(std::string_view node) const {
     const auto it = nodes_.find(node);
     return it == nodes_.end() ? nullptr : &it->second;
+}
+
+void Registry::ForEachNode(const std::function<void(const NodeDecl&)>& fn) const {
+    for (const auto& entry : nodes_) fn(entry.second);
 }
 
 std::string Registry::NodeOf(const CommandSpec& c) const {

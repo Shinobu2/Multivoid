@@ -53,7 +53,8 @@ struct Policy {
 // absolute expiry in epoch seconds), `booleans[i]` for Boolean, `contexts` for the Contexts
 // argument; `texts[i]` is the word (the raw remainder for Rest and Contexts) for every kind.
 // `notifySlots` is filled for a spec with a Notify qualifier: the seated slots, other than the
-// caller's and the host's, that hold its node.
+// caller's and the host's, that hold its node (`<the spec's node>.<name>`, or the qualifier's own
+// `node` when it names one).
 struct Context {
     const Caller& caller;
     const CommandSpec& spec;
@@ -72,6 +73,10 @@ struct Context {
 
     void Reply(std::string line) { replies.push_back(std::move(line)); }
 };
+
+// The node every permission change's Notify qualifier names: its holders are told of each change.
+// RegisterBuiltins declares it; this is its one spelling.
+inline constexpr const char* kAdminLogNode = "multivoid.admin.log";
 
 // A refusal or a usage error sets no `ran`; its one reply line says why.
 struct DispatchResult {

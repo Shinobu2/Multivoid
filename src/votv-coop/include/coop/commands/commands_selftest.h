@@ -23,8 +23,9 @@ void ModerationCases(Checker& check);
 // The settings commands over fake ports (commands_cases_settings.cpp), called by RunSelftest.
 void SettingsCases(Checker& check);
 
-// The command grammar over test trees (commands_cases_grammar.cpp): a targeted parent and the
-// argument kinds, called by RunSelftest.
+// The command grammar over test trees (commands_cases_grammar.cpp): a targeted parent, the
+// argument kinds, and the nodes a tree declares (leaves only, the Notify qualifier's own node),
+// called by RunSelftest.
 void GrammarCases(Checker& check);
 
 }  // namespace coop::commands

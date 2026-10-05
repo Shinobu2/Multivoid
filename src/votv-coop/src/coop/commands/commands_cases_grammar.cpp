@@ -1,6 +1,7 @@
 // coop/commands/commands_cases_grammar.cpp -- the cases of the command grammar: a targeted parent
-// (an argument taken between two verbs) and the argument kinds Boolean, Duration and Contexts, over
-// test trees, each case a Dispatch of one line. Called from RunSelftest.
+// (an argument taken between two verbs), the argument kinds Boolean, Duration and Contexts, and
+// the nodes a tree declares (leaves only, the Notify qualifier's own node), over test trees, each
+// case a Dispatch of one line. Called from RunSelftest.
 
 #include "coop/commands/command_args.h"
 #include "coop/commands/command_dispatcher.h"
@@ -8,6 +9,7 @@
 #include "coop/commands/command_targets.h"
 #include "coop/commands/commands_selftest.h"
 
+#include <algorithm>
 #include <initializer_list>
 #include <string>
 #include <string_view>
@@ -27,6 +29,7 @@ struct GrammarCapture {
     std::vector<bool> given;
     std::vector<bool> booleans;
     std::vector<std::pair<std::string, std::string>> contexts;
+    std::vector<int> notifySlots;
 };
 GrammarCapture g_grammar;
 
@@ -39,6 +42,7 @@ void CaptureGrammar(Context& ctx) {
     g_grammar.given = ctx.given;
     g_grammar.booleans = ctx.booleans;
     g_grammar.contexts = ctx.contexts.Pairs();
+    g_grammar.notifySlots = ctx.notifySlots;
     ctx.Reply("ok");
 }
 
@@ -430,6 +434,86 @@ void KindCases(Checker& check) {
     }
 }
 
+// The node the last holds call was asked about; only the player whose id is 32 x `d` holds the
+// admin log node.
+std::string g_heldAsked;
+
+bool HoldsAdminLog(std::string_view id, std::string_view node, bool) {
+    g_heldAsked = std::string(node);
+    return id == std::string(32, 'd') && node == kAdminLogNode;
+}
+
+std::string WhyRefused(Registry& reg, const CommandSpec& c) {
+    std::string why;
+    return reg.Register(c, &why) ? std::string() : why;
+}
+
+bool Declared(const std::vector<std::string>& names, const char* node) {
+    return std::find(names.begin(), names.end(), node) != names.end();
+}
+
+void NodeCases(Checker& check) {
+    Registry reg;
+    check(RegisterBuiltins(reg) && reg.Register(TargetedTree(), nullptr),
+          "nodes: the targeted tree registers");
+    const CommandSpec* mvt = reg.FindRoot("mvt", nullptr);
+    const CommandSpec* user = mvt != nullptr ? &mvt->subVerbs[0] : nullptr;
+    check(user != nullptr && reg.FindNode("multivoid.mvt") == nullptr &&
+              reg.FindNode("multivoid.mvt.user") == nullptr &&
+              reg.FindNode("multivoid.mvt.user.permission") == nullptr &&
+              reg.FindNode("multivoid.mvt.user.permission.set") != nullptr &&
+              reg.FindNode("multivoid.mvt.user.permission.set.offline") != nullptr &&
+              reg.NodeOf(*mvt) == "multivoid.mvt" && reg.NodeOf(*user) == "multivoid.mvt.user",
+          "nodes: a spec without a handler declares no node, its leaf declares one, and the path word keeps"
+          " the derived string");
+
+    std::vector<std::string> names;
+    reg.ForEachNode([&](const NodeDecl& d) { names.push_back(d.node); });
+    check(std::is_sorted(names.begin(), names.end()) && Declared(names, "multivoid.command.selector") &&
+              Declared(names, kAdminLogNode) && Declared(names, "multivoid.mvt.user.permission.set") &&
+              !Declared(names, "multivoid.mvt.user"),
+          "nodes: ForEachNode visits every declared node in name order");
+
+    // A Notify qualifier that names a node declares nothing and asks about that node.
+    Registry notify;
+    CommandSpec alert = Leaf("alert", {}, {{"notify", QualKind::Notify, kAdminLogNode}});
+    CommandSpec ping = Leaf("ping", {}, {{"notify", QualKind::Notify}});
+    check(RegisterBuiltins(notify) && notify.Register(alert, nullptr) && notify.Register(ping, nullptr) &&
+              notify.FindNode("multivoid.alert") != nullptr && notify.FindNode("multivoid.alert.notify") == nullptr &&
+              notify.FindNode("multivoid.ping.notify") != nullptr,
+          "nodes: a Notify qualifier naming a node registers and declares none of its own");
+    Policy policy = GrammarPolicy();
+    policy.holds = &HoldsAdminLog;
+    const Caller console{0, 0, true};
+    g_heldAsked.clear();
+    const DispatchResult told = Run(notify, console, "alert", policy);
+    check(told.ran && g_grammar.notifySlots == std::vector<int>{1} && g_heldAsked == kAdminLogNode,
+          "nodes: the notify slots follow holds for the qualifier's own node");
+    g_heldAsked.clear();
+    const DispatchResult derived = Run(notify, console, "ping", policy);
+    check(derived.ran && g_grammar.notifySlots.empty() && g_heldAsked == "multivoid.ping.notify",
+          "nodes: without a node of its own the qualifier asks the derived one");
+
+    // Every node that DeclareNode did not declare fails the one test.
+    Registry bad;
+    check(RegisterBuiltins(bad) &&
+              bad.Register(Leaf("gate", {{"who", ArgKind::PlayerOrId, false}}, {kOffline}), nullptr),
+          "nodes: the refusal tree's builtins and gate register");
+    const auto notDeclared = [&](const char* spec, const char* node) {
+        CommandSpec c = Leaf(spec, {}, {{"notify", QualKind::Notify, node}});
+        return WhyRefused(bad, c) ==
+               std::string("'") + spec + "': the notify node '" + node + "' is not a declared non-command node";
+    };
+    check(notDeclared("x", "multivoid.nosuch"), "nodes: a Notify node that was never declared is refused");
+    check(notDeclared("x", "multivoid.help"), "nodes: a Notify node that is a command node is refused");
+    check(notDeclared("x", "multivoid.gate.offline"), "nodes: a Notify node that is a qualifier node is refused");
+    check(notDeclared("self", "multivoid.self"), "nodes: a Notify node that is the spec's own node is refused");
+    check(WhyRefused(bad, Leaf("g2", {{"who", ArgKind::PlayerOrId, false}},
+                               {{"offline", QualKind::GateOffline, kAdminLogNode}})) ==
+              "'g2': only a Notify qualifier names a node",
+          "nodes: a node on a qualifier that is not Notify is refused");
+}
+
 }  // namespace
 
 void GrammarCases(Checker& check) {
@@ -437,6 +521,7 @@ void GrammarCases(Checker& check) {
     BooleanCases(check);
     DurationCases(check);
     KindCases(check);
+    NodeCases(check);
 }
 
 }  // namespace coop::commands
