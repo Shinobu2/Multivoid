@@ -80,6 +80,7 @@ bool RunSelftest() {
     RunInheritanceCases(sink);
     RunResolutionCases(sink);
     RunFilesCases(sink, scratch);
+    RunEditCases(sink);
     RunGrantsCases(sink);
 
     if (!scratch.empty()) fs::remove_all(scratch, ec);

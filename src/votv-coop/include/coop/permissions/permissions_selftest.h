@@ -35,6 +35,7 @@ void RunInheritanceCases(CheckSink& sink);
 void RunResolutionCases(CheckSink& sink);
 // `scratch` is an empty folder the cases may write under and delete from; the caller removes it.
 void RunFilesCases(CheckSink& sink, const std::filesystem::path& scratch);
+void RunEditCases(CheckSink& sink);
 void RunGrantsCases(CheckSink& sink);
 
 // Runs every cases function and logs the result line. True when every check passed.

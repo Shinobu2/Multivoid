@@ -695,6 +695,8 @@ set(VOTVCOOP_SOURCES
     src/coop/permissions/resolution.cpp
     src/coop/permissions/grants_core.cpp
     src/coop/permissions/permission_files.cpp
+    src/coop/permissions/permission_edit.cpp
+    src/coop/permissions/permissions_cases_edit.cpp
     src/coop/permissions/permission_host.cpp
     src/coop/permissions/permissions_selftest.cpp
     src/coop/permissions/permissions_cases_context.cpp
