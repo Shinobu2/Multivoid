@@ -167,6 +167,14 @@ void ExecuteHostCommand(ElementId eid, void* actor, Command c, uint8_t requester
                 verb, eid, requesterSlot);
         return;
     }
+    // Get the reports takes the disc in its served player's hand, and nothing writes a puppet's hand: for a
+    // client the host's run can only fail, and the game's refusal hint it raises lands on the host's screen,
+    // not the requester's. The verb is not run for a client until a lane carries the client's held disc.
+    if (c == Command::GetReports && requesterSlot != coop::players::kPeerIdHost) {
+        UE_LOGI("kerfur_command: verb '%ls' eid=%u from slot %u not run -- the client's held disc does not "
+                "reach the host, so the verb could only refuse on the host's screen", verb, eid, requesterSlot);
+        return;
+    }
     const uint8_t before = SP::ServedSlot(actor);
     uint8_t serves = requesterSlot;
     if (serves != coop::players::kPeerIdHost && !g_killLive) {
