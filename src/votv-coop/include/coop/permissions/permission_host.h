@@ -66,15 +66,16 @@ struct ApplyResult {
 };
 
 // One edit of one holder, in this order: no running hosted session (NoSession); adopt a pending
-// publish; no server folder; read the store's texts from DISK (a folder or a file it cannot read, a
-// stem that is no group name or player id, each refuse the edit before anything else); PlanEdit
+// publish; no server folder; read the store's texts from DISK (a folder or a file it cannot read,
+// a stem that is no group name or player id, each refuse the edit before anything else); PlanEdit
 // with the host's own id as the owner and the live subject; then NoChange publishes the disk's
 // reading, a refusal answers its reason, a change is written (one file, whole), published (the
 // loader's reading of the files), logged and appended to `<folder>\permissions\actions.jsonl` as
-// `action` through `AppendAction`. A change and a no-change each log the microseconds from the start of the call to the
-// log line (` in <n> us`), the read of the store included (on a change the action-log append comes
-// after it), so a rig can measure it. An edit saved by hand to the SAME holder's file between the
-// read and the move is lost; a hand edit to any other file is part of what the next edit reads.
+// `action` through `AppendAction`. A change and a no-change each log the microseconds from the
+// start of the call to the log line (` in <n> us`), the read of the store included (on a change
+// the action-log append comes after it), so a rig can measure it. An edit saved by hand to the
+// SAME holder's file between the read and the move is lost; a hand edit to any other file is part
+// of what the next edit reads.
 // GAME THREAD.
 ApplyResult Apply(const HolderKey& key, const std::function<bool(Model& copy, std::string* why)>& change,
                   bool callerIsOwner, const std::vector<std::string>& nodes, const Action& action);
