@@ -58,4 +58,33 @@ struct ReleaseKey {
 size_t ReleaseKeyCount();
 const ReleaseKey& ReleaseKeyAt(size_t index);  // index < ReleaseKeyCount()
 
+// --- this process's own build (self_identity.cpp) ---------------------------------------------------
+
+enum class SelfStep : uint8_t {
+    NotComputed,   // ComputeSelf has not published
+    NoModulePath,  // the module's own path did not resolve
+    ReadFailed,    // main.dll could not be opened or read
+    HashFailed,    // the CNG provider failed
+    NoSigFile,     // <path>.sig does not exist (ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND)
+    SigMalformed,  // the .sig could not be read, is larger than 1 KiB, or fails ParseSigFile
+    TargetMismatch,
+    BuildMismatch,
+    HashMismatch,
+    SigPresent  // every field matched; whether it VERIFIES is SignatureVerifies' answer
+};
+
+struct BuildIdentity {
+    uint8_t sha256[kShaBytes]{};  // the file's hash: valid at NoSigFile and every later step
+    SelfStep step = SelfStep::NotComputed;
+    SigFile sig;  // meaningful only when step == SigPresent
+};
+
+void ComputeSelf();                // boot thread, once, before harness::Start
+const BuildIdentity& Self();       // any thread
+bool SelfIsOfficial();             // step == SigPresent && SignatureVerifies(sig, ResolveFlag(rows::build_trust_test_key))
+const char* StepName(SelfStep step);
+const char* StatusSuffix();        // "" when SelfIsOfficial(), else " (unofficial build)"
+std::string SelfShaHex();          // 64 lowercase hex of Self().sha256
+std::string SelfSigHex();          // 128 lowercase hex of Self().sig.sig when step == SigPresent, else ""
+
 }  // namespace coop::build_trust

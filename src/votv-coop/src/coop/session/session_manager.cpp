@@ -6,6 +6,7 @@
 
 #include "session_manager_internal.h"  // co-located: what the host and join lanes share
 
+#include "coop/build_trust/build_trust.h"  // StatusSuffix -- "(unofficial build)" on the label
 #include "coop/config/config.h"           // Resolve* -- the password and net.port rows
 #include "coop/config/config_registry.h"  // T7: the my-name default constant
 #include "coop/net/lobby_announcer.h"
@@ -203,11 +204,12 @@ const char* GameTarget() { return coop::version::kGameTarget; }
 std::string DisplayVersion() {
     // The version identity is the pair (game target, build number), with no separate mod semver;
     // the build number is kProtocolVersion, which moves exactly when compatibility moves.
-    // Function-static: the inputs are compile-time constants and the browser header calls this
-    // every frame.
+    // Function-static: the inputs never change once the session runs, and the browser header calls
+    // this every frame.
     static const std::string kLabel =
         std::string("Multivoid ") + coop::version::kGameTarget +
-        " b" + std::to_string(static_cast<int>(net::kProtocolVersion));
+        " b" + std::to_string(static_cast<int>(net::kProtocolVersion)) +
+        coop::build_trust::StatusSuffix();
     return kLabel;
 }
 

@@ -8,6 +8,7 @@
 
 #include "bootstrap/refuse_dialog.h"  // the stand-down modal (never the overlay's dialog)
 #include "ui/native_text_field.h"   // its un-gated editing selftest
+#include "coop/build_trust/build_trust.h"  // ComputeSelf -- this DLL's hash and type
 #include "coop/net/protocol.h"  // kProtocolVersion -- the b<N> build rev in the banner
 #include "coop/version.h"
 #include "harness/harness.h"
@@ -129,11 +130,12 @@ DWORD WINAPI BootThread(LPVOID rawTag) {
     // The Paper-pair identity line: game target + build number (= kProtocolVersion).
     UE_LOGI("boot: Multivoid %s b%u", coop::version::kGameTarget,
             static_cast<unsigned>(coop::net::kProtocolVersion));
-    // Build triage line: discriminates same-proto rebuilds in bug reports
-    // (banner-only -- never announced, never gated; the DLL hash stays the deploy
-    // truth). The exe identity beside kGameTarget makes an install-skew report
-    // (mod built for cook X running on exe Y) one-look diagnosable from the log.
+    // Build triage lines: the compile time below, then build_trust's line with this DLL's own hash
+    // and its type (official, signed by the test key, or unofficial and why). The exe identity
+    // beside kGameTarget makes an install-skew report (mod built for cook X running on exe Y)
+    // one-look diagnosable from the log.
     UE_LOGI("boot: compiled %s %s", __DATE__, __TIME__);
+    coop::build_trust::ComputeSelf();
     // Entry + load-moment marker: which entry point brought us in (start_mod, entry=cppmod, is
     // the only one this binary can print) and how late relative to process creation. UE4SS starts
     // its C++ mods from its constructor, before any scan of its own.

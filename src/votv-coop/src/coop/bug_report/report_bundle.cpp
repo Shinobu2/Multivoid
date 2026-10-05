@@ -10,6 +10,7 @@
 #include "report_stream.h"
 
 #include "coop/atomic_file/atomic_file.h"
+#include "coop/build_trust/build_trust.h"
 #include "coop/config/config_report.h"
 #include "coop/net/peer_identity.h"
 #include "coop/net/protocol.h"
@@ -411,6 +412,8 @@ Status Build(const Form& form, const Capture& cap) {
     meta["format"] = 1;
     meta["game_target"] = coop::version::kGameTarget;
     meta["build"] = coop::net::kProtocolVersion;
+    meta["build_official"] = coop::build_trust::SelfIsOfficial();
+    meta["build_sha"] = coop::build_trust::SelfShaHex();
     meta["role"] = cap.role;
     meta["slot"] = cap.slot < 0 ? Json(nullptr) : Json(cap.slot);
     meta["players"] = cap.players;
