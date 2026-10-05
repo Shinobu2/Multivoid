@@ -64,7 +64,8 @@ struct EditPlan {
 // entry in `texts` byte for byte, or both are absent (a hand-written file the change left the same
 // in meaning is still rewritten in canonical form; a deny the default step overrides is no
 // change; the empty group `default` and a user in the default state keep no file, so an edit that
-// leaves one so is no change over no file and a delete over one); the owner invariant. PURE: nothing is read or written.
+// leaves one so is no change over no file and a delete over one); the owner invariant. PURE:
+// nothing is read or written.
 EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& key,
                   const std::function<bool(Model& copy, std::string* why)>& change, bool callerIsOwner,
                   std::string_view ownerId, const ContextSet& subject, int64_t now,
