@@ -17,6 +17,7 @@
 #include "harness/autotest.h"
 
 #include "coop/config/config.h"
+#include "coop/config/config_selftest.h"
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/paths.h"

@@ -18,6 +18,7 @@
 
 #include "config_internal.h"
 #include "coop/config/config_registry.h"
+#include "coop/config/config_selftest.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/paths.h"
 

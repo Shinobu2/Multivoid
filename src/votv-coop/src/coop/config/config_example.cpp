@@ -18,6 +18,7 @@
 #include "config_internal.h"
 #include "coop/atomic_file/atomic_file.h"
 #include "coop/config/config_registry.h"
+#include "coop/config/config_selftest.h"
 #include "coop/net/protocol.h"   // kDefaultDirectAddr (the retired-value migration)
 #include "coop/version.h"
 #include "ue_wrap/core/log.h"

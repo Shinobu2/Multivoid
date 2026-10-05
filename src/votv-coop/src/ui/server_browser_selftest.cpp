@@ -18,6 +18,7 @@
 
 #include "coop/config/config.h"           // the ini line a tab click must have written
 #include "coop/config/config_registry.h"
+#include "coop/config/config_selftest.h"
 #include "coop/net/lobby_client.h"        // LobbyRow -- the rows a tab click must bring
 #include "coop/net/lobby_password.h"      // kGeneratedLength -- what a minted password measures
 #include "coop/net/master_slots.h"

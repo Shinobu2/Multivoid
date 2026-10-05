@@ -13,6 +13,7 @@
 #include "config_internal.h"
 #include "coop/atomic_file/atomic_file.h"
 #include "coop/config/config_registry.h"
+#include "coop/config/config_selftest.h"
 #include "ue_wrap/core/log.h"
 
 #include <windows.h>
