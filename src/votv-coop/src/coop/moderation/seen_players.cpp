@@ -2,6 +2,7 @@
 
 #include "coop/moderation/seen_players.h"
 
+#include "coop/atomic_file/atomic_file.h"
 #include "coop/moderation/moderation.h"    // EnforceableAddress
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"  // kMaxPeers
@@ -65,15 +66,25 @@ void WriteFileLocked() {
         UE_LOGW("seen_players: module dir unresolved -- registry not persisted");
         return;
     }
-    std::ofstream f(path, std::ios::trunc);
-    if (!f) {
-        UE_LOGW("seen_players: cannot open '%ls' for write -- registry not persisted",
-                path.c_str());
-        return;
+    std::string text =
+        "# VOTV coop seen-players registry -- one player per line: guid|nick|lastSeenUnix|ip\n";
+    for (const auto& [guid, rec] : g_records) {
+        text += guid;
+        text += '|';
+        text += rec.nick;
+        text += '|';
+        text += std::to_string(rec.lastSeenUnix);
+        text += '|';
+        text += rec.ip;
+        text += '\n';
     }
-    f << "# VOTV coop seen-players registry -- one player per line: guid|nick|lastSeenUnix|ip\n";
-    for (const auto& [guid, rec] : g_records)
-        f << guid << '|' << rec.nick << '|' << rec.lastSeenUnix << '|' << rec.ip << '\n';
+    // Cached: written under g_mutex on the game thread at each join and leave, so a flush would
+    // block a frame for a record of who was seen.
+    const atomic_file::Result r =
+        atomic_file::Write(path, text, atomic_file::Mode::Replace, atomic_file::Sync::Cached);
+    if (!r.ok())
+        UE_LOGW("seen_players: could not write '%ls' (%s) -- registry not persisted", path.c_str(),
+                atomic_file::Describe(r).c_str());
 }
 
 void FillEntryLocked(const std::string& guid, const Record& rec, Entry& e) {

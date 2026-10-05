@@ -2,6 +2,7 @@
 
 #include "coop/moderation/ban_list.h"
 
+#include "coop/atomic_file/atomic_file.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/paths.h"
 
@@ -89,26 +90,12 @@ void WriteFile(const std::vector<Entry>& copy) {
     }
     if (g_serverDir.empty()) return;
     const fs::path path = fs::path(g_serverDir) / L"bans.json";
-    const fs::path tmp = fs::path(g_serverDir) / L"bans.json.tmp";
     const std::string text = SerializeBans(copy);
-    {
-        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        f.write(text.data(), static_cast<std::streamsize>(text.size()));
-        f.flush();
-        if (!f) {
-            UE_LOGE("ban_list: could not write %ls (%s) -- the ban holds for this session only",
-                    tmp.c_str(), "the temporary file did not take the text");
-            return;
-        }
-    }
-    std::error_code ec;
-    fs::rename(tmp, path, ec);  // MSVC's rename replaces an existing target
-    if (ec) {
+    const atomic_file::Result r =
+        atomic_file::Write(path, text, atomic_file::Mode::Replace, atomic_file::Sync::ToDisk);
+    if (!r.ok())
         UE_LOGE("ban_list: could not write %ls (%s) -- the ban holds for this session only",
-                path.c_str(), ec.message().c_str());
-        std::error_code rm;
-        fs::remove(tmp, rm);
-    }
+                path.c_str(), atomic_file::Describe(r).c_str());
 }
 
 }  // namespace

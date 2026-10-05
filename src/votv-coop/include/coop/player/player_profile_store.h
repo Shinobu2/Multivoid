@@ -64,8 +64,8 @@ bool AnythingPending();
 void MarkWorldGathered();
 
 // The host's world save was written to `writtenSlot`: bring the set beside that file if it stood
-// under another slot, then write what the last gather set aside (atomically -- a temp file and a
-// rename -- keeping the previous file as .bak). Returns how many were written. A failed write
+// under another slot, then write what the last gather set aside (atomically, through
+// coop/atomic_file, keeping the previous file as .bak). Returns how many were written. A failed write
 // stays for the next cut; a profile that is on disk and unchanged since is let go of, because Get
 // gives it back from its file. One world is written under more than one name: a quicksave writes
 // a new <main>_SUB_<n> file, and a plain save made after loading a subsave writes the main slot.
