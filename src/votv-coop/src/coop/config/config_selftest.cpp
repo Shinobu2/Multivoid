@@ -381,4 +381,19 @@ int SelftestQuotedValues() {
     return fail;
 }
 
+int SelftestAnnounce() {
+    namespace reg = config_registry;
+    const bool breakAnnounce = ResolveFlag(reg::rows::selftest_break_announce);
+    int fail = 0;
+    auto expect = [&](const char* what, bool ok) {
+        if (ok) UE_LOGI("config-selftest: announce %s ok", what);
+        else { UE_LOGW("config-selftest: FAIL announce %s", what); ++fail; }
+    };
+    const auto& row = *reg::rows::voice_distance_cm.row;
+    expect("equal spelling", !ShouldAnnounce(row, "4800", "4800.0"));
+    expect("changed", ShouldAnnounce(row, "4800", breakAnnounce ? "4800" : "6000"));
+    expect("not notify", !ShouldAnnounce(*reg::rows::net_ratecontrol.row, "0", "1"));
+    return fail;
+}
+
 }  // namespace coop::config

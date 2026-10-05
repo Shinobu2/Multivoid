@@ -129,12 +129,15 @@ const char* const* CredentialKeys(size_t& count);
 // time. kRowLive = every reader of the row follows a set (subscribed, or re-resolving at each use):
 // a pane draws it without "Takes effect at the next session" (a server row) or "... next launch"
 // (a local row). kRowAddress = its value can name a peer or a server: ValueForLog marks it unless
-// it equals the row's compiled default.
+// it equals the row's compiled default. kRowNotify = a change of its value is announced to every
+// player (Source's FCVAR_NOTIFY); a notify row is replicated, labelled, never a credential, never an
+// address row, and its kind is Flag, Int, Float or Enum.
 enum RowFlag : unsigned {
     kRowServer = 1u << 0,
     kRowReplicated = 1u << 1,
     kRowLive = 1u << 2,
     kRowAddress = 1u << 3,
+    kRowNotify = 1u << 4,
 };
 
 // The limits of a replicated row, the registry's facts so that this file needs no other header.
@@ -152,6 +155,7 @@ bool IsServerScope(const Row* row);
 bool IsReplicated(const Row* row);
 bool IsLive(const Row* row);
 bool IsAddressRow(const Row* row);
+bool IsNotify(const Row* row);
 
 // THE printed form of a config value, for every log line, ini line and report that quotes one: a
 // null row (an unknown key) is "<not shown>"; an identity or credential row "<set>"; an address

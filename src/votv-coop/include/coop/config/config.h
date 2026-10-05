@@ -135,6 +135,9 @@ void SessionLayerPut(const config_registry::Row* row, const std::string& text);
 // every row it held tells its subscribers, so a consumer resolves the install's own value again.
 // Any thread. Idempotent: with nothing held and no role it logs nothing.
 void SessionLayerEnd();
+// Game thread: the notify rows whose resolved value changed since the last take, in the order first
+// marked; a session's begin and end clear them.
+std::vector<const config_registry::Row*> TakePendingAnnouncements();
 
 // The typed layered reads: Resolve(row) is the session's value of a server-scope row while a
 // session runs (the session layer), then a value set while the game runs (the runtime layer),
@@ -178,6 +181,12 @@ std::string ResolveString(const config_registry::StringRow& row);
 // The text every Resolve of this row starts from: the top layer that answers, or the default as
 // text. Any thread.
 std::string EffectiveText(const config_registry::Row& row);
+// The census's rendering of `raw` as the row's resolved type -- a float `%.9g`, a flag `1`/`0` -- so
+// two spellings of one value render as one text.
+std::string ResolvedText(const config_registry::Row& row, const std::string& raw);
+// True when `row` is notify and its resolved value differs between the two raw texts.
+bool ShouldAnnounce(const config_registry::Row& row, const std::string& before,
+                    const std::string& after);
 // What a pane draws from EffectiveText, the readers' own steps exposed unchanged. FlagVerdict: 1 for
 // 1/true/yes/on, -1 for 0/false/no/off, 0 for anything else (a reader answers the row's default);
 // CookValue: the text cooked as the typed readers cook it, to compare with a row's tokens.
@@ -334,5 +343,7 @@ int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)());
 // The quoted-value grammar's selftest on a scratch ini beside the exe: what the writer quotes, the
 // reader returns whole. Returns the failure count; each check logs one config-selftest line.
 int SelftestQuotedValues();
+// ShouldAnnounce on pure inputs; returns the failure count, one config-selftest line per check.
+int SelftestAnnounce();
 
 }  // namespace coop::config

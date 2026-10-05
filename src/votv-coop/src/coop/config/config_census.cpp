@@ -28,7 +28,6 @@
 #include <vector>
 
 namespace coop::config {
-namespace {
 
 using config_registry::Kind;
 using config_registry::Row;
@@ -39,7 +38,7 @@ using config_registry::Row;
 // exactly what the RESOLVER returns -- before a consumer's own clamp. Two consumers clamp further
 // and the census does not follow them there: ReadNickname caps length and repertoire, and
 // ReadPlayerSkin replaces an unknown skin with a random starter.
-std::string Resolved(const Row& r, const std::string& raw) {
+std::string ResolvedText(const Row& r, const std::string& raw) {
     char buf[64];
     switch (r.kind) {
         case Kind::Flag:
@@ -58,7 +57,10 @@ std::string Resolved(const Row& r, const std::string& raw) {
     return raw;  // free strings are unvalidated, and an identity never reaches here
 }
 
-}  // namespace
+// The announcement's decision, by resolved value: two spellings of one value are no change.
+bool ShouldAnnounce(const Row& row, const std::string& before, const std::string& after) {
+    return config_registry::IsNotify(&row) && ResolvedText(row, before) != ResolvedText(row, after);
+}
 
 namespace internal {
 
@@ -109,7 +111,7 @@ void ReportEffectiveConfig() {
         if (unread) why = std::string("multivoid.ini ") + IniFaultWords(fault);
         const bool refused = !valid && r.failClosed;
         const std::string value = config_registry::ValueForLog(
-            &r, refused ? internal::Printable(raw) : Resolved(r, raw));
+            &r, refused ? internal::Printable(raw) : ResolvedText(r, raw));
         // The env/ini label holds only before the first SetValue: fromEnv is false when the
         // runtime layer answered, so a row set this run reads "ini" here whatever its source.
         if (valid)

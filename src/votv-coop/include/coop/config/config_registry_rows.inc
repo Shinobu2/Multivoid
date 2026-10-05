@@ -223,7 +223,7 @@ CFG_FLOAT(voice_distance_cm, "voice.distance_cm", "voice", 4800.0f, 0, 1000000, 
     "Maximum voice audibility distance in centimeters (4800 = 48 m); 0 = unlimited (a whisper "
     "stays local); the host's setting in a session. A value of 1..99 is a near-mute range, the "
     "host's to choose.")
-CFG_ROWFLAGS(voice_distance_cm, kRowServer | kRowReplicated | kRowLive)
+CFG_ROWFLAGS(voice_distance_cm, kRowServer | kRowReplicated | kRowLive | kRowNotify)
 CFG_LABEL(voice_distance_cm, "Voice range")
 CFG_INT(voice_jitter_threshold, "voice.jitter_threshold", "voice", 3, 0, 60, nullptr,
     "Jitter buffer: late-packet tolerance in frames before a reset.")

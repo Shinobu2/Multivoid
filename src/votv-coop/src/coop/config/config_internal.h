@@ -146,7 +146,8 @@ int SessionRole();
 // The session's value of `row`: false unless a session runs and the row is held.
 bool SessionLayerGet(const config_registry::Row* row, std::string& raw);
 // The host's in-setter put: SetValueAt and ResetValueAt call it with the set lock held, before
-// their one notification, so it notifies nobody.
+// their one notification, so it notifies no subscriber; it marks a changed notify row for
+// announcement (TakePendingAnnouncements).
 void SessionLayerPutNoNotify(const config_registry::Row* row, const std::string& raw);
 // The one sanitiser a value passes before it enters the host's session layer (a session's start,
 // a reset): `raw` when the reader accepts it and, for a replicated row, the wire can carry it;

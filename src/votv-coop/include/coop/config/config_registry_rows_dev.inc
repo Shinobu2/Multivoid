@@ -75,6 +75,8 @@ CFG_FLAG(selftest_break_runtime_layer, "selftest_break_runtime_layer", "dev", fa
     "Red arm of the runtime-layer selftest: its first SetValue is skipped, so every check that reads the value it would have set must fail.")
 CFG_FLAG(selftest_break_quoting, "selftest_break_quoting", "dev", false, "VOTVCOOP_SELFTEST_BREAK_QUOTING",
     "Red arm of the quoting selftest: its first check writes its line unquoted, so the ;-value reads back cut and the check must fail.")
+CFG_FLAG(selftest_break_announce, "selftest_break_announce", "dev", false, "VOTVCOOP_SELFTEST_BREAK_ANNOUNCE",
+    "Red arm of the announce selftest: its changed check compares a value with itself, so it must fail.")
 CFG_FLAG(selftest_break_server_id, "selftest_break_server_id", "dev", false, "VOTVCOOP_SELFTEST_BREAK_SERVER_ID",
     "Red arm of the server_profile selftest: its first id case expects the wrong answer, so it must fail.")
 CFG_INT(selftest_runtime_probe, "selftest_runtime_probe", "dev", 0, 0, 9, "VOTVCOOP_SELFTEST_RUNTIME_PROBE",

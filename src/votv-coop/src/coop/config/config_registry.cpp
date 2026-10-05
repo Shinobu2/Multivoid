@@ -450,6 +450,34 @@ constexpr bool NoCredentialAddress() {
     }
     return true;
 }
+constexpr bool NotifyImpliesReplicated() {
+    for (size_t i = 0; i < kRowCount; ++i)
+        if ((kRowFlags[i] & kRowNotify) && !(kRowFlags[i] & kRowReplicated)) return false;
+    return true;
+}
+constexpr bool NoNotifyAddress() {
+    for (size_t i = 0; i < kRowCount; ++i)
+        if ((kRowFlags[i] & kRowNotify) && (kRowFlags[i] & kRowAddress)) return false;
+    return true;
+}
+constexpr bool NotifyIsLabelled() {
+    for (size_t i = 0; i < kRowCount; ++i) {
+        if (!(kRowFlags[i] & kRowNotify)) continue;
+        bool labelled = false;
+        for (size_t j = 0; j < kRowLabelCount; ++j)
+            if (kRowLabels[j].row == &kRows[i]) labelled = true;
+        if (!labelled) return false;
+    }
+    return true;
+}
+constexpr bool NotifyIsScalar() {
+    for (size_t i = 0; i < kRowCount; ++i) {
+        if (!(kRowFlags[i] & kRowNotify)) continue;
+        const Kind k = kRows[i].kind;
+        if (k != Kind::Flag && k != Kind::Int && k != Kind::Float && k != Kind::Enum) return false;
+    }
+    return true;
+}
 constexpr bool ReplicatedKeysFitTheWire() {
     for (size_t i = 0; i < kRowCount; ++i)
         if ((kRowFlags[i] & kRowReplicated) && CLen(kRows[i].key) > kServerSettingKeyMax)
@@ -468,6 +496,10 @@ static_assert(ReplicatedImpliesServer(), "a kRowReplicated row must also be kRow
 static_assert(NoLabelledIdentity(), "a labelled row must not be Kind::Identity: a pane has no drawer for it");
 static_assert(NoReplicatedCredential(), "a credential row must never be kRowReplicated");
 static_assert(NoCredentialAddress(), "a credential row must never be kRowAddress");
+static_assert(NotifyImpliesReplicated(), "a notify row must be replicated");
+static_assert(NoNotifyAddress(), "a notify row is never an address row");
+static_assert(NotifyIsLabelled(), "a notify row must be labelled");
+static_assert(NotifyIsScalar(), "a notify row must be a flag, int, float or enum");
 static_assert(ReplicatedKeysFitTheWire(),
               "a kRowReplicated row's key is longer than kServerSettingKeyMax");
 static_assert(ReplicatedDefaultsFitTheWire(),
@@ -499,6 +531,8 @@ bool IsReplicated(const Row* row) { return (RowFlags(row) & kRowReplicated) != 0
 bool IsLive(const Row* row) { return (RowFlags(row) & kRowLive) != 0; }
 
 bool IsAddressRow(const Row* row) { return row && (RowFlags(row) & kRowAddress) != 0; }
+
+bool IsNotify(const Row* row) { return (RowFlags(row) & kRowNotify) != 0; }
 
 std::string ValueForLog(const Row* row, std::string_view value) {
     if (!row) return "<not shown>";

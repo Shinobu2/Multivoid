@@ -17,6 +17,7 @@
 #include "coop/config/config_registry.h"
 #include "ue_wrap/core/log.h"
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 #include <string>
@@ -39,6 +40,9 @@ std::unordered_map<const Row*, std::string> g_sessionLayer;
 // 0 none, 1 host, 2 client. Written under the layer lock; read lock-free for the fast "no session"
 // answer.
 std::atomic<int> g_sessionRole{0};
+// The notify rows whose resolved value a host-side write changed since the last take, in the order
+// first marked. Guarded by internal::LayerMutex(); cleared by a session's begin and end.
+std::vector<const Row*> g_pendingAnnounce;
 
 // A value as the logs show it: through the registry's one printed form, after internal::Printable,
 // since the host chose its bytes.
@@ -65,6 +69,15 @@ bool SessionLayerGet(const Row* row, std::string& raw) {
 
 void SessionLayerPutNoNotify(const Row* row, const std::string& raw) {
     std::lock_guard<std::mutex> lk(LayerMutex());
+    // A row absent from the map is not marked: SessionLayerBegin fills every server-scope row
+    // before the session's role is set, so a host-side put never misses. The old value is read
+    // from the map, never through RawBelowSession, which reads the ini and the ini is never read
+    // under the layer lock. ShouldAnnounce is pure.
+    const auto it = g_sessionLayer.find(row);
+    if (it != g_sessionLayer.end() && ShouldAnnounce(*row, it->second, raw) &&
+        std::find(g_pendingAnnounce.begin(), g_pendingAnnounce.end(), row) ==
+            g_pendingAnnounce.end())
+        g_pendingAnnounce.push_back(row);
     g_sessionLayer[row] = raw;
 }
 
@@ -104,6 +117,7 @@ void SessionLayerBegin(bool host) {
         stale.reserve(g_sessionLayer.size());
         for (const auto& kv : g_sessionLayer) stale.push_back(kv.first);
         g_sessionLayer.clear();
+        g_pendingAnnounce.clear();
         for (const auto& f : fresh) g_sessionLayer[f.first] = f.second;
         g_sessionRole.store(host ? 1 : 2, std::memory_order_release);
     }
@@ -154,11 +168,21 @@ void SessionLayerEnd() {
         held.reserve(g_sessionLayer.size());
         for (const auto& kv : g_sessionLayer) held.push_back(kv.first);
         g_sessionLayer.clear();
+        g_pendingAnnounce.clear();
         g_sessionRole.store(0, std::memory_order_release);
     }
     if (!had) return;
     UE_LOGI("config: SESSION cleared (%u rows)", static_cast<unsigned>(held.size()));
     for (const Row* row : held) internal::PostNotify(row);
+}
+
+// The accepted limit: a row changed and changed back between two takes (A -> B -> A) stays marked
+// and announces its current value once.
+std::vector<const Row*> TakePendingAnnouncements() {
+    std::vector<const Row*> taken;
+    std::lock_guard<std::mutex> lk(internal::LayerMutex());
+    taken.swap(g_pendingAnnounce);
+    return taken;
 }
 
 }  // namespace coop::config
