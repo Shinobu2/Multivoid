@@ -1,11 +1,12 @@
 // coop/player/stat_orders_wire.h -- an admin's orders to, and queries of, one player's stats and
-// effects: their bytes, every check of a peer's bytes, and the host's table of the ones awaiting
+// effects: their bytes, the checks of a client's answer, and the host's table of the ones awaiting
 // an answer. Engine-free: no engine type, no session, no clock. The game thread uses it.
 //
 // Every check of a client's ANSWER is in an Unpack function, the length first; the host never
 // reads an answer any other way, so a client's bytes cannot fault it. An order's op, row and
-// numbers are judged by the client that takes it, which answers Refused and never drops it. Tokens: the table below mints them and never expires one. The reliable
-// channel delivers or the slot disconnects, and a slot's disconnect answers every token it holds.
+// numbers are judged by the client that takes it, which answers Refused and never drops it.
+// Tokens: the table below mints them and never expires one. The reliable channel delivers or the
+// slot disconnects, and a slot's disconnect answers every token it holds.
 //
 // Red arm: with the dev row selftest_break_stat_orders the selftest's first case expects the wrong
 // token, so the run must fail.
