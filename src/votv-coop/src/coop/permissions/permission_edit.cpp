@@ -4,8 +4,6 @@
 
 #include "coop/permissions/resolution.h"
 
-#include <nlohmann/json.hpp>
-
 #include <algorithm>
 #include <string>
 #include <utility>
@@ -184,21 +182,6 @@ std::vector<std::string> ProblemLines(const std::vector<std::string>& problems) 
     if (problems.size() > kMaxLines)
         lines.push_back("... and " + std::to_string(problems.size() - kMaxLines) + " more");
     return lines;
-}
-
-std::string ActionJson(const Action& a, int64_t timestamp) {
-    using OJson = nlohmann::ordered_json;
-    OJson line = OJson::object();
-    line["timestamp"] = timestamp;
-    line["source"] = OJson::object();
-    line["source"]["id"] = a.sourceId;
-    line["source"]["name"] = a.sourceName;
-    line["target"] = OJson::object();
-    line["target"]["type"] = a.targetType;
-    line["target"]["id"] = a.targetId;
-    line["target"]["name"] = a.targetName;
-    line["description"] = a.description;
-    return line.dump(-1, ' ', false, OJson::error_handler_t::replace);
 }
 
 }  // namespace coop::permissions

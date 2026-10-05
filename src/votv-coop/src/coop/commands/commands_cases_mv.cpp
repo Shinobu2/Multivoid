@@ -10,6 +10,7 @@
 #include "coop/commands/command_targets.h"
 #include "coop/commands/commands_selftest.h"
 #include "coop/commands/mv_commands.h"
+#include "coop/permissions/action_log.h"
 #include "coop/permissions/permission_edit.h"
 
 #include <algorithm>

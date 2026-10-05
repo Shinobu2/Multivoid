@@ -78,22 +78,9 @@ EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& key,
 bool OwnerLoses(const Model& before, const Model& after, std::string_view ownerId, const ContextSet& subject,
                 int64_t now, const std::vector<std::string>& nodes, std::string* which);
 
-// One permission change as the host logs it and appends it to the action log: who (the proved id
-// and the nick), what it acted on (`user` or `group`, its id or name, its display name) and the
-// description (`/mv ` and the canonical line). LuckPerms' LoggedAction fields
-// (LoggedAction.java:69-72).
-struct Action {
-    std::string sourceId, sourceName, targetType, targetId, targetName, description;
-};
-
 // The lines a host answers for a list of loader problems: at most five, each at most 200 bytes
 // INCLUDING the `...` it ends with when it was cut (cut on a UTF-8 boundary at or before byte 197),
 // then `... and N more` when there are more than five. PURE.
 std::vector<std::string> ProblemLines(const std::vector<std::string>& problems);
-
-// The action log's line without its `\n`: the compact `ordered_json` `{"timestamp", "source": {"id",
-// "name"}, "target": {"type", "id", "name"}, "description"}` in that key order, `timestamp` in epoch
-// seconds, a byte that is not UTF-8 replaced (ActionJsonSerializer's keys). PURE.
-std::string ActionJson(const Action& a, int64_t timestamp);
 
 }  // namespace coop::permissions

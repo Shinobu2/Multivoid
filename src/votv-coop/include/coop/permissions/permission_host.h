@@ -13,6 +13,7 @@
 // node there); outside one, Apply answers NoSession and Reload an empty vector.
 #pragma once
 
+#include "coop/permissions/action_log.h"
 #include "coop/permissions/permission_edit.h"
 
 #include <cstdint>
@@ -70,7 +71,7 @@ struct ApplyResult {
 // with the host's own id as the owner and the live subject; then NoChange publishes the disk's
 // reading, a refusal answers its reason, a change is written (one file, whole), published (the
 // loader's reading of the files), logged and appended to `<folder>\permissions\actions.jsonl` as
-// `action`. A change and a no-change each log the microseconds from the start of the call to the
+// `action` through `AppendAction`. A change and a no-change each log the microseconds from the start of the call to the
 // log line (` in <n> us`), the read of the store included (on a change the action-log append comes
 // after it), so a rig can measure it. An edit saved by hand to the SAME holder's file between the
 // read and the move is lost; a hand edit to any other file is part of what the next edit reads.

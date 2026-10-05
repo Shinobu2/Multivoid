@@ -14,7 +14,6 @@
 #include <chrono>
 #include <ctime>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -94,22 +93,6 @@ std::vector<std::string> WithProblems(const char* header, const std::vector<std:
     std::vector<std::string> lines{header};
     for (std::string& line : ProblemLines(problems)) lines.push_back(std::move(line));
     return lines;
-}
-
-// One line to the action log. The change stands when the append fails: the log is a record a person
-// reads, and a torn last line is what a crash mid-append costs.
-void AppendActionLog(const std::filesystem::path& dir, const Action& action) {
-    const std::string line = ActionJson(action, NowSeconds()) + "\n";
-    bool appended = false;
-    {
-        std::ofstream f(dir / L"actions.jsonl", std::ios::binary | std::ios::app);
-        if (f) {
-            f.write(line.data(), static_cast<std::streamsize>(line.size()));
-            f.flush();
-            appended = static_cast<bool>(f);
-        }
-    }
-    if (!appended) UE_LOGW("permissions: could not append to actions.jsonl -- the change stands");
 }
 
 }  // namespace
@@ -238,7 +221,10 @@ ApplyResult Apply(const HolderKey& key, const std::function<bool(Model& copy, st
     }
     ReplaceLive(std::move(plan.candidate));
     UE_LOGI("permissions: %s (by %.8s) in %lld us", action.description.c_str(), action.sourceId.c_str(), spentUs());
-    AppendActionLog(dir, action);
+    // The change stands when the append fails: the log is a record a person reads, and a torn last
+    // line is what a crash mid-append costs.
+    if (!AppendAction(dir, action, NowSeconds()))
+        UE_LOGW("permissions: could not append to actions.jsonl -- the change stands");
     out.outcome = ApplyOutcome::Changed;
     out.replies.push_back("Done: " + action.description);
     return out;

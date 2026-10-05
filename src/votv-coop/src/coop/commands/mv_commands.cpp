@@ -14,6 +14,7 @@
 #include "coop/commands/command_dispatcher.h"
 #include "coop/permissions/model.h"
 #include "coop/permissions/node.h"
+#include "coop/permissions/action_log.h"
 #include "coop/permissions/permission_edit.h"
 
 #include <algorithm>

@@ -1,8 +1,10 @@
 // coop/permissions/permissions_cases_edit.cpp -- the checks of coop/permissions/permission_edit.h:
 // an edit planned over the store's texts as read, the file text it yields, the candidate model the
 // loader builds from the texts with that one replaced, the owner invariant, who refused, the
-// problem lines a host answers and the action log's line.
+// problem lines a host answers and the action log's line (`action_log`'s, checked here through its
+// include).
 
+#include "coop/permissions/action_log.h"
 #include "coop/permissions/permission_edit.h"
 #include "coop/permissions/permissions_selftest.h"
 #include "coop/permissions/resolution.h"
