@@ -5,13 +5,20 @@ Standard library only. A fake runner answers canned `gh` output and records ever
 keyword arguments, so no process starts and the real `gh` is never run; each run happens inside a
 temporary working directory with stdout and stderr captured. The fake answers only the three
 commands keygen may run, with the output a real `gh` prints (so an echo of it is seen), and acts
-on the keyword arguments the way `subprocess.run` does. Two mutants are always run and the same
-assertion helper as the green arms must flag each of them. The drill names a repository that does
-not exist, and for its whole run every route to a process refuses with an AssertionError:
-`subprocess.Popen` (which `run`, `check_output`, `check_call`, `call` and a by-name `run` all reach),
-`release_sign`'s own `subprocess.run`, and its own `os` process routes (`system`, `popen`, `spawn*`,
-`exec*`, `startfile`). A bypass of the injected runner is then a FAIL line and starts no process
-through those routes; the guards are restored when the run ends.
+on the keyword arguments the way `subprocess.run` does. Three mutants are always run and the same
+assertion helper as the green arms must flag each of them; one starts a process, which the guard
+below must refuse.
+
+The drill names a repository that does not exist and, for its whole run, refuses the process
+routes it can see with an AssertionError, so a bypass of the injected runner through one of them
+is a FAIL line and starts nothing. Covered: the shared `subprocess.Popen` and everything built on
+it (`run`, `check_output`, `check_call`, `call`, a `run` imported by name); `release_sign`'s own
+`subprocess` copy and its own `os` copy (`system`, `popen`, `startfile`, `spawn*`, `exec*`,
+`posix_spawn*`, `fork*`, whichever the platform has). Not covered: a name bound before the guard
+(`from subprocess import Popen`, `from os import system`), an alias or a function-local import of
+the real `os`, `_winapi`, `ctypes` or `multiprocessing` called directly. Detected where it can,
+never a sandbox: the drill judges the code, it does not contain it; a new route is for the
+custody review of the diff. The guards are restored when the run ends.
 
 Run: python -I -B .github/ci/release_sign_keygen_drill.py
 """
@@ -47,7 +54,10 @@ leaks = lib.leaks
 REAL_RUN = subprocess.run
 REAL_POPEN = subprocess.Popen
 REAL_OS = os
-REAL_SYSTEM = os.system
+# Process names the armed check asks for by name, so a typo in `process_routes` cannot hide a route
+# from the guard and from the check at once; a name this platform lacks is skipped.
+PROCESS_NAMES = ("system", "popen", "startfile", "spawnl", "spawnv", "execl", "execv",
+                 "posix_spawn", "fork")
 REPO = "drill-owner/drill-repo"
 ENV_ARGV = ["gh", "api", "repos/%s/environments/release" % REPO]
 POLICIES_ARGV = ["gh", "api", "repos/%s/environments/release/deployment-branch-policies" % REPO]
@@ -172,19 +182,24 @@ def refuse(*args, **kwargs):
 
 
 def process_routes(namespace):
-    """The names in `namespace` that start a process on this platform."""
+    """The names in `namespace` that start a process, by name: `system`, `popen`, `startfile` and
+    the `spawn*`, `exec*`, `posix_spawn*` and `fork*` families. `dir` lists only the names this
+    platform has (`startfile` on Windows, `posix_spawn*` and `fork*` on POSIX)."""
     return [n for n in dir(namespace)
-            if n in ("system", "popen", "startfile") or n.startswith(("spawn", "exec"))]
+            if n in ("system", "popen", "startfile")
+            or n.startswith(("spawn", "exec", "posix_spawn", "fork"))]
 
 
 @contextlib.contextmanager
 def no_process():
-    """Every route to a process refuses for the run. `subprocess.Popen` is replaced on the shared
-    module, because `run`, `check_output`, `check_call`, `call` and a `run` imported by name all
-    reach it through the module's globals; `release_sign`'s own `subprocess` (its `run` and `Popen`)
-    and its own `os` process routes (`system`, `popen`, `spawn*`, `exec*`, `startfile`) are replaced
-    by copies local to that module's namespace. Nothing else is blocked; all are restored in the
-    `finally`."""
+    """Refuses the process routes the drill can see, for the run (the module docstring lists what
+    is covered and what is not). `subprocess.Popen` is replaced on the shared module, because
+    `run`, `check_output`, `check_call`, `call` and a `run` imported by name all reach it through
+    the module's globals; `release_sign`'s own `subprocess` (its `run` and `Popen`) and its own
+    `os` routes (`process_routes`) are replaced by copies local to that module's namespace.
+    Detected where it can, never a sandbox: a name bound before the guard, an alias or a local
+    import of the real `os`, `_winapi`, `ctypes` and `multiprocessing` stay open. Every name this
+    patches is restored in the `finally`."""
     real_sub, real_os, real_popen = rs.subprocess, rs.os, subprocess.Popen
     sub_stub = types.SimpleNamespace(**vars(real_sub))
     sub_stub.run = sub_stub.Popen = refuse
@@ -261,6 +276,12 @@ def leaking_keygen(args, runner, out):
     return rc
 
 
+def process_starting_keygen(args, runner, out):
+    """Starts a harmless child through release_sign's own references; the guard must refuse it."""
+    rs.subprocess.Popen([sys.executable, "-c", "pass"])
+    return rs.cmd_keygen(args, runner, out)
+
+
 def unchecked_keygen(args, runner, out):
     runner(SECRET_ARGV, input=os.urandom(32).hex(), **SECRET_KWARGS)
     return rs.cmd_keygen(args, runner, out)
@@ -301,7 +322,8 @@ def drill_keygen_green(tmp):
 def drill_keygen_mutants(tmp):
     table = one_row_table(tmp)
     for name, mutant in (("a keygen that prints the seed", leaking_keygen),
-                         ("a keygen that skips the protection check", unchecked_keygen)):
+                         ("a keygen that skips the protection check", unchecked_keygen),
+                         ("a keygen that starts a process", process_starting_keygen)):
         check("mutant: %s caught" % name, bool(keygen_flaws(mutant, FakeGh(), table)))
 
 
@@ -429,10 +451,12 @@ def drill_keygen_wiring():
           rs._REPO.fullmatch(REPO) is not None)
     check("main's default runner is subprocess.run",
           inspect.signature(rs.main).parameters["runner"].default is REAL_RUN)
-    check("the process guards are armed (nothing is started to prove it)",
+    routes = set(process_routes(REAL_OS)) | {n for n in PROCESS_NAMES if hasattr(REAL_OS, n)}
+    check("the process guards are armed on every route (nothing is started to prove it)",
           rs.subprocess is not subprocess and rs.subprocess.run is not REAL_RUN
-          and subprocess.Popen is not REAL_POPEN and rs.os is not REAL_OS
-          and rs.os.system is not REAL_SYSTEM)
+          and subprocess.Popen is not REAL_POPEN and rs.subprocess.Popen is not REAL_POPEN
+          and rs.os is not REAL_OS
+          and all(getattr(rs.os, n) is not getattr(REAL_OS, n) for n in routes))
 
 
 def main():
@@ -442,10 +466,9 @@ def main():
         for group in (drill_keygen_green, drill_keygen_mutants, drill_keygen_refuses,
                       drill_keygen_secret, drill_keygen_readback, drill_keygen_ids):
             guarded(group, tmp)
-    check("the process guards are restored after the run: subprocess.run, subprocess.Popen, "
-          "release_sign's subprocess and os, and os.system",
-          subprocess.run is REAL_RUN and subprocess.Popen is REAL_POPEN
-          and rs.subprocess is subprocess and rs.os is REAL_OS and os.system is REAL_SYSTEM)
+    check("the process guards are restored after the run: subprocess.Popen and release_sign's "
+          "subprocess and os",
+          subprocess.Popen is REAL_POPEN and rs.subprocess is subprocess and rs.os is REAL_OS)
     return lib.finish("release_sign keygen drill")
 
 
