@@ -10,6 +10,7 @@
 #include "ue_wrap/engine/data_table.h"
 #include "ue_wrap/world/world_singleton.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <cwchar>
@@ -26,10 +27,11 @@ namespace SR = ue_wrap::save_record;
 
 std::vector<std::wstring> g_names;
 bool g_haveNames = false;
-bool g_structural = false;  // the table is there, but its rows cannot be read: for the process
-bool g_saidAbsent = false;
+bool g_saidAbsent = false;  // log-once latches only: neither one decides a result
+bool g_saidRows = false;
 
-// A table not loaded yet is not a verdict; its absence costs one walk of the object array a call.
+// A table not loaded yet, or not yet readable, is not a verdict; each costs one walk of the object
+// array a call until it reads.
 bool ReadNamesOnce() {
     void* const table = R::FindObject(L"list_effects", L"DataTable");
     if (!table) {
@@ -39,8 +41,8 @@ bool ReadNamesOnce() {
     }
     std::vector<DT::RowRef> rows;
     if (!DT::Rows(table, rows, "effects") || rows.empty()) {
-        g_structural = true;
-        UE_LOGW("effects: list_effects' rows did not read (%zu rows) -- the effects are out of reach", rows.size());
+        if (!g_saidRows) UE_LOGW("effects: list_effects' rows did not read (%zu rows) -- asked again at the next call", rows.size());
+        g_saidRows = true;
         return false;
     }
     g_names.clear();
@@ -62,6 +64,9 @@ bool TableSpelling(const std::wstring& name, std::wstring* out) {
     }
     return false;
 }
+
+// StringToFName returns NAME_None on a failed conversion; a table spelling is never empty.
+bool IsNone(const R::FName& n) { return n.ComparisonIndex == 0 && n.Number == 0; }
 
 // ---- the gamemode's arrays and verbs, resolved per gamemode class ----------------------------
 
@@ -118,7 +123,7 @@ bool EnsureEffectOffsets() {
 
 bool Names(std::vector<std::wstring>* out) {
     if (!out) return false;
-    if (!g_haveNames && !g_structural) g_haveNames = ReadNamesOnce();
+    if (!g_haveNames) g_haveNames = ReadNamesOnce();
     if (!g_haveNames) return false;
     *out = g_names;
     return true;
@@ -127,10 +132,12 @@ bool Names(std::vector<std::wstring>* out) {
 bool List(std::vector<Entry>* out) {
     if (!out) return false;
     void* const gm = GamemodeObject();
-    if (!gm || g_gm.effectsNames < 0 || g_gm.effects < 0 || !EnsureEffectOffsets()) return false;
+    if (!gm || g_gm.effectsNames < 0 || g_gm.effects < 0) return false;
     const SR::Arr names = SR::ReadArr(gm, g_gm.effectsNames);
     const SR::Arr actors = SR::ReadArr(gm, g_gm.effects);
     if (names.num != actors.num) return false;
+    // effect_C is needed only to read an actor: an empty pair of arrays lists as empty without it.
+    if (actors.num > 0 && !EnsureEffectOffsets()) return false;
     out->clear();
     out->reserve(static_cast<size_t>(names.num));
     for (int32_t i = 0; i < names.num; ++i) {
@@ -150,18 +157,19 @@ bool List(std::vector<Entry>* out) {
 }
 
 bool Add(const std::wstring& name, float strength, float seconds) {
+    if (!std::isfinite(strength) || !std::isfinite(seconds)) return false;
     std::wstring spelled;
     if (!TableSpelling(name, &spelled)) return false;
     void* const gm = GamemodeObject();
     if (!gm || !g_gm.addEffectFn) return false;
     const R::FName effect = fname_utils::StringToFName(spelled);
+    if (IsNone(effect)) return false;
     ParamFrame f(g_gm.addEffectFn);
     if (!f.valid()) return false;
-    f.Set<R::FName>(L"effect", effect);
-    f.Set<float>(L"strength", strength);
-    f.Set<float>(L"time", seconds);
-    f.Set<bool>(L"incrementStrength", false);
-    f.Set<bool>(L"incrementTime", false);
+    if (!f.Set<R::FName>(L"effect", effect) || !f.Set<float>(L"strength", strength) ||
+        !f.Set<float>(L"time", seconds) || !f.Set<bool>(L"incrementStrength", false) ||
+        !f.Set<bool>(L"incrementTime", false))
+        return false;
     return Call(gm, f);
 }
 
@@ -180,9 +188,10 @@ bool Remove(const std::wstring& name) {
     void* const gm = GamemodeObject();
     if (!gm || !g_gm.removeEffectFn) return false;
     const R::FName pin = fname_utils::StringToFName(spelled);
+    if (IsNone(pin)) return false;
     ParamFrame f(g_gm.removeEffectFn);
     if (!f.valid()) return false;
-    f.Set<R::FName>(L"InputPin", pin);
+    if (!f.Set<R::FName>(L"InputPin", pin)) return false;
     return Call(gm, f);
 }
 

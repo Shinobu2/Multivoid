@@ -18,25 +18,31 @@
 namespace ue_wrap::effects {
 
 // The game's effect names: the row names of its list_effects DataTable. Read once and kept (the
-// table does not change within a run); false while the table is not loaded.
+// table does not change within a run); false while the table is not loaded or its rows do not
+// read, each asked again at the next call.
 bool Names(std::vector<std::wstring>* out);
 
 // live false: the actor is gone (strength and time are then 0).
 struct Entry { std::wstring name; bool live; float strength; float time; };
 
 // The gamemode's effects, effects_names[i] beside effects[i]. False when the gamemode or a
-// property does not resolve, or the two arrays differ in length.
+// property does not resolve, the two arrays differ in length, or effect_C's strength and time do
+// not resolve while the arrays hold an entry; an empty pair of arrays lists as empty.
 bool List(std::vector<Entry>* out);
 
 // gamemode addEffect(effect, strength, time, incrementStrength=false, incrementTime=false). False,
 // calling nothing, for a name not in Names() (matched without case; the table's spelling is what
-// the game receives), or when the gamemode or the function does not resolve. On a non-stacking
-// effect already active the game merges: strength and time each become the larger of old and new.
+// the game receives), for a non-finite strength or seconds, or when the gamemode or the function
+// does not resolve, a parameter does not set, or the name does not convert to an FName. True means
+// the game's verb ran, not that an entry was added: on a non-stacking effect already active the game
+// merges (strength and time each become the larger of old and new), and a stale entry makes that
+// merge a no-op.
 bool Add(const std::wstring& name, float strength, float seconds);
 
 // gamemode removeEffect(InputPin): the first entry of `name`. False, calling nothing, when List
 // has no entry of that name or its first one is not live (the game would call removeRanout on a
-// destroyed actor).
+// destroyed actor), or a parameter does not set or the name does not convert to an FName. One call
+// takes one instance.
 bool Remove(const std::wstring& name);
 
 }  // namespace ue_wrap::effects
