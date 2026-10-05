@@ -428,7 +428,12 @@ void DrainDirty(coop::net::Session* s) {
         void* actor = LivePropActor(eid);
         if (!actor || !IsContainerActor(actor)) continue;
         void* inv = InventoryOf(actor);
-        if (!inv || !IsWorldContainerInventory(inv)) continue;   // BOUNDARY 1 (fail-closed)
+        if (!inv || !IsWorldContainerInventory(inv)) {   // BOUNDARY 1 (fail-closed)
+            // A first publication owed for it waits for the component instead of ending here.
+            auto owed = g_owedFirst.find(eid);
+            if (owed != g_owedFirst.end() && NowMs() < owed->second) g_retry.insert(eid);
+            continue;
+        }
         // A transfer in progress is not published: what the host added to it so far merges into the
         // author's slice when it lands, and is published with it.
         if (IsHost() && AwaitedBirth(eid, 0)) { g_retry.insert(eid); continue; }
@@ -596,13 +601,15 @@ Ingest ParseAndApply(const std::vector<uint8_t>& blob, uint32_t& outEid, uint8_t
         void* inv = actor && IsContainerActor(actor) ? InventoryOf(actor) : nullptr;
         std::vector<SR::SaveRecord> hostRecs;
         if (inv && ReadContents(inv, hostRecs, /*neuterNested=*/false) && !hostRecs.empty()) {
-            if (recs.size() + hostRecs.size() <= cw::kMaxRecords) {
-                recs.insert(recs.end(), hostRecs.begin(), hostRecs.end());
-                merged = true;
-            } else {
+            if (recs.size() + hostRecs.size() > cw::kMaxRecords) {
+                // Neither half may be dropped to make the other fit: nothing is written, and the
+                // transfer stays awaited, so both copies keep what they hold.
                 UE_LOGW("container_contents: eid=%u -- the host's %zu record(s) do not fit beside the "
-                        "thrower's %zu; the host's are kept out", outEid, hostRecs.size(), recs.size());
+                        "thrower's %zu; the transfer is not applied", outEid, hostRecs.size(), recs.size());
+                return Ingest::Handled;
             }
+            recs.insert(recs.end(), hostRecs.begin(), hostRecs.end());
+            merged = true;
         }
     }
     const uint64_t contentHash = cw::ContentHash(outEid, recs);

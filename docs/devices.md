@@ -116,7 +116,8 @@ either, until the thrower's slice lands. The thrower ships its slice once the ho
 container, and retries while its own slot is not readable yet; every slice of that author for the
 container is the newest version of the transfer, an edit made while the first one waited included,
 and is taken without a base. Whatever the host put in meanwhile is kept beside it, and the merged
-contents go to every peer, the thrower included. The wait ends after thirty seconds or when the
+contents go to every peer, the thrower included; if the two do not fit one container, nothing is
+written and both copies keep what they hold. The wait ends after thirty seconds or when the
 thrower leaves. A container the host throws publishes its contents at the express, since the
 mirrors are born empty, retrying while its slot is not readable.
 
