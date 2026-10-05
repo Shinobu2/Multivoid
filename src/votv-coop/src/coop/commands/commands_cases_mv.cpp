@@ -1,5 +1,6 @@
 // coop/commands/commands_cases_mv.cpp -- the cases of coop/commands/mv_commands.h: each leaf's
-// reply, the edit it hands the host and the notice it sends, over fake ports and an in-memory store.
+// reply, the edit it hands the host and the notice it sends, the lines of the reading leaves and of
+// reload, over fake ports and an in-memory store.
 // The fake `apply` runs PlanEdit over the store's texts as the host's Apply does and composes the
 // host's lines for the outcomes these cases reach (the host's own composition is the rig's). Called
 // from RunSelftest.
@@ -11,6 +12,7 @@
 #include "coop/commands/mv_commands.h"
 #include "coop/permissions/permission_edit.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -42,6 +44,12 @@ struct Fake {
     perm::Action action;
     std::vector<std::pair<int, std::string>> told;
     std::vector<uint32_t> toldGeneration;
+    // What `info` and `listgroups` read, and what `reload` answers and was asked by.
+    perm::Model live;
+    bool broken = false;
+    std::vector<std::string> reloadLines;
+    int reloadCalls = 0;
+    std::string reloadActor;
 };
 
 Fake& F() {
@@ -117,6 +125,13 @@ bool Hosted() { return F().hosted; }
 bool HostHoldsLog() { return F().hostHoldsLog; }
 std::string NoNick(std::string_view) { return std::string(); }
 int64_t Now() { return kNow; }
+const perm::Model& Live() { return F().live; }
+bool StoreBroken() { return F().broken; }
+std::vector<std::string> Reload(const std::string& actorId) {
+    ++F().reloadCalls;
+    F().reloadActor = actorId;
+    return F().reloadLines;
+}
 void Notify(const Caller& to, std::string_view line) {
     F().told.emplace_back(to.slot, std::string(line));
     F().toldGeneration.push_back(to.generation);
@@ -126,6 +141,9 @@ mv::Ports MakePorts() {
     mv::Ports p;
     p.hosted = &Hosted;
     p.apply = &FakeApply;
+    p.reload = &Reload;
+    p.live = &Live;
+    p.storeBroken = &StoreBroken;
     p.recordNick = &NoNick;
     p.hostHoldsLog = &HostHoldsLog;
     p.now = &Now;
@@ -392,6 +410,148 @@ void NoSessionRows(Checker& check, const Registry& reg) {
           "mv: the host's NoSession is answered the same way, and tells no one");
 }
 
+perm::Node N(const std::string& key, bool value = true, int64_t expiry = 0, perm::ContextSet contexts = {}) {
+    perm::Node n;
+    n.key = key;
+    n.value = value;
+    n.expiry = expiry;
+    n.contexts = std::move(contexts);
+    return n;
+}
+
+perm::ContextSet Ctx(std::initializer_list<std::pair<const char*, const char*>> pairs) {
+    perm::ContextSet s;
+    for (const auto& p : pairs) s.Add(p.first, p.second);
+    return s;
+}
+
+bool Contains(const std::vector<std::string>& lines, const std::string& line) {
+    return std::find(lines.begin(), lines.end(), line) != lines.end();
+}
+
+// What `info` shows of a stored holder: its header, its parents, its other nodes with their marks.
+void InfoFormatCases(Checker& check) {
+    const perm::HolderKey una{perm::HolderKind::User, Id('1')};
+    perm::Model m;
+    m.CreateGroup("b");
+    m.CreateGroup("staff");
+    m.LoadUser(Id('1'), "b", {N("group.b"), N("group.staff", false, 1700003600)}, nullptr);
+    const std::vector<std::string> lines = mv::InfoLines(m, una, "Una", kNow);
+    check(lines == std::vector<std::string>{"Una: primary group b", "Parents: b, staff = false (until 1700003600)",
+                                            "Nothing else is set."},
+          "mv info: a user's primary group, its parents sorted by name with their marks, nothing else set");
+
+    const perm::HolderKey marked{perm::HolderKind::User, Id('2')};
+    m.SetNode(perm::HolderKind::User, Id('2'), N("a.b", true, 0, Ctx({{"server", "x"}, {"world", "y"}})));
+    m.SetNode(perm::HolderKind::User, Id('2'), N("c.d", false, 1000, Ctx({{"server", "x"}})));
+    m.SetNode(perm::HolderKind::User, Id('2'), N("e.f", true, 1000));
+    m.SetNode(perm::HolderKind::User, Id('2'), N("g.h", true, 1700003600));
+    const std::vector<std::string> other = mv::InfoLines(m, marked, "Mia", kNow);
+    check(other.size() == 6 && other[0] == "Mia: primary group default" && other[1] == "Parents: default" &&
+              Contains(other, "a.b [server=x, world=y]") && Contains(other, "c.d = false (expired) [server=x]") &&
+              Contains(other, "e.f (expired)") && Contains(other, "g.h (until 1700003600)"),
+          "mv info: a node's marks, in order: false, until or expired, contexts");
+
+    const perm::HolderKey many{perm::HolderKind::User, Id('3')};
+    for (int i = 1; i <= 25; ++i)
+        m.SetNode(perm::HolderKind::User, Id('3'), N("n." + std::string(i < 10 ? "0" : "") + std::to_string(i)));
+    const std::vector<std::string> capped = mv::InfoLines(m, many, "Max", kNow);
+    check(capped.size() == 2 + 20 + 1 && capped[2] == "n.01" && capped[21] == "n.20" && capped[22] == "... and 5 more",
+          "mv info: twenty node lines, then the count of the rest");
+
+    m.CreateGroup("w");
+    m.SetNode(perm::HolderKind::Group, "w", N("weight.5"));
+    m.SetNode(perm::HolderKind::Group, "w", N("weight.10", true, 1000));
+    m.CreateGroup("plain");
+    check(mv::InfoLines(m, {perm::HolderKind::Group, "w"}, "w", kNow) ==
+                  std::vector<std::string>{"w: weight 5", "Parents: none", "Nothing else is set."} &&
+              mv::InfoLines(m, {perm::HolderKind::Group, "plain"}, "plain", kNow)[0] == "plain: no weight",
+          "mv info: a group's current weight, an expired one left out, or no weight");
+
+    check(mv::InfoLines(m, {perm::HolderKind::User, Id('9')}, "Zed", kNow) ==
+                  std::vector<std::string>{"Zed has nothing set: the default group applies."} &&
+              mv::InfoLines(m, {perm::HolderKind::Group, "ghost"}, "ghost", kNow) ==
+                  std::vector<std::string>{"No group named ghost."},
+          "mv info: a missing user and a missing group");
+}
+
+void ListGroupCases(Checker& check) {
+    perm::Model m;
+    for (int i = 1; i <= 21; ++i) m.CreateGroup(std::string("g") + (i < 10 ? "0" : "") + std::to_string(i));
+    m.SetNode(perm::HolderKind::Group, "g01", N("weight.5"));
+    const std::vector<std::string> lines = mv::ListGroupLines(m, kNow);
+    check(lines.size() == 21 && lines[0] == "default" && lines[1] == "g01 (weight 5)" && lines[2] == "g02" &&
+              lines[19] == "g19" && lines[20] == "... and 2 more",
+          "mv listgroups: twenty of twenty-two groups in name order, then the count of the rest");
+    perm::Model few;
+    few.CreateGroup("b");
+    few.CreateGroup("a");
+    check(mv::ListGroupLines(few, kNow) == std::vector<std::string>{"a", "b", "default"},
+          "mv listgroups: every group of a short list, by name");
+}
+
+// The reading leaves and reload through the dispatcher.
+void ReadingRows(Checker& check, const Registry& reg) {
+    ResetFake();
+    const Caller console = Console();
+    const std::string cy = Id('c');
+    F().live.SetNode(perm::HolderKind::User, cy, N("a.b"));
+    check(Run(reg, console, "mv user Cy info").replies ==
+              std::vector<std::string>{"Cy: primary group default", "Parents: default", "a.b"},
+          "mv: user info shows the stored user of the live model, named by its nick");
+    check(Run(reg, console, "mv group default info").replies ==
+              std::vector<std::string>{"default: no weight", "Parents: none", "Nothing else is set."},
+          "mv: group info shows the stored group");
+    check(Replied(Run(reg, console, "mv group bad!name info"), "'bad!name' is not a valid group name."),
+          "mv: info of a word that is no group name is refused");
+    check(Replied(Run(reg, console, "mv listgroups"), "default"), "mv: listgroups lists the live groups");
+
+    F().broken = true;
+    const std::string broken = "The permission files did not load at the host start: fix them, then /mv reload.";
+    check(Replied(Run(reg, console, "mv user Cy info"), broken) && Replied(Run(reg, console, "mv group default info"), broken) &&
+              Replied(Run(reg, console, "mv listgroups"), broken),
+          "mv: with a broken store info and listgroups say so");
+    F().broken = false;
+
+    F().reloadLines = {"Reloaded: 1 groups, 2 users."};
+    check(Replied(Run(reg, console, "mv reload"), "Reloaded: 1 groups, 2 users.") && F().reloadCalls == 1 &&
+              F().reloadActor == Id('a'),
+          "mv: reload sends the host's lines and names the caller's id");
+    F().reloadLines = {};
+    check(Replied(Run(reg, console, "mv reload"), kNoSession), "mv: an empty reload answer is no hosted session");
+    const int asked = F().reloadCalls;
+    const DispatchResult refused = Run(reg, Bob(), "mv reload", &OperatorOnly);
+    check(!refused.ran && refused.replies.size() == 1 &&
+              refused.replies[0] == "You do not have permission for /mv reload (multivoid.mv.reload)." &&
+              F().reloadCalls == asked,
+          "mv: reload is refused to a client without its node");
+
+    F().hosted = false;
+    const int before = F().reloadCalls;
+    check(Replied(Run(reg, console, "mv user Cy info"), kNoSession) && Replied(Run(reg, console, "mv group staff info"), kNoSession) &&
+              Replied(Run(reg, console, "mv listgroups"), kNoSession) && Replied(Run(reg, console, "mv reload"), kNoSession) &&
+              F().reloadCalls == before,
+          "mv: with no hosted session the reading leaves and reload answer so");
+}
+
+// The whole tree as /help lists it to the host: the order and the texts the command drill pins.
+void HelpListCases(Checker& check, const Registry& reg) {
+    ResetFake();
+    const std::vector<std::string> help = Run(reg, Console(), "help").replies;
+    check(help.size() == 21 && help[2] == "/mv user <who> permission set <node> [value] [contexts...] -- Sets a permission on a player." &&
+              help[8] == "/mv user <who> info -- Shows a player's groups and permissions." &&
+              help[15] == "/mv group <name> setweight <weight> -- Sets a group's weight (the highest wins)." &&
+              help[16] == "/mv group <name> info -- Shows a group's parents, weight and permissions." &&
+              help[19] == "/mv listgroups -- Lists the groups." &&
+              help[20] == "/mv reload -- Reloads the permission files from disk.",
+          "mv: /help lists the nineteen leaves in the tree's depth-first order");
+    check(reg.FindNode("multivoid.mv.reload") != nullptr && !reg.FindNode("multivoid.mv.reload")->defaultGranted &&
+              reg.FindNode("multivoid.mv.user.info.offline") != nullptr &&
+              reg.FindNode("multivoid.mv.group.info.offline") == nullptr &&
+              reg.FindNode("multivoid.mv.listgroups") != nullptr,
+          "mv: the reading leaves declare their nodes, reload default false, no notify node among them");
+}
+
 }  // namespace
 
 void MvCases(Checker& check) {
@@ -403,6 +563,10 @@ void MvCases(Checker& check) {
     NoChangeAndOwnerRows(check, reg);
     NoticeRows(check, reg);
     NoSessionRows(check, reg);
+    InfoFormatCases(check);
+    ListGroupCases(check);
+    ReadingRows(check, reg);
+    HelpListCases(check, reg);
 }
 
 }  // namespace coop::commands

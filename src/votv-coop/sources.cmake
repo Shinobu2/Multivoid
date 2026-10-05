@@ -688,6 +688,7 @@ set(VOTVCOOP_SOURCES
     src/coop/commands/commands_cases_mv.cpp
     src/coop/commands/moderation_commands.cpp
     src/coop/commands/mv_commands.cpp
+    src/coop/commands/mv_info.cpp
     src/coop/commands/settings_commands.cpp
     src/coop/permissions/context_set.cpp
     src/coop/permissions/node.cpp

@@ -292,6 +292,22 @@ void WeightCases(CheckSink& sink) {
     m.SetNode(HolderKind::Group, "w2", N("weight.9", true, kNow));
     sink.Check(WeightOf(*m.FindGroup("w2"), kNow) == 9 && WeightOf(*m.FindGroup("w2"), kNow + 1) == 0,
                "weight: an expired weight does not count");
+
+    // CurrentWeight tells "none" apart from zero: the highest applying weight, contexts ignored.
+    int weight = -1;
+    m.CreateGroup("w3");
+    sink.Check(!CurrentWeight(*m.FindGroup("w3"), kNow, &weight) && weight == -1,
+               "weight: a group with no weight node has none");
+    m.SetNode(HolderKind::Group, "w3", N("weight.5"));
+    m.SetNode(HolderKind::Group, "w3", N("weight.10", true, kNow));
+    m.SetNode(HolderKind::Group, "w3", N("weight.7", true, 0, Ctx({{"server", "a"}})));
+    sink.Check(CurrentWeight(*m.FindGroup("w3"), kNow, &weight) && weight == 10 &&
+                   CurrentWeight(*m.FindGroup("w3"), kNow + 1, &weight) && weight == 7,
+               "weight: the highest weight that applies, a context ignored and an expired one left out");
+    m.CreateGroup("w4");
+    m.SetNode(HolderKind::Group, "w4", N("weight.0"));
+    sink.Check(CurrentWeight(*m.FindGroup("w4"), kNow, &weight) && weight == 0,
+               "weight: a weight of zero is a weight");
 }
 
 }  // namespace

@@ -16,7 +16,7 @@ bool IsGlobalGroupNode(const Node& n) {
 }  // namespace
 
 // Ported from LuckPerms common/src/main/java/me/lucko/luckperms/common/model/WeightCache.java:49-69 (MIT, THIRD-PARTY-NOTICES.md).
-int WeightOf(const Holder& h, int64_t now) {
+bool CurrentWeight(const Holder& h, int64_t now, int* out) {
     bool found = false;
     int best = 0;
     for (const Node& n : h.nodes.Nodes()) {
@@ -25,7 +25,13 @@ int WeightOf(const Holder& h, int64_t now) {
         if (!found || w > best) best = w;
         found = true;
     }
-    return best;
+    if (found && out != nullptr) *out = best;
+    return found;
+}
+
+int WeightOf(const Holder& h, int64_t now) {
+    int weight = 0;
+    return CurrentWeight(h, now, &weight) ? weight : 0;
 }
 
 // Ported from LuckPerms common/src/main/java/me/lucko/luckperms/common/model/manager/user/AbstractUserManager.java:81-111 (MIT, THIRD-PARTY-NOTICES.md).

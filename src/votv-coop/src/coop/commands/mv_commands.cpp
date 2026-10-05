@@ -315,6 +315,42 @@ Handler GroupLifeLeaf(const Ports& p, bool create) {
     };
 }
 
+constexpr const char* kBrokenStore =
+    "The permission files did not load at the host start: fix them, then /mv reload.";
+
+// `info` of a user or a group: the stored holder of the live model, read within this call. A broken
+// store has loaded nothing, so there is nothing to show.
+Handler InfoLeaf(const Ports& p, bool isUser) {
+    return [p, isUser](Context& ctx) {
+        if (!p.hosted()) { ctx.Reply(kNoSession); return; }
+        if (p.storeBroken()) { ctx.Reply(kBrokenStore); return; }
+        Edit holder;
+        std::string refusal;
+        if (!HolderOf(p, ctx, isUser, &holder, &refusal)) { ctx.Reply(refusal); return; }
+        for (const std::string& line : InfoLines(p.live(), holder.key, holder.targetName, p.now()))
+            ctx.Reply(line);
+    };
+}
+
+Handler ListGroupsLeaf(const Ports& p) {
+    return [p](Context& ctx) {
+        if (!p.hosted()) { ctx.Reply(kNoSession); return; }
+        if (p.storeBroken()) { ctx.Reply(kBrokenStore); return; }
+        for (const std::string& line : ListGroupLines(p.live(), p.now())) ctx.Reply(line);
+    };
+}
+
+// reload changes no file: no action line and no notice, the host logs who ran it. An empty answer
+// is the host saying there is no hosted session.
+Handler ReloadLeaf(const Ports& p) {
+    return [p](Context& ctx) {
+        if (!p.hosted()) { ctx.Reply(kNoSession); return; }
+        const std::vector<std::string> lines = p.reload(ctx.caller.playerId);
+        if (lines.empty()) { ctx.Reply(kNoSession); return; }
+        for (const std::string& line : lines) ctx.Reply(line);
+    };
+}
+
 // A spec of the tree. Every changing leaf carries a Notify qualifier on the log node; the user
 // leaves carry the offline gate their PlayerOrId target needs.
 CommandSpec Spec(const char* name, std::string description) {
@@ -380,6 +416,10 @@ CommandSpec HolderSpec(const Ports& p, bool isUser) {
         c.subVerbs.push_back(Leaf("setweight", "Sets a group's weight (the highest wins).", {kWeightArg},
                                   HolderLeaf(p, false, Op::SetWeight), false, true));
     }
+    c.subVerbs.push_back(Leaf("info",
+                              isUser ? "Shows a player's groups and permissions."
+                                     : "Shows a group's parents, weight and permissions.",
+                              {}, InfoLeaf(p, isUser), isUser, false));
     return c;
 }
 
@@ -392,6 +432,8 @@ bool Register(Registry& reg, const Ports& p) {
     mv.subVerbs.push_back(Leaf("creategroup", "Creates a group.", {kNameArg}, GroupLifeLeaf(p, true), false, true));
     mv.subVerbs.push_back(Leaf("deletegroup", "Deletes a group no one names.", {kNameArg}, GroupLifeLeaf(p, false),
                                false, true));
+    mv.subVerbs.push_back(Leaf("listgroups", "Lists the groups.", {}, ListGroupsLeaf(p), false, false));
+    mv.subVerbs.push_back(Leaf("reload", "Reloads the permission files from disk.", {}, ReloadLeaf(p), false, false));
     return reg.Register(std::move(mv), nullptr);
 }
 

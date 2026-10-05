@@ -8,7 +8,8 @@
 // qualifiers (an offline target, who is told); a handler here never asks the permission system. A
 // changing leaf hands the host ONE edit (a closure over a copy of the model, the holder it names, the
 // action it logs) and sends every reply line the host composed; the host writes, publishes, logs and
-// appends the action log, the handlers are engine-free and cannot.
+// appends the action log, the handlers are engine-free and cannot. The reading leaves (`info`,
+// `listgroups`) format the live model within one call; `reload` asks the host.
 //
 // Engine-free like the model files: it reaches coop/permissions only for the types.
 
@@ -53,5 +54,15 @@ struct Ports {
 
 // Registers the `mv` root into `reg`. False when the registry refuses it.
 bool Register(Registry& reg, const Ports& p);
+
+// The lines of `/mv user|group ... info`: the STORED holder `key` of `m` (what its file holds, never
+// a resolved answer), named `displayName`, with `now` for the expired marks and the weight rule
+// (mv_info.cpp). Pure; each line is one reply.
+std::vector<std::string> InfoLines(const coop::permissions::Model& m, const coop::permissions::HolderKey& key,
+                                   const std::string& displayName, int64_t now);
+
+// The lines of `/mv listgroups`: one per group in name order, with its weight when it has one, at
+// most twenty and then `... and N more` (mv_info.cpp). Pure.
+std::vector<std::string> ListGroupLines(const coop::permissions::Model& m, int64_t now);
 
 }  // namespace coop::commands::mv

@@ -16,6 +16,10 @@ namespace coop::permissions {
 // not count; 0 when there is none.
 int WeightOf(const Holder& h, int64_t now);
 
+// The same rule with "there is none" told apart: false when the holder has no `weight.<n>` node that
+// applies at `now` (expiry 0 or not below `now`), else true with the largest `<n>` in `*out`.
+bool CurrentWeight(const Holder& h, int64_t now, int* out);
+
 // The user's primary group over its LIVE global groups at `now` (true `group.*` nodes with no
 // context that apply at `now` and name an existing group, in store order): the stored primary if it
 // is one of them, else the first of them, else `default`. Views into `user` or static storage.
