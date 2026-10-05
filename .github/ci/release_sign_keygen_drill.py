@@ -54,7 +54,8 @@ POLICIES_ARGV = ["gh", "api", "repos/%s/environments/release/deployment-branch-p
 SECRET_ARGV = ["gh", "secret", "set", rs.SEED_ENV, "--env", "release", "--repo", REPO]
 API_KWARGS = {"capture_output": True, "text": True, "encoding": "utf-8"}
 SECRET_KWARGS = dict(API_KWARGS, errors="replace")
-UNPROTECTED = "release_sign: the release environment is not protected as the runbook sets it (%s)"
+UNPROTECTED = ("release_sign: the release environment is not protected as docs/release.md sets "
+               "it (%s)")
 ID_RANGE = "release_sign: --id must be 1..254\n"
 GH_LINE = "Set Actions secret %s for environment release in %s\n" % (rs.SEED_ENV, REPO)
 GH_WARNING = "warning: a newer release of gh is available\n"

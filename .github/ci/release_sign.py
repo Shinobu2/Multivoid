@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """release_sign -- signs and verifies a main.dll with Ed25519, standard library only.
 
-    python -I -B .github/ci/release_sign.py sign   --dll <path> --target <t> --build <n> --out <path> [--test-key]
+    python -I -B .github/ci/release_sign.py sign   --dll <path> --target <t> --build <n>
+                                                   --out <path> [--test-key]
     python -I -B .github/ci/release_sign.py verify --dll <path> --sig <path> [--trust-test-key]
     python -I -B .github/ci/release_sign.py keygen --id <n> --repo <owner/name>
 
@@ -9,7 +10,7 @@
 build it belongs to and an Ed25519 signature over `signed_message`. `verify` applies the same
 grammar and steps as the game, and prints which step refused. `keygen` makes a key in memory, hands
 its private half straight to the `release` environment's secret through `gh`, and prints only the
-table row; it refuses first unless that environment is protected as the runbook sets it.
+table row; it refuses first unless that environment is protected as docs/release.md sets it.
 The game's check is the vendored ed25519-donna `ed25519_sign_open`
 (src/votv-coop/third_party/GameNetworkingSockets/src/external/ed25519-donna/ed25519.c);
 `verify` is the same cofactorless, byte-exact check (RFC 8032 section 5.1.7 allows it): it
@@ -17,7 +18,8 @@ recomputes R' = [S]B - [k]A, encodes it and accepts only when those 32 bytes equ
 signature's R. It differs from the game in two ways, none of which an honest `sign` can reach:
   - S: the game tests only the top three bits of S; `verify` requires S < L, which is stricter.
   - Points: when the game unpacks the public key it reduces y mod p and applies no x = 0 sign-bit
-    rule, so it accepts non-canonical encodings that `verify` refuses. Its key is the compiled table.
+    rule, so it accepts non-canonical encodings that `verify` refuses. Its key is the compiled
+    table.
     R is never decoded, by `verify` or by the game: its bytes are only compared.
 
 The job that holds the release key installs nothing, so the signature scheme is written here from
@@ -28,8 +30,8 @@ coordinate addition, key generation, sign, verify) and checked against its secti
 This is NOT constant-time: it signs one DLL per release on a CI runner. The seed is read from the
 environment only, and no message and no exception text this file writes holds it.
 
-Exit codes: 0 done; 1 verification failed; 2 a usage or key-table error; 3 the environment (the seed,
-or `gh` and the repository's `release` environment).
+Exit codes: 0 done; 1 verification failed; 2 a usage or key-table error; 3 the environment (the
+seed, or `gh` and the repository's `release` environment).
 Every message is one line on stdout and starts `release_sign: `.
 """
 import argparse
@@ -375,7 +377,7 @@ _BRANCH_POLICIES = {("v*", "tag"), ("main", "branch")}
 
 def _unprotected(check):
     return SignError("protection", 3, "release_sign: the release environment is not protected as "
-                     "the runbook sets it (%s)" % check)
+                     "docs/release.md sets it (%s)" % check)
 
 
 def _gh_api(runner, path):
@@ -395,7 +397,8 @@ def _gh_api(runner, path):
 
 
 def _check_protection(environment, policies):
-    """The runbook's protection, read from the REST answers; a reviewer's own fields are not read."""
+    """The protection docs/release.md sets, read from the REST answers; a reviewer's own fields
+    are not read."""
     if not isinstance(environment, dict) or environment.get("can_admins_bypass") is not False:
         raise _unprotected("admins can bypass")
     rules = environment.get("protection_rules")
