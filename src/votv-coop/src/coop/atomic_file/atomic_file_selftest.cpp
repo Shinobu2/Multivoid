@@ -190,8 +190,8 @@ static bool RunSelftestBody() {
         if (ok) { ++pass; return; }
         UE_LOGE("atomic_file selftest FAIL: %s", what);
     };
-    // A seed write (the setup before a case's assertion) names its own failure, and adds a check
-    // only when it fails, so the case's own check never carries a setup fault under its label.
+    // A seed write (the setup before a case's assertion) names its own failure first, and adds a
+    // check only when it fails; checks that depend on the seed may still fail after it.
     auto seeded = [&](bool ok, const char* what) {
         if (!ok) check(false, what);
         return ok;
