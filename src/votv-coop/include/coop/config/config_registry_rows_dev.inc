@@ -152,6 +152,8 @@ CFG_ENUM(command_drill, "command_drill", "dev", "off", "off|on|red|grant|grantre
     "line, so it must fail. grant / grantred: a client runs a command and reports whether the host's "
     "permissions allowed it (grant: one the rig's fixture grants; grantred: one it does not); hostdeny: "
     "the host runs a command its own permission file denies it and reports the refusal.")
+CFG_ENUM(mv_drill, "mv_drill", "dev", "off", "off|on|red", "VOTVCOOP_MV_DRILL",
+    "Drill (BOTH peers): /mv end to end -- on runs the script, red expects a wrong reply at step 5.1.")
 CFG_ENUM(bug_report_drill, "bug_report_drill", "dev", "off", "off|on|red", "VOTVCOOP_BUG_REPORT_DRILL",
     "The bug-report drill: plants values, saves a report, opens it and judges it (red: plants an address unmarked).")
 CFG_ENUM(grants_drill, "grants_drill", "dev", "off", "off|grant|none|hostdeny", "VOTVCOOP_GRANTS_DRILL",

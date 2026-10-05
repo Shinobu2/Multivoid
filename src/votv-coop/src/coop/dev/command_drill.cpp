@@ -193,12 +193,12 @@ void Observe(std::string_view line) {
     else if (g_phase == Phase::WaitFirst) OnGrantReply(line);
 }
 
+}  // namespace
+
 bool ClientReady(coop::net::Session* s) {
     return s->connected() && coop::net_pump::HasAnnouncedWorldReady() &&
            coop::join_progress::CurrentPhase() == coop::join_progress::Phase::Idle;
 }
-
-}  // namespace
 
 void Tick(coop::net::Session* session) {
     if (ModeNow() == Mode::Off || !session || !session->running()) return;

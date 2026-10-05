@@ -503,6 +503,7 @@ set(VOTVCOOP_SOURCES
     src/coop/dev/desk_crossing_drill.cpp
     src/coop/dev/desk_ping_drill.cpp
     src/coop/dev/command_drill.cpp
+    src/coop/dev/mv_drill.cpp
     src/coop/dev/chat_drill.cpp
     src/coop/dev/ban_drill.cpp
     src/coop/dev/bug_report_drill.cpp
