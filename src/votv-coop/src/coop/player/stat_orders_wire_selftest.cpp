@@ -110,13 +110,26 @@ void RunTable(Tally& check, bool breakIt) {
     check(t.Take(a, 1, 7, Kind::Order, &got) && got.token == a && t.Count(1) == before - 1,
           "table: Take removes one entry");
 
-    // TakeOldest: the first-added of that slot and kind.
-    check(t.TakeOldest(1, Kind::Order, &got) && got.token == b && got.sentMs == 200,
-          "table: TakeOldest returns the first-added order of the slot");
-    check(t.TakeOldest(1, Kind::Query, &got) && got.token == q1, "table: TakeOldest honours the kind");
+    // TakeOldest: the first-added of that slot and kind, with the generation Take checks.
+    const int oldestCount = t.Count(1);
+    const uint64_t oldestStamp = t.OldestSentMs(1);
+    check(!t.TakeOldest(1, 8, Kind::Order, &got), "table: TakeOldest refuses a changed generation");
+    check(t.Count(1) == oldestCount && t.OldestSentMs(1) == oldestStamp,
+          "table: a refused TakeOldest leaves the entry");
+    check(t.TakeOldest(1, 7, Kind::Order, &got) && got.token == b && got.sentMs == 200 && got.generation == 7,
+          "table: TakeOldest returns the first-added order of the slot with the matching generation");
+    check(t.TakeOldest(1, 7, Kind::Query, &got) && got.token == q1, "table: TakeOldest honours the kind");
     if (got.queryDone) got.queryDone(Result::Applied, TableView{});
     check(queryAnswers == 1, "table: a query entry carries its callback");
-    check(!t.TakeOldest(9, Kind::Order, &got), "table: TakeOldest is false for a slot that holds none");
+    check(!t.TakeOldest(9, 7, Kind::Order, &got), "table: TakeOldest is false for a slot that holds none");
+    uint32_t g3 = 0, g4 = 0;
+    t.Add(MakePending(5, 3, Kind::Order, 6000), &g3);
+    t.Add(MakePending(5, 4, Kind::Order, 6100), &g4);
+    check(!t.TakeOldest(5, 4, Kind::Order, &got) && t.Count(5) == 2 && t.OldestSentMs(5) == 6000,
+          "table: TakeOldest judges the generation of the oldest entry, not of a later one");
+    check(t.TakeOldest(5, 3, Kind::Order, &got) && got.token == g3 && t.TakeOldest(5, 4, Kind::Order, &got) &&
+              got.token == g4 && t.Count(5) == 0,
+          "table: TakeOldest takes each entry once its own generation is named");
     check(t.OldestSentMs(1) == 1000, "table: OldestSentMs follows the removals");
 
     // TakeSlot and TakeAll.
@@ -162,6 +175,19 @@ void RunOrderCodec(Tally& check) {
     check(std::strcmp(OpText(Op::SetStat), "set") == 0 && std::strcmp(OpText(Op::AddEffect), "add") == 0 &&
               std::strcmp(OpText(Op::RemoveEffect), "remove") == 0,
           "codec: OpText names the op");
+    bool resultTexts = true;
+    for (const Result r : {Result::Applied, Result::Refused, Result::NotFound, Result::NotReady, Result::Left,
+                           Result::Malformed}) {
+        const char* text = ResultText(r);
+        resultTexts = resultTexts && text != nullptr && text[0] != '\0';
+    }
+    check(resultTexts, "codec: every Result value has a non-empty text");
+    bool opTexts = true;
+    for (const Op op : {Op::SetStat, Op::AddEffect, Op::RemoveEffect}) {
+        const char* text = OpText(op);
+        opTexts = opTexts && text != nullptr && text[0] != '\0';
+    }
+    check(opTexts, "codec: every Op value has a non-empty text");
 
     for (const Op op : {Op::SetStat, Op::AddEffect, Op::RemoveEffect}) {
         OrderWire in = SampleOrder(op);

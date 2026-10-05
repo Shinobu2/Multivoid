@@ -234,9 +234,10 @@ bool PendingTable::Take(uint32_t token, uint8_t slot, uint32_t generation, Kind 
     return false;
 }
 
-bool PendingTable::TakeOldest(uint8_t slot, Kind kind, Pending* out) {
+bool PendingTable::TakeOldest(uint8_t slot, uint32_t generation, Kind kind, Pending* out) {
     for (auto it = entries_.begin(); it != entries_.end(); ++it) {
         if (it->slot != slot || it->kind != kind) continue;
+        if (it->generation != generation) return false;
         *out = std::move(*it);
         entries_.erase(it);
         return true;

@@ -85,8 +85,9 @@ public:
     bool Take(uint32_t token, uint8_t slot, uint32_t generation, Kind kind, Pending* out);
     // The OLDEST entry of `slot` and `kind`, removed: an answer arrives in the order its requests
     // were sent (one ordered lane), so an answer too malformed to carry a token answers the oldest.
-    // False when the slot holds none.
-    bool TakeOldest(uint8_t slot, Kind kind, Pending* out);
+    // False (nothing removed) when the slot holds none or its oldest of that kind carries a different
+    // generation, as Take refuses a changed one.
+    bool TakeOldest(uint8_t slot, uint32_t generation, Kind kind, Pending* out);
     std::vector<Pending> TakeSlot(uint8_t slot);   // every entry of the slot, removed
     std::vector<Pending> TakeAll();
     int Count(uint8_t slot) const;                 // both kinds
