@@ -8,15 +8,14 @@
 build it belongs to and an Ed25519 signature over `signed_message`. `verify` applies the same
 grammar and steps as the game, and prints which step refused. The game's check is the vendored
 ed25519-donna `ed25519_sign_open` (src/votv-coop/third_party/GameNetworkingSockets/src/external/
-ed25519-donna/ed25519.c); `verify` is the RFC 8032 section 5.1.7 check and differs from it in three
-ways, none of which an honest `sign` can reach:
+ed25519-donna/ed25519.c); `verify` is the same cofactorless, byte-exact check (RFC 8032 section
+5.1.7 allows it): it recomputes R' = [S]B - [k]A, encodes it and accepts only when those 32 bytes
+equal the signature's R. It differs from the game in two ways, none of which an honest `sign` can
+reach:
   - S: the game tests only the top three bits of S; `verify` requires S < L, which is stricter.
-  - Equation: the game recomputes R' = [S]B - [k]A and compares its 32 bytes with R (cofactorless,
-    byte-exact). `verify` decodes R and checks [8][S]B == [8](R + [k]A) (cofactored). In this one
-    direction `verify` is LAXER than the game: it accepts an R with a small-order component that
-    the game refuses. `sign` never produces such an R.
   - Points: when the game unpacks the public key it reduces y mod p and applies no x = 0 sign-bit
     rule, so it accepts non-canonical encodings that `verify` refuses. Its key is the compiled table.
+    R is never decoded, by `verify` or by the game: its bytes are only compared.
 
 The job that holds the release key installs nothing, so the signature scheme is written here from
 the algorithm of RFC 8032 section 5.1 (field arithmetic, point encoding and decoding, extended
@@ -90,9 +89,8 @@ def _mul(k, p):
     return acc
 
 
-def _same(p, q):
-    return ((p[0] * q[2] - q[0] * p[2]) % _P == 0
-            and (p[1] * q[2] - q[1] * p[2]) % _P == 0)
+def _negate(p):
+    return ((-p[0]) % _P, p[1], p[2], (-p[3]) % _P)
 
 
 def _encode(p):
@@ -166,12 +164,13 @@ def ed25519_verify(pub, msg, sig):
     if len(pub) != 32 or len(sig) != 64:
         return False
     a = _decode(pub)
-    r = _decode(sig[:32])
     s = int.from_bytes(sig[32:], "little")
-    if a is None or r is None or s >= _L:
+    if a is None or s >= _L:
         return False
     k = _digest_int(sig[:32], pub, msg) % _L
-    return _same(_mul(8, _mul(s, _BASE)), _mul(8, _add(r, _mul(k, a))))
+    # R' = [S]B - [k]A, compared as 32 encoded bytes with the signature's R (cofactorless).
+    r_check = _add(_mul(s, _BASE), _negate(_mul(k, a)))
+    return _encode(r_check) == sig[:32]
 
 
 # --- the message and the .sig file --------------------------------------------------------------
