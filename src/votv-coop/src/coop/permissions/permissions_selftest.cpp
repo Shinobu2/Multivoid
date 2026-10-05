@@ -81,6 +81,7 @@ static bool RunSelftestBody() {
     RunInheritanceCases(sink);
     RunResolutionCases(sink);
     RunFilesCases(sink, scratch);
+    RunActionLogCases(sink, scratch);
     RunEditCases(sink);
     RunGrantsCases(sink);
 

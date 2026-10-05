@@ -711,6 +711,7 @@ set(VOTVCOOP_SOURCES
     src/coop/permissions/action_log.cpp
     src/coop/permissions/permission_edit.cpp
     src/coop/permissions/permissions_cases_edit.cpp
+    src/coop/permissions/permissions_cases_action_log.cpp
     src/coop/permissions/permission_host.cpp
     src/coop/permissions/permissions_selftest.cpp
     src/coop/permissions/permissions_cases_context.cpp

@@ -36,6 +36,8 @@ void RunResolutionCases(CheckSink& sink);
 // `scratch` is a path that does not exist yet; the cases create it, write under it and delete from
 // it, and the caller removes it. An empty path skips the disk case.
 void RunFilesCases(CheckSink& sink, const std::filesystem::path& scratch);
+// The action log's writer, under `scratch / "action_log"`; `scratch` is as for RunFilesCases.
+void RunActionLogCases(CheckSink& sink, const std::filesystem::path& scratch);
 void RunEditCases(CheckSink& sink);
 void RunGrantsCases(CheckSink& sink);
 
