@@ -88,44 +88,15 @@ S3 = re.compile(r"(?:flag (?:it )?for|file (?:it )?(?:as|under)|belongs in|shoul
 # `AGENT_SPAWNING`, the three `QUESTION_FORM_*`, `SERVER_BROWSER_ARC`), each a real place a move
 # could come FROM. Both moves are SCOPE, both are stated, because a ratchet whose baseline drifts
 # without a reason beside it is a ratchet nobody can audit.
-# 53 -> 57 (2026-10-03), CONTENT, every line read: a build sheet dictates the interface it builds and
-# the comments above it word for word, so once built those lines live in the tracked header AND in the
-# unpublished design doc that specified them (in config.h, config_internal.h and the dev rows: the
-# SetValue/Subscribe/selftest declarations and their comments, from SETTINGS_ARC.md; the mannequin drill's
-# lines in its header, dev_lanes.cpp, pump.cpp, the dev menu and its dev row, from its event doc). The direction is doc-quotes-code, not a move of
-# private prose. A lane built from a sheet may raise this again, each time with its lines read and stated.
-# 57 -> 59 (2026-10-03), CONTENT, both lines read: SP-1a's sheet (SERVER_PROFILES_ARC.md §7a) dictated the
-# docs/code-map.md row for coop/server_profile/ and the EnsureHosted call in session_runtime.cpp verbatim --
-# doc quoting code again, no private prose.
-# 59 -> 60 (2026-10-03), CONTENT, the line read: CMD C-2's sheet (COMMANDS_ARC.md 10c.3) dictated the
-# command_drill row of config_registry_rows_dev.inc verbatim -- doc quoting code, no private prose.
-# 60 -> 66 (2026-10-05), CONTENT, every new line read: BR-1's sheets (BUG_REPORT_ARC.md 8d.8-8d.15) dictated
-# the address mark's two constants in ue_wrap/core/log.h, three declarations of report_bundle.h, one of
-# report_core.h and the two dev rows (selftest_break_bug_report, bug_report_drill) verbatim -- doc quoting
-# code, no private prose.
-# 66 -> 69 (2026-10-05), CONTENT, the three lines read: F3 WP-4's sheet (PERMISSIONS_ARC.md 14.5) dictated
-# grants_core.h's Projected enum, the kProjected table and ReadBit's declaration verbatim -- doc quoting code.
-# 69 -> 70 (2026-10-05), CONTENT, the line read: C-4a's sheet (PERMISSIONS_ARC.md 15.10) dictated
-# command_args.h's ParseDuration declaration verbatim -- doc quoting code.
-# 70 -> 85 (2026-10-05), CONTENT, all fifteen lines read: C-4-0's sheets (PERMISSIONS_ARC.md 15.12-15.15) dictated
-# atomic_file.h's interface (nine lines), Write's definition line in atomic_file.cpp, the two dev break rows (four lines),
-# and config_ini_write.cpp's RemoveDuplicateKeyLinesLayered line SETTINGS_ARC.md quotes -- doc quoting code.
-# 85 -> 90 (2026-10-05), CONTENT, the five lines read: C-4b's sheet (PERMISSIONS_ARC.md 15.18) dictated
-# permission_edit.h's EditResult, PlanEdit and OwnerLoses declarations (four lines) and OwnerLoses' definition line.
-# 90 -> 100 (2026-10-05), CONTENT, the ten lines read: C-4c's sheets (PERMISSIONS_ARC.md 15.22-15.24) dictated
-# mv_commands.h's Ports and its two info declarations (seven lines), permission_host.h's ApplyOutcome and Apply
-# declarations and Apply's definition line -- doc quoting code.
-# 100 -> 105 (2026-10-05), CONTENT, the five lines read: PSA-1a's sheet (PLAYER_STATE_ADMIN_ARC.md 5b) dictated
-# vitals.h's Field enum (three lines), WriteRule and Row declarations -- doc quoting code.
-# 105 -> 106 (2026-10-05), CONTENT, the line read: PSA-1b's sheet (PLAYER_STATE_ADMIN_ARC.md 5c) dictated
-# effects.h's Add declaration verbatim -- doc quoting code.
-# 106 -> 124 (2026-10-05), CONTENT, the eighteen lines read: PSA-2a's sheet (PLAYER_STATE_ADMIN_ARC.md 5e) dictated
-# stat_orders_wire.h's interface (sixteen lines: the Op and Result enums with Result's comment, the two views, OrderWire,
-# QueryDone, ResultText, three Unpack declarations (UnpackQuery, UnpackOrderReply, UnpackQueryReply) with one comment, PendingTable's kMaxQueries, Take, TakeSlot and
-# OldestSentMs) and protocol.h's kStatRows and kStatEffectName -- doc quoting code.
-# 124 -> 130 (2026-10-05), CONTENT, the six lines read: PSA-2b's sheet (PLAYER_STATE_ADMIN_ARC.md 5f) dictated
-# stat_orders.h's Sent enum, SendOrder's declaration and the four Handle* declarations -- doc quoting code.
-OVERLAP_BASELINE = 130
+# 53 -> 130 (2026-10-03..05), CONTENT, thirteen raises, each with its lines read and stated in its commit: every one a
+# build sheet's interface quoted by the unpublished design doc that dictated it -- doc quoting code, no private prose.
+# 130 -> 21 (2026-10-05), SCOPE, approved by the maintainer: a fenced block of an unpublished docs/ design doc is no
+# longer a source for a tracked CODE file (unpublished_lines, FENCED), since a sheet's dictated code is in both places
+# by design and every land had to raise this line again. A tracked .md that repeats such a line still counts (a public
+# doc is where moved prose would land); an unclosed fence hides nothing (its lines stay sources); memory notes,
+# CLAUDE.md, the skills and docs/security/ stay whole sources. The 21 left are the older shapes: lines shared with
+# memory notes, an event doc's quoted lines and dev rows quoted in prose.
+OVERLAP_BASELINE = 21
 # EXCLUDED because it is a deliberate practice, not a leak: copying memory topics into the public
 # piles archive. It alone contributes ~1,263 of the raw 1,300 overlaps.
 OVERLAP_SKIP = ("docs/piles/_archive/session-log/",)
@@ -207,8 +178,16 @@ def _norm(s):
     return re.sub(r"\s+", " ", re.sub(r"[`*_>#|\[\]]", "", s)).strip().lower()
 
 
+# Lines read only inside a fenced block of an unpublished docs/ design doc: a source for a tracked .md only.
+# Filled by unpublished_lines, beside the dict it returns.
+FENCED = {}
+
+
 def unpublished_lines(repo=REPO):
     """Normalised lines >= OVERLAP_MIN chars from the trees no repository tracks, or None.
+
+    A fenced block of an unpublished docs/ design doc (not docs/security/) goes to FENCED instead: code the
+    doc quotes, an overlap only where a tracked .md repeats it. An unclosed fence hides nothing.
 
     None on a PARTIAL corpus, not just an empty one. With `MULTIVOID_MEMORY_DIR` mistyped, the memory
     half (35 of the 37 overlapping lines) simply vanished and the gate printed `4 (baseline 37)` and
@@ -222,6 +201,7 @@ def unpublished_lines(repo=REPO):
     if not os.path.isdir(mem):
         return None
     out = {}                     # normalised line -> the first unpublished file it was read from
+    FENCED.clear()
     # DERIVED FROM TRACKING, not listed. This was `CLAUDE.md` + `docs/security/*.md` + the memory
     # directory -- a hand list, and therefore wrong the moment anything else went local. `[V]`
     # 2026-09-04: `docs/DOCUMENTIZE_ARC.md` and `.claude/skills/*/SKILL.md` became unpublished the
@@ -253,11 +233,42 @@ def unpublished_lines(repo=REPO):
                 label = os.path.relpath(p, repo).replace(os.sep, "/")
             except ValueError:                      # another drive: relpath has no answer
                 label = p
+        # A fenced block of an unpublished DESIGN doc is code the doc quotes, not prose that could move:
+        # a build sheet dictates the interface it builds, so once built those lines live in both
+        # places by design. Memory notes, CLAUDE.md, the skills and docs/security/ stay whole sources --
+        # a fenced command there can carry a private address, and its move is the leak this gate exists for.
+        fenced_ok = label.startswith("docs/") and not label.startswith("docs/security/")
+        in_fence, held = False, []
         for line in io.open(p, encoding="utf-8", errors="replace").read().split(chr(10)):
+            if fenced_ok and line.lstrip().startswith("```"):
+                if in_fence:
+                    for n in held:
+                        FENCED.setdefault(n, label)
+                    held = []
+                in_fence = not in_fence
+                continue
             n = _norm(line)
-            if len(n) >= OVERLAP_MIN:
+            if len(n) < OVERLAP_MIN:
+                continue
+            if in_fence:
+                held.append(n)
+            else:
                 out.setdefault(n, label)
+        for n in held:                  # an unclosed fence: its lines stay sources (fail closed)
+            out.setdefault(n, label)
+    for n in list(FENCED):
+        if n in out:
+            del FENCED[n]
     return out
+
+
+def _source(src, rel, n):
+    """The unpublished file a tracked line repeats, or None: a fenced design-doc line counts only for a .md."""
+    if n in src:
+        return src[n]
+    if rel.endswith(".md") and n in FENCED:
+        return FENCED[n]
+    return None
 
 
 def overlap_lines(repo=REPO):
@@ -273,8 +284,8 @@ def overlap_lines(repo=REPO):
             continue
         for line in io.open(full, encoding="utf-8", errors="replace").read().split(chr(10)):
             n = _norm(line)
-            if len(n) >= OVERLAP_MIN and n in src:
-                hits.append((rel, n, src[n]))
+            if len(n) >= OVERLAP_MIN and _source(src, rel, n):
+                hits.append((rel, n, _source(src, rel, n)))
     return hits
 
 
@@ -297,7 +308,7 @@ def overlap_count(repo=REPO):
             continue
         for line in io.open(full, encoding="utf-8", errors="replace").read().split(chr(10)):
             n = _norm(line)
-            if len(n) >= OVERLAP_MIN and n in src:
+            if len(n) >= OVERLAP_MIN and _source(src, rel, n):
                 per[rel] = per.get(rel, 0) + 1
     return sum(per.values()), per
 

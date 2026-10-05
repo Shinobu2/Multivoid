@@ -163,6 +163,67 @@ def drill_ack_is_path_keyed():
           "every acknowledgement line carries a path (a bare needle clears nothing)")
 
 
+def drill_design_fence_is_not_a_source():
+    """A fenced block of an unpublished docs/ design doc is code the doc quotes: not a source. The same
+    fenced line in a memory note IS one -- a fenced command there can carry a private address.
+
+    Both halves run on a temporary corpus, so they need no real one and run in CI too.
+    """
+    print("  -- a design doc's code fence is not a source; a memory note's is --")
+    line = "bool ExampleDictatedDeclaration(const std::wstring& name, float strength, float seconds);"
+    d = tempfile.mkdtemp(prefix="plgf_")
+    m = tempfile.mkdtemp(prefix="plgm_")
+    saved = os.environ.get("MULTIVOID_MEMORY_DIR")
+    real_tracked = G.tracked_docs
+    try:
+        os.makedirs(os.path.join(d, "docs"))
+        os.makedirs(os.path.join(d, "src"))
+        io.open(os.path.join(d, "docs", "design.md"), "w", encoding="utf-8", newline=NL).write(
+            "# a design doc" + NL + "a prose line long enough to be a source of its own, and unrelated" + NL
+            + "```cpp" + NL + line + NL + "```" + NL)
+        io.open(os.path.join(d, "src", "public.cpp"), "w", encoding="utf-8", newline=NL).write(line + NL)
+        os.environ["MULTIVOID_MEMORY_DIR"] = m
+        G.tracked_docs = lambda repo=None: ["src/public.cpp"]
+        n, _ = G.overlap_count(d)
+        check(n == 0, "GREEN: a line built from a design doc's fenced block is not an overlap ({})".format(n))
+        io.open(os.path.join(m, "note.md"), "w", encoding="utf-8", newline=NL).write(
+            "```" + NL + line + NL + "```" + NL)
+        n2, per = G.overlap_count(d)
+        check(n2 == 1 and per.get("src/public.cpp") == 1,
+              "RED: the same line fenced in a memory note is an overlap ({})".format(n2))
+        os.remove(os.path.join(m, "note.md"))
+        io.open(os.path.join(m, "note.md"), "w", encoding="utf-8", newline=NL).write("empty" + NL)
+        # the same fenced line copied into a tracked public doc is an overlap: prose moved there would be a leak
+        # (at the root: the source globs read docs/, so a tracked doc there would read as a source here)
+        io.open(os.path.join(d, "public.md"), "w", encoding="utf-8", newline=NL).write(line + NL)
+        G.tracked_docs = lambda repo=None: ["src/public.cpp", "public.md"]
+        n3, per3 = G.overlap_count(d)
+        check(per3.get("public.md") == 1 and not per3.get("src/public.cpp"),
+              "RED: a design doc's fenced line copied into a tracked .md is an overlap ({})".format(per3))
+        G.tracked_docs = lambda repo=None: ["src/public.cpp"]
+        # a fence in docs/security/ hides nothing
+        os.makedirs(os.path.join(d, "docs", "security"))
+        io.open(os.path.join(d, "docs", "security", "s.md"), "w", encoding="utf-8", newline=NL).write(
+            "```" + NL + line + NL + "```" + NL)
+        n4, _ = G.overlap_count(d)
+        check(n4 == 1, "RED: the same line fenced in docs/security/ is an overlap ({})".format(n4))
+        os.remove(os.path.join(d, "docs", "security", "s.md"))
+        # an unclosed fence hides nothing: its lines stay sources
+        io.open(os.path.join(d, "docs", "design.md"), "w", encoding="utf-8", newline=NL).write(
+            "# a design doc" + NL + "a prose line long enough to be a source of its own, and unrelated" + NL
+            + "```cpp" + NL + line + NL)
+        n5, _ = G.overlap_count(d)
+        check(n5 == 1, "RED: a line under an unclosed fence is still a source ({})".format(n5))
+    finally:
+        G.tracked_docs = real_tracked
+        if saved is None:
+            os.environ.pop("MULTIVOID_MEMORY_DIR", None)
+        else:
+            os.environ["MULTIVOID_MEMORY_DIR"] = saved
+        shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(m, ignore_errors=True)
+
+
 def drill_partial_corpus_is_not_a_count():
     """A corpus missing its largest half must report n/a, not a smaller number.
 
@@ -202,6 +263,7 @@ def main():
     drill_overlap_ratchet()
     drill_acknowledgement()
     drill_ack_is_path_keyed()
+    drill_design_fence_is_not_a_source()
     drill_partial_corpus_is_not_a_count()
     print("")
     if FAILS:
