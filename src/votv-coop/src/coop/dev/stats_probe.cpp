@@ -85,6 +85,13 @@ void ProbeSnapshot() {
     float orig[kRows];
     for (size_t i = 0; i < kRows; ++i)
         if (!V::Read(static_cast<V::Field>(i), &orig[i])) return NotFound("snapshot");
+    // Write refuses a non-finite value, so a stat that is already one could not be restored.
+    for (size_t i = 0; i < kRows; ++i) {
+        if (std::isfinite(orig[i])) continue;
+        UE_LOGE("[STATS-PROBE] snapshot MISMATCH: %s holds a non-number, not probed",
+                V::RowOf(static_cast<V::Field>(i)).name);
+        return Bad();
+    }
     bool written[kRows] = {};
     for (size_t i = 0; i < kRows; ++i)
         written[i] = V::Write(static_cast<V::Field>(i), kSnapshotBase + static_cast<float>(i));
