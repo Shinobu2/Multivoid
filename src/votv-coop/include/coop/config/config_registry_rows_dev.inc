@@ -159,6 +159,8 @@ CFG_ENUM(mv_drill, "mv_drill", "dev", "off", "off|on|red", "VOTVCOOP_MV_DRILL",
 CFG_ENUM(stats_probe, "stats_probe", "dev", "off", "off|on|red", "VOTVCOOP_STATS_PROBE",
     "Probe (BOTH peers): every player stat read, written and restored inside one frame, and the game's "
     "status effects added, listed and removed -- red expects a wrong Health read-back and two bloodLoss entries.")
+CFG_ENUM(stat_order_drill, "stat_order_drill", "dev", "off", "off|on|red", "VOTVCOOP_STAT_ORDER_DRILL",
+    "Drill (the HOST): order and query a client's stats and effects and check every answer -- red expects a wrong answer.")
 CFG_ENUM(bug_report_drill, "bug_report_drill", "dev", "off", "off|on|red", "VOTVCOOP_BUG_REPORT_DRILL",
     "The bug-report drill: plants values, saves a report, opens it and judges it (red: plants an address unmarked).")
 CFG_ENUM(grants_drill, "grants_drill", "dev", "off", "off|grant|none|hostdeny", "VOTVCOOP_GRANTS_DRILL",

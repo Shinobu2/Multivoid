@@ -36,6 +36,7 @@
 #include "coop/dev/command_drill.h"  // [dev] a typed command is run by the host and answered privately
 #include "coop/dev/mv_drill.h"  // [dev] the /mv commands end to end against a seeded permission store
 #include "coop/dev/stats_probe.h"  // [dev] every player stat read, written and restored in one frame, and the game's status effects added, listed and removed
+#include "coop/dev/stat_order_drill.h"  // [dev] the host orders and queries a client's stats and effects and checks every answer
 #include "coop/dev/chat_drill.h"  // [dev] the chat checks, judged in memory
 #include "coop/dev/ban_drill.h"  // [dev] the host bans a joined client by the moderation verb
 #include "coop/dev/bug_report_drill.h"  // [dev] a bug report is saved and its zip judged in memory
@@ -153,6 +154,7 @@ void EndSession() {
     coop::dev::command_drill::OnDisconnect();  // [dev] the phases start over, the reply observer cleared
     coop::dev::mv_drill::OnDisconnect();  // [dev] the /mv script starts over, the reply observer cleared
     coop::dev::stats_probe::OnDisconnect();  // [dev] a rejoin's peers run the probe again
+    coop::dev::stat_order_drill::OnDisconnect();  // [dev] the steps start over, an answer still in flight is ignored
     coop::dev::chat_drill::OnDisconnect();  // [dev] the drill starts over, a chat it opened is closed
     coop::dev::ban_drill::OnSessionEnd();  // [dev] empty by design: its one state, the step, stands
     coop::dev::pause_quit_drill::OnDisconnect();  // [dev] a pending wait for the pause menu is dropped; the per-process latch stands
@@ -232,6 +234,7 @@ void TickDrills(coop::net::Session& session) {
     coop::dev::command_drill::Tick(&session);  // [dev] the commands drill (a latched read when off)
     coop::dev::mv_drill::Tick(&session);  // [dev] the /mv drill (a latched read when off)
     coop::dev::stats_probe::Tick(&session);  // [dev] the player stats and status effects probe (a latched read when off)
+    coop::dev::stat_order_drill::Tick(&session);  // [dev] the stat order drill's steps (a latched read when off)
     coop::dev::chat_drill::Tick(&session);  // [dev] the chat drill (a latched read when off)
     coop::dev::ban_drill::Tick(&session);  // [dev] the host ban drill (a latched read when off)
     coop::dev::bug_report_drill::Tick(&session);  // [dev] the bug-report drill (a latched read when off)
