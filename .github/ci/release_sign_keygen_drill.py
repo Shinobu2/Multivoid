@@ -321,10 +321,14 @@ def drill_keygen_green(tmp):
 
 def drill_keygen_mutants(tmp):
     table = one_row_table(tmp)
-    for name, mutant in (("a keygen that prints the seed", leaking_keygen),
-                         ("a keygen that skips the protection check", unchecked_keygen),
-                         ("a keygen that starts a process", process_starting_keygen)):
-        check("mutant: %s caught" % name, bool(keygen_flaws(mutant, FakeGh(), table)))
+    # The process mutant counts as caught only by the guard's own refusal: any other exception (a
+    # typo in the mutant) would also be a flaw and would pass the check for the wrong reason.
+    for name, mutant, must in (("a keygen that prints the seed", leaking_keygen, None),
+                               ("a keygen that skips the protection check", unchecked_keygen, None),
+                               ("a keygen that starts a process", process_starting_keygen,
+                                "no exception (AssertionError)")):
+        flaws = keygen_flaws(mutant, FakeGh(), table)
+        check("mutant: %s caught" % name, bool(flaws) and (must is None or must in flaws))
 
 
 def drill_keygen_refuses(tmp):
