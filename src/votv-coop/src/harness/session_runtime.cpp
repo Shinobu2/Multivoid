@@ -10,6 +10,7 @@
 
 #include "coop/atomic_file/atomic_file.h"
 #include "coop/bug_report/report_core.h"
+#include "coop/build_trust/build_trust.h"
 #include "coop/commands/commands_selftest.h"
 #include "coop/comms/chat_sync.h"
 #include "coop/config/config.h"
@@ -213,6 +214,9 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // faults the host on a client's bytes, and a token table that answers the wrong slot answers an
     // order nobody sent.
     coop::stat_orders::RunSelftest();
+    // And the build's own type: a parser that accepts a bent line, or a verifier that trusts an
+    // unknown key, makes a fork read as official.
+    coop::build_trust::RunSelftest();
     // And the newest-wins latch every received stream keeps: no LAN run reorders a datagram, so the
     // batch that arrives behind one already taken is refused here, on pinned sequences.
     coop::net::stream_slot::RunSelftest();

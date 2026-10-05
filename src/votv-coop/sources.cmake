@@ -454,6 +454,8 @@ set(VOTVCOOP_SOURCES
     src/coop/player/stat_orders.cpp
     src/coop/player/stat_orders_wire.cpp
     src/coop/player/stat_orders_wire_selftest.cpp
+    src/coop/build_trust/build_trust.cpp
+    src/coop/build_trust/build_trust_selftest.cpp
     src/coop/items/inventory_wire.cpp
     src/coop/items/save_record_wire.cpp
     src/coop/props/container_contents_sync.cpp
