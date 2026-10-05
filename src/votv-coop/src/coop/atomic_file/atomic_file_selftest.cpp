@@ -1,5 +1,5 @@
 // coop/atomic_file/atomic_file_selftest.cpp -- the un-gated boot selftest of the one file writer,
-// run once per session start on both peers (shape: coop/moderation/ban_list_selftest.cpp). It
+// run once per process on both peers (shape: coop/moderation/ban_list_selftest.cpp). It
 // writes real files in a scratch folder beside the executable: a writer that leaves a cut file or
 // a stray temporary loses an ini, a ban or a key, and nothing else would notice.
 //
@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iterator>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -163,7 +164,7 @@ bool ReadDacl(const fs::path& path, bool& protectedOut, DWORD& aceCountOut) {
 
 }  // namespace
 
-bool RunSelftest() {
+static bool RunSelftestBody() {
     int pass = 0, total = 0;
     auto check = [&](bool ok, const char* what) {
         ++total;
@@ -253,9 +254,9 @@ bool RunSelftest() {
         const bool kept = !fs::exists(dead) && fs::exists(system) && fs::exists(ours);
         check(made && removed == 1 && kept && !ProcessRunning(1) && ProcessRunning(4),
               "case 8a: RemoveLeftovers deletes only a dead process's temporary");
-        HandWrite(dead, "x");
+        const bool deadMade = HandWrite(dead, "x");
         const Result r = Write(y, "ff", Mode::Replace, Sync::Cached);
-        check(r.ok() && !fs::exists(dead) && Reads(y, "ff"),
+        check(deadMade && r.ok() && !fs::exists(dead) && Reads(y, "ff"),
               "case 8b: a write sweeps its own target's dead leftover");
         const fs::path report = scratch / L"report-x.zip.1.tmp";
         HandWrite(report, "x");
@@ -293,6 +294,15 @@ bool RunSelftest() {
     }
     UE_LOGE("atomic_file selftest: %d/%d checks passed", pass, total);
     return false;
+}
+
+// Once per process: the cases are ~150 file operations and several flushes, and a session
+// Stop/Start would redo them; a later call returns the first run's verdict without output.
+bool RunSelftest() {
+    static std::once_flag ran;
+    static bool verdict = false;
+    std::call_once(ran, [] { verdict = RunSelftestBody(); });
+    return verdict;
 }
 
 }  // namespace coop::atomic_file

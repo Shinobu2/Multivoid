@@ -584,7 +584,7 @@ bool VerifyBlob(const PubKey& pub, const uint8_t* data, size_t len, const Sig& s
     return ed25519_sign_open(data, len, pub.data(), sig.data()) == 0;
 }
 
-bool RunSelftest() {
+static bool RunSelftestBody() {
     int pass = 0, total = 0;
     auto check = [&](bool ok, const char* what) {
         ++total;
@@ -730,8 +730,9 @@ bool RunSelftest() {
             const std::wstring scratch =
                 exe + L"\\" + kScratchKeyPrefix + std::to_wstring(::GetCurrentProcessId()) + L".key";
             ::DeleteFileW(scratch.c_str());
-            coop::atomic_file::Write(scratch, "malformed", coop::atomic_file::Mode::Replace,
-                                     coop::atomic_file::Sync::Cached);
+            const bool seeded =
+                coop::atomic_file::Write(scratch, "malformed", coop::atomic_file::Mode::Replace,
+                                         coop::atomic_file::Sync::Cached).ok();
             uint8_t want[kPrivKeyBytes];
             uint8_t expect[kPrivKeyBytes];
             for (size_t i = 0; i < kPrivKeyBytes; ++i) {
@@ -739,7 +740,7 @@ bool RunSelftest() {
                 expect[i] = static_cast<uint8_t>(i + 1 + (breakIt ? 1 : 0));
             }
             DWORD werr = 0;
-            check(WriteKeyFile(scratch, want, &werr, coop::atomic_file::Mode::Replace),
+            check(seeded && WriteKeyFile(scratch, want, &werr, coop::atomic_file::Mode::Replace),
                   "the key file was not written over a malformed one (Replace)");
             uint8_t got[kPrivKeyBytes]{};
             DWORD rerr = 0;
@@ -748,7 +749,7 @@ bool RunSelftest() {
                   "the key file does not read back as the key that was written");
             DWORD cerr = 0;
             check(!WriteKeyFile(scratch, want, &cerr, coop::atomic_file::Mode::CreateOnly) &&
-                      cerr == ERROR_ALREADY_EXISTS,
+                      (cerr == ERROR_ALREADY_EXISTS || cerr == ERROR_FILE_EXISTS),
                   "a create-only key write over an existing file was not refused");
             if (coop::atomic_file::VolumeKeepsAcls(scratch) && KeyFileAcl().ok) {
                 bool isProtected = false;
@@ -767,6 +768,15 @@ bool RunSelftest() {
     }
     UE_LOGE("peer_identity selftest: %d/%d checks passed", pass, total);
     return false;
+}
+
+// Once per process: the key-file cases do file operations and flushes, and a session Stop/Start
+// would redo them; a later call returns the first run's verdict without output.
+bool RunSelftest() {
+    static std::once_flag ran;
+    static bool verdict = false;
+    std::call_once(ran, [] { verdict = RunSelftestBody(); });
+    return verdict;
 }
 
 }  // namespace coop::net::peer_identity

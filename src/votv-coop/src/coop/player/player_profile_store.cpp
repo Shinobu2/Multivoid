@@ -287,13 +287,17 @@ bool FollowWrittenSlot(const std::wstring& written) {
     std::unordered_set<std::wstring> names;
     for (const fs::path& file : set) {
         // Cached: the game thread, at a save to a new slot; the next cut writes the primary ToDisk.
+        // A stream iterator stops at the first read error without setting badbit, so the bytes are
+        // checked against the size the file system gave before the read.
         std::string bytes;
         std::string why = "could not read";
         {
+            std::error_code sizeEc;
+            const std::uintmax_t size = fs::file_size(file, sizeEc);
             std::ifstream in(file, std::ios::binary);
-            if (in) {
+            if (in && !sizeEc) {
                 bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-                if (!in.bad()) why.clear();
+                if (bytes.size() == size) why.clear();
             }
         }
         if (why.empty()) {
