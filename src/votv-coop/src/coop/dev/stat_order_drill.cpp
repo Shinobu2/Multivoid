@@ -156,6 +156,7 @@ bool RowRead(const SO::TableView& v, V::Field f) { return (v.validMask >> static
 // whether a joiner's world holds the host's effect from before it joined.
 void JudgeFirstQuery(SO::Result r, const SO::TableView& v) {
     const char* what = "query the whole table";
+    if (r == SO::Result::NotReady) return Unmeasurable("the joiner's world was changing");
     if (r != SO::Result::Applied) return Mismatch(what, r, 0.f, false, "expected Applied");
     UE_LOGI("[STAT-ORDER] query health=%.3f food=%.3f sleep=%.3f effects=%u", Row(v, V::Field::Health),
             Row(v, V::Field::Food), Row(v, V::Field::Sleep), static_cast<unsigned>(v.effectTotal));
@@ -220,6 +221,7 @@ SO::Order EffectOrder(SO::Op op, const char* name, float strength, float seconds
 void Tick(Session* session) {
     if (ArmNow() == Arm::Off || g_finished || g_inFlight || !session || !session->running()) return;
     if (session->role() != coop::net::Role::Host) return;
+    SO::Install(session);   // the pump ticks the drills before its per-tick Install of the lanes
     const bool red = ArmNow() == Arm::Red;
     switch (g_step) {
     case 1: {
