@@ -224,6 +224,15 @@ teleport. The host can deny itself a command the same way, in a file named by it
 your own row in the player list). A player whose permission file sets `multivoid.kick.exempt` (or
 `.ban.exempt`) cannot be kicked or banned by a friend, only by the host.
 
+The same files can be edited in game with `/mv`, in LuckPerms' `/lp` shape: `/mv user <who> permission set
+<node> [true|false]`, `/mv user <who> parent add <group>`, `/mv group <name> permission set ...`, `/mv creategroup
+<name>`, `/mv user <who> info`, `/mv listgroups`, and `/mv reload` after editing a file by hand; `/help` lists them
+all. The host can run every one; a friend runs the ones the host granted (`multivoid.mv.user.permission.set` and its
+siblings), and no friend can take one of the mod's permissions away from the host. Each change is written to the files at once, and
+recorded in `permissions\actions.jsonl` beside them; a player holding `multivoid.admin.log` is told of every change.
+A command rewrites the one file it changes in its own layout, so keep notes elsewhere, not as extra keys in a
+permission file.
+
 The host's server settings -- today the voice range, `voice.distance_cm`, in centimetres -- change with
 `/set <setting> <value>` and go back to their default with `/reset <setting>`; every peer follows
 at once. F1's `Administration > Server settings` draws each of them and runs those same lines. A
