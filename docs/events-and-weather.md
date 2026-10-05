@@ -78,8 +78,10 @@ names while a client session runs. Shared-world content then arrives only from t
 through the character, world-actor and prop mirrors. A spawner anchored to the player's camera
 (the pinecone drops) is the exception: each peer rolls its own.
 The host's drops reach every peer as ordinary prop births; a client's -- a pinecone, a stick, a
-crystal -- go to the host as a drop intent, the host builds them and every peer sees them
-(`coop/props/prop_drop_intent`). The remaining randomness is closed shape by shape:
+crystal, and any base prop the spawner makes -- go to the host as a drop intent, the host builds
+them and every peer sees them (`coop/props/prop_drop_intent`). A prop a mirrored character makes
+on a client -- a kerfur-o handing back a disc, a creature dropping a totem -- is an echo of the
+host's character and is destroyed there; the host's own character makes the one that counts. The remaining randomness is closed shape by shape:
 a mirror where the host owns the roll and the state, an intent where a client's action makes
 the host roll (a shop delivery time, a signal catch, a device claim), and a shared seed where
 the game already uses a seeded stream. Cosmetic-local randomness (view bob, flicker, exhaust)
