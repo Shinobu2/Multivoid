@@ -24,8 +24,9 @@ namespace R = ue_wrap::reflection;
 
 // One-time resolution cache. Resolving on every access ran several FindPropertyOffset calls --
 // ~100-300 ms of game-thread block each time, a visible frame hitch. Cached, no access looks a
-// property up again; the steady-state cost differs per owner. A save row: the GameInstance (the
-// world singleton's), one pointer deref and the float access. A gamemode row: the gamemode lookup
+// property up again; the steady-state cost differs per owner. A save row: the world singleton's
+// GameInstance lookup twice (EnsureBase, then ResolveSlot), a class compare (EnsureSaveRows), then
+// the save_gameInst deref and the float access. A gamemode row: the gamemode lookup
 // and a class compare first. A pawn row: that, then the gamemode's mainPlayer deref, an IsLive
 // check and a class compare.
 struct Cache {
