@@ -12,8 +12,12 @@
 // (reference/mtasa-blue/Server/mods/deathmatch/logic/CElement.cpp:1281); here the host never writes
 // its copy at send time, so nothing is stamped. For the query pair, MTA's resendPlayerModInfo
 // (reference/mtasa-blue/Server/mods/deathmatch/logic/luadefs/CLuaPlayerDefs.cpp:49) asks a client
-// for data it alone holds, and the Source SDK's convar query answers under a cookie
-// (reference/source-sdk-2013/src/game/server/gameinterface.h:115). Shapes only.
+// for data it alone holds, and the Source SDK's convar query answers under a cookie and a status
+// (reference/source-sdk-2013/src/public/engine/iserverplugin.h:36-43, 110-113, 160). The closer
+// tagged-request and status-reply shape is MTA's takePlayerScreenShot
+// (reference/mtasa-blue/Server/mods/deathmatch/logic/CStaticFunctionDefinitions.cpp:3329-3349,
+// reference/mtasa-blue/Server/mods/deathmatch/logic/packets/CPlayerScreenShotPacket.cpp:16-60); ours
+// is stricter: the token, the slot and the generation must all match. Shapes only.
 
 #pragma once
 
