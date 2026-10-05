@@ -73,13 +73,13 @@ int SelftestScanWithFailure(int failAfterLines) {
     return internal::ScanWithInjectedFailure(failAfterLines);
 }
 
-// ---- typed-resolver twins (arc 3 C5; see config.h) --------------------------
+// ---- typed-resolver twins (arc 3 C5; see config_selftest.h) -----------------
 
 namespace {
 
 // The twins' ini pick: same authoritative-line read as the live layer, over
 // `path` instead of the module ini; NO env layer (the env layer is drilled by
-// its own live-resolver control -- see config.h).
+// its own live-resolver control -- see config_selftest.h).
 bool PickIniAt(const std::wstring& path, const config_registry::Row* row, std::string& raw) {
     static const char* kAbsent = "\x01<absent>";
     IniScan st = IniScan::Ok;

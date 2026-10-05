@@ -40,7 +40,7 @@ bool EnsureIniSkeleton();
 // they are, and the rewritten line's inline comment is deleted. Best-effort: a read-only
 // directory means the value is not remembered, logged and false; true means the atomic swap
 // landed. Any value is accepted (ValueValidForKey is true for identity rows). The
-// string-keyed machinery below (reformat, keep-line, skeleton, selftests) operates on keys
+// string-keyed machinery below (reformat, keep-line, skeleton) operates on keys
 // discovered in the file.
 bool WriteIniValue(const config_registry::IdentityRow& row, const char* value);
 
