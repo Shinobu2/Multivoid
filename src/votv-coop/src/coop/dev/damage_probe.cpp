@@ -1,4 +1,4 @@
-// coop/dev/damage_probe.cpp -- see coop/dev/damage_probe.h.
+// src/coop/dev/damage_probe.cpp -- see include/coop/dev/damage_probe.h.
 #include "coop/dev/damage_probe.h"
 
 #include "coop/config/config.h"

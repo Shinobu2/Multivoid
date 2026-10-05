@@ -83,7 +83,7 @@ bool OnImpactEntryPre(void* self, void* /*params*/) {
 // through an impact entry: the body's own ubergraph calls Add Player Damage on itself once a second
 // for as long as it burns. A peer's puppet that walked through fire only this machine shows caught
 // it here and burned for the rest of the session, and every tick ran the damage body against this
-// machine's player: its camera shook once a second (measured with coop/dev/damage_probe: [DMG]
+// machine's player: its camera shook once a second (measured with src/coop/dev/damage_probe.cpp: [DMG]
 // PUPPET lines at 1 Hz for seven minutes). The puppet's owner sees no such fire and takes nothing,
 // which is the victim-authoritative answer the impact cancel already gives. Watched at the
 // script-body gate because the verb is Blueprint-internal on every route.

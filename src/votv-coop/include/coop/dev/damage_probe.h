@@ -1,4 +1,4 @@
-// coop/dev/damage_probe.h -- [dev] every call of the player's damage verb on this machine, one [DMG]
+// include/coop/dev/damage_probe.h -- [dev] every call of the player's damage verb on this machine, one [DMG]
 // line each: whose body takes it (this machine's own player, a peer's puppet by slot, or another
 // actor), the amount, the source argument's class, and the Blueprint function and object that called
 // it. It answers which route a hazard reaches a player by, and on which machine, before a relay is
