@@ -413,6 +413,17 @@ void Tick() {
     }
 }
 
+bool SendProfileNow(coop::net::Session* s) {
+    if (!s || !s->connected() || !g_profileApplied) return false;
+    ue_wrap::inventory::PlayerInventory items;
+    if (!ue_wrap::inventory::ReadAll(items)) return false;
+    SampleStandingPose();
+    std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(items);
+    const uint64_t itemsHash = coop::blob_chunks::Fnv64(blob);
+    // No hash or cadence check: the caller has just changed the vitals the profile carries.
+    return SendProfile(s, std::move(blob), itemsHash, items.inventory.size(), Clock::now());
+}
+
 void OnReliable(const coop::net::BlobChunkPayload& p, uint8_t senderPeerSlot) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s) return;

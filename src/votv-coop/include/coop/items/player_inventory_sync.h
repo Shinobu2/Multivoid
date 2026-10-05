@@ -7,7 +7,8 @@
 // the host's items under the host's keys. In session order: the host sends a joining peer its
 // profile while that peer is still pre-world (a first join gets a starter kit under fresh
 // keys), and the client writes it into the save object before the world materialises; the
-// client streams its profile back as it changes, only from a world that was built from one;
+// client streams its profile back as it changes (and at once after an admin's order, SendProfileNow),
+// only from a world that was built from one;
 // the host holds each complete, changed blob by GUID and cuts the held profiles to disk when its
 // own world is saved, at no other moment (coop/player/player_profile_store.h says why). Nothing
 // held and no file IS the first-join test.
@@ -72,6 +73,12 @@ void OnDisconnectForSlot(int peerSlot);
 // Aggregate disconnect: the client clears its send-dedup and any pending apply. The host keeps
 // what the store holds -- on a host this edge is the last client leaving. Game thread.
 void OnDisconnect();
+
+// CLIENT: send this client's profile now, on the stream's path, past the stream's hash and cadence
+// checks; a send restarts the stream's 30 s cadence. False when the stream is shut (not connected,
+// or this world was not built from a host profile, so the host keeps the one it holds), when the
+// items do not read, or when the transport refused or the profile is too large. Game thread.
+bool SendProfileNow(coop::net::Session* s);
 
 // Per-tick: the client's outbound inventory stream, or the host's on-join push, by role. It
 // also carries a one-shot read-verify self-test (ini inventory_selftest=1) that reads the local
