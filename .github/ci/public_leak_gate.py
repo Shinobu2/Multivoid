@@ -121,9 +121,11 @@ S3 = re.compile(r"(?:flag (?:it )?for|file (?:it )?(?:as|under)|belongs in|shoul
 # effects.h's Add declaration verbatim -- doc quoting code.
 # 106 -> 124 (2026-10-05), CONTENT, the eighteen lines read: PSA-2a's sheet (PLAYER_STATE_ADMIN_ARC.md 5e) dictated
 # stat_orders_wire.h's interface (sixteen lines: the Op and Result enums with Result's comment, the two views, OrderWire,
-# QueryDone, ResultText, the four Unpack declarations with one comment, PendingTable's kMaxQueries, Take, TakeSlot and
+# QueryDone, ResultText, three Unpack declarations (UnpackQuery, UnpackOrderReply, UnpackQueryReply) with one comment, PendingTable's kMaxQueries, Take, TakeSlot and
 # OldestSentMs) and protocol.h's kStatRows and kStatEffectName -- doc quoting code.
-OVERLAP_BASELINE = 124
+# 124 -> 130 (2026-10-05), CONTENT, the six lines read: PSA-2b's sheet (PLAYER_STATE_ADMIN_ARC.md 5f) dictated
+# stat_orders.h's Sent enum, SendOrder's declaration and the four Handle* declarations -- doc quoting code.
+OVERLAP_BASELINE = 130
 # EXCLUDED because it is a deliberate practice, not a leak: copying memory topics into the public
 # piles archive. It alone contributes ~1,263 of the raw 1,300 overlaps.
 OVERLAP_SKIP = ("docs/piles/_archive/session-log/",)
