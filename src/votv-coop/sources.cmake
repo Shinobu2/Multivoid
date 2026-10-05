@@ -152,6 +152,7 @@ set(VOTVCOOP_SOURCES
     src/ue_wrap/actors/prop_events.cpp
     src/ue_wrap/actors/garbage_bag.cpp
     src/ue_wrap/actors/vitals.cpp
+    src/ue_wrap/actors/effects.cpp
     src/ue_wrap/world/game_mode.cpp
     src/ue_wrap/world/world_singleton.cpp
     src/ue_wrap/world/world_instances.cpp

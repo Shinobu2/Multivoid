@@ -7,18 +7,22 @@
 #include "coop/dev/command_drill.h"
 #include "coop/net/session.h"
 
+#include "ue_wrap/actors/effects.h"
 #include "ue_wrap/actors/vitals.h"
 #include "ue_wrap/core/log.h"
 
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cwchar>
 #include <string>
+#include <vector>
 
 namespace coop::dev::stats_probe {
 namespace {
 
 namespace V = ue_wrap::vitals;
+namespace E = ue_wrap::effects;
 
 enum class Arm : uint8_t { Off, On, Red };
 
@@ -164,6 +168,94 @@ void ProbeDefaults() {
     ok ? Good() : Bad();
 }
 
+// ---- the effects leg ---------------------------------------------------------------------------
+
+constexpr float kEffectStrength = 1.f;  // what an added effect is given, and what List must report
+constexpr float kEffectSeconds = 5.f;
+
+// The effects the probe adds: each one's removal leaves nothing behind.
+const wchar_t* const kEffectsAdded[] = {L"bloodLoss", L"foodPoison", L"nausea", L"sleepy", L"vaccine_a"};
+
+// The effects the probe only lists by name, and what a removal of each would leave.
+struct ListedOnly { const wchar_t* name; const char* leaves; };
+const ListedOnly kEffectsListed[] = {
+    {L"lsd", "the lsd reverb on"},
+    {L"vaccine", "a widget on screen"},
+    {L"poo", "a poo prop"},
+};
+
+bool SameName(const std::wstring& a, const wchar_t* b) { return _wcsicmp(a.c_str(), b) == 0; }
+
+// How many entries of `name` the list holds, and the first of them.
+int CountOf(const std::vector<E::Entry>& list, const std::wstring& name, const E::Entry** first) {
+    int n = 0;
+    for (const E::Entry& e : list) {
+        if (!SameName(e.name, name.c_str())) continue;
+        if (n == 0 && first) *first = &e;
+        ++n;
+    }
+    return n;
+}
+
+void EffectNotFound(const std::wstring& name) {
+    UE_LOGE("[STATS-PROBE] effect %ls NOT FOUND", name.c_str());
+    Bad();
+}
+
+// One effect of the add list: skipped when it is already active (an add would merge into it, or
+// stack beside it), else added, listed, removed, listed.
+void ProbeEffectAdded(const std::wstring& name, bool red) {
+    std::vector<E::Entry> list;
+    if (!E::List(&list)) return EffectNotFound(name);
+    if (CountOf(list, name, nullptr) > 0) {
+        UE_LOGI("[STATS-PROBE] effect %ls SKIPPED (already active)", name.c_str());
+        return;
+    }
+    if (!E::Add(name, kEffectStrength, kEffectSeconds)) return EffectNotFound(name);
+    const bool listedAdded = E::List(&list);
+    const E::Entry* first = nullptr;
+    const int added = listedAdded ? CountOf(list, name, &first) : 0;
+    const float strength = first ? first->strength : 0.f;
+    const float time = first ? first->time : 0.f;
+    const int expected = (red && SameName(name, L"bloodLoss")) ? 2 : 1;
+    const bool addedOk = added == expected && first && first->live && Near(strength, kEffectStrength) &&
+                         Near(time, kEffectSeconds);
+    // The removal runs whatever the add read back, so a MISMATCH does not leave an effect behind.
+    const bool removed = E::Remove(name);
+    const bool listedAfter = E::List(&list);
+    if (!listedAdded || !removed || !listedAfter) return EffectNotFound(name);
+    const int after = CountOf(list, name, nullptr);
+    const bool ok = addedOk && after == 0;
+    if (ok) UE_LOGI("[STATS-PROBE] effect %ls after-add=%d strength=%.3f time=%.3f after-remove=%d OK", name.c_str(), added, strength, time, after);
+    else UE_LOGE("[STATS-PROBE] effect %ls after-add=%d strength=%.3f time=%.3f after-remove=%d MISMATCH", name.c_str(), added, strength, time, after);
+    ok ? Good() : Bad();
+}
+
+// Every effect the game's table names: the add list through its whole cycle, the list-only ones by
+// name, and any other a game update added as a MISMATCH, since nobody has vetted its removal.
+void ProbeEffects(bool red) {
+    std::vector<std::wstring> names;
+    if (!E::Names(&names)) return NotFound("effects");
+    for (const std::wstring& name : names) {
+        bool added = false;
+        for (const wchar_t* a : kEffectsAdded) added = added || SameName(name, a);
+        if (added) {
+            ProbeEffectAdded(name, red);
+            continue;
+        }
+        const ListedOnly* listed = nullptr;
+        for (const ListedOnly& l : kEffectsListed)
+            if (SameName(name, l.name)) listed = &l;
+        if (listed) {
+            UE_LOGI("[STATS-PROBE] effect %ls LISTED (not added: its removal leaves %s)", name.c_str(), listed->leaves);
+            Good();
+            continue;
+        }
+        UE_LOGE("[STATS-PROBE] effect %ls MISMATCH: not vetted", name.c_str());
+        Bad();
+    }
+}
+
 // The host's readiness: one row of each owner reads.
 bool HostReady() {
     float v = 0.f;
@@ -188,6 +280,7 @@ void Tick(coop::net::Session* session) {
     ProbeSnapshot();
     ProbeRefusals();
     ProbeDefaults();
+    ProbeEffects(red);
     UE_LOGI("[STATS-PROBE] DONE bad=%d ok=%d", g_bad, g_ok);
 }
 
