@@ -45,6 +45,10 @@ bool HoldsExplicitly(std::string_view playerId, std::string_view node);
 // The clock the checks use: unix seconds. Any thread.
 int64_t NowSeconds();
 
+// Game thread: the folder an admin action is recorded in -- the server folder's `permissions` -- or
+// empty when no hosted session runs or the server folder is unknown.
+std::filesystem::path ActionLogFolder();
+
 // A counter of the live model's replacements: it advances when the game thread adopts a model a host
 // start published (adopting a pending one first, as the first check does) and at each in-game edit
 // or reload that publishes one, so a changed value means every answer must be asked again. GAME

@@ -81,7 +81,7 @@ ModResult KickPlayer(const PlayerToken& token, const char* reason) {
                 static_cast<unsigned>(token.playerNo), token.slot);
         return ModResult::Gone;
     }
-    const std::string why = ReasonOr(reason, "kicked by host");
+    const std::string why = ReasonOr(reason, kKickDefaultReason);
     if (!s->KickWithToken(token.slot, token.generation, coop::net::EndReason::KickedByHost,
                           why.c_str())) {
         UE_LOGW("moderation: kick of #%u (slot %d) did nothing -- they are already "
@@ -130,7 +130,7 @@ ModResult BanPlayer(const PlayerToken& token, const char* reason, bool byAddress
         byAddress ? EnforceableAddress(*s, token.slot, token.generation) : std::string();
     // The typed reason rides the close as its text, so the banned player reads it under the code;
     // the constant stands in when none was typed, and is what the record stores.
-    const std::string why = ReasonOr(reason, "banned by host");
+    const std::string why = ReasonOr(reason, kBanDefaultReason);
     if (!coop::ban_list::Add(id.c_str(), nick, address.c_str(), why.c_str())) return ModResult::NoId;
     // Accepted window: the banned player's re-proof over a second connection, whose ban check
     // ran on the net thread just before the Add above, is seated for this session. MTA has
@@ -160,7 +160,7 @@ ModResult BanOffline(const char* id, const char* reason, bool byAddress) {
     const std::string address =
         (known && byAddress && coop::ban_list::IsBannableAddress(e.ip)) ? std::string(e.ip)
                                                                         : std::string();
-    const std::string why = ReasonOr(reason, "banned by host");
+    const std::string why = ReasonOr(reason, kBanDefaultReason);
     if (!coop::ban_list::Add(guid.c_str(), known ? e.nick : "", address.c_str(), why.c_str()))
         return ModResult::NoId;
     UE_LOGI("moderation: offline-banned '%s' (id %.8s..., address %s)", known ? e.nick : "",

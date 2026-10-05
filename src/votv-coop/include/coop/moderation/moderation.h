@@ -60,6 +60,11 @@ inline PlayerToken TokenFor(int slot, uint16_t playerNo, uint32_t generation) {
 // teleport whose host pose could not be read).
 enum class ModResult : uint8_t { Done, NoSession, Gone, NoId, NotBanned, Failed };
 
+// The reason a kick or a ban carries when none was typed: it rides the close and a ban's record
+// stores it.
+inline constexpr char kKickDefaultReason[] = "kicked by host";
+inline constexpr char kBanDefaultReason[] = "banned by host";
+
 // Cache the Session pointer (used by the verbs). Called once at host boot, alongside the other
 // modules' SetSession.
 void SetSession(coop::net::Session* session);
@@ -75,7 +80,7 @@ bool HostedSessionRunning();
 // never names a successor. Any thread.
 std::string EnforceableAddress(const coop::net::Session& s, int slot, uint32_t generation);
 
-// Disconnect the captured player; `reason` rides the close (null/empty reads "kicked by host").
+// Disconnect the captured player; `reason` rides the close (null/empty reads kKickDefaultReason).
 // Gone when the target has since left or been replaced -- see the token note above.
 ModResult KickPlayer(const PlayerToken& token, const char* reason);
 
@@ -87,8 +92,8 @@ ModResult KickPlayer(const PlayerToken& token, const char* reason);
 // banned id only, because bystanders at a shared address (a household router, a carrier address) keep their
 // session and meet the refusal at their next proof -- the named cost, undone by Unban.
 // The ban survives host restarts and is checked at the identity proof of every future join;
-// `reason` is stored on the record and rides the banned player's close (null/empty reads "banned
-// by host", applied before the ban is stored).
+// `reason` is stored on the record and rides the banned player's close (null/empty reads
+// kBanDefaultReason, applied before the ban is stored).
 // Gone -- writing no ban and kicking nobody -- if the slot no longer holds the captured player;
 // NoId if it does but their identity proof has not landed. This is the whole point of the token:
 // a permanent ban is the least reversible thing the host can do, so it must never land on

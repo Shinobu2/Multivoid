@@ -99,6 +99,14 @@ std::vector<std::string> WithProblems(const char* header, const std::vector<std:
 
 int64_t NowSeconds() { return static_cast<int64_t>(::time(nullptr)); }
 
+std::filesystem::path ActionLogFolder() {
+    UE_ASSERT_GAME_THREAD("permission_host::ActionLogFolder");
+    if (!coop::moderation::HostedSessionRunning()) return {};
+    LiveChecker();  // adopts a pending publish, as Apply does
+    if (g_serverDir.empty()) return {};
+    return StoreDir();
+}
+
 uint64_t Revision() {
     UE_ASSERT_GAME_THREAD("permission_host::Revision");
     LiveChecker();  // adopts a pending publish, as the first check would
