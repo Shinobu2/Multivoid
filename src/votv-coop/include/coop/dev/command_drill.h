@@ -27,8 +27,8 @@ void Tick(coop::net::Session* session);
 void OnDisconnect();
 
 // A client's world is up and its join is over: connected, the world-ready announced, the join
-// progress idle. The one predicate the command drill and the /mv drill start a client on. Game
-// thread.
+// progress idle. The one predicate the command drill, the /mv drill and the stats probe start a
+// client on. Game thread.
 bool ClientReady(coop::net::Session* s);
 
 }  // namespace coop::dev::command_drill
