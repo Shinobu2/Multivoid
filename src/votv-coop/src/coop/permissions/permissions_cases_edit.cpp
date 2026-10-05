@@ -101,7 +101,7 @@ void ExpiredCases(CheckSink& sink) {
                                       m.DeleteGroup("staff");
                                       return true;
                                   });
-    sink.Check(primary.result == EditResult::Refused && Has(primary.why, "staff"),
+    sink.Check(primary.result == EditResult::Refused && Has(primary.why, "primary group"),
                "edit: deleting the group a user's stored primary names is refused");
 }
 
@@ -187,6 +187,50 @@ void RefusalCases(CheckSink& sink) {
                "edit: texts that do not load refuse every edit, naming the loader's first problem");
 }
 
+// True when `text`, as the file of the user `id` beside `others`, loads with no problem and the loaded
+// user serialises, pruned, to `text` again.
+bool LoadsBackEqual(const std::vector<HolderText>& others, const std::string& id, const std::string& text,
+                    std::string* primary) {
+    std::vector<HolderText> texts = others;
+    texts.push_back({id, false, text});
+    Model m;
+    if (!ShouldLoad(LoadHolders(texts, m))) return false;
+    const Holder* h = m.FindUser(id);
+    if (h == nullptr) return false;
+    *primary = h->primaryGroup;
+    return SerializeHolder(*h, kNow, true) == text;
+}
+
+// The text an edit writes is the loader's reading of the holder, not the copy's.
+void LoaderReadingCases(CheckSink& sink) {
+    const std::string id = Id('9');
+    const std::vector<HolderText> gold = {{"gold", true, "{}"}};
+    const auto unrelated = [&](Model& m, std::string*) {
+        m.SetNode(HolderKind::User, id, N("a.b"));
+        return true;
+    };
+    const std::string heldByExpired =
+        R"({"primaryGroup":"gold","permissions":["x.y",{"permission":"group.gold","expiry":1000}]})";
+    std::vector<HolderText> texts = gold;
+    texts.push_back({id, false, heldByExpired});
+    const EditPlan pruned = Plan(texts, {HolderKind::User, id}, unrelated);
+    std::string primary;
+    sink.Check(pruned.result == EditResult::Changed && !pruned.deleteFile &&
+                   LoadsBackEqual(gold, id, pruned.text, &primary) && primary == "default" &&
+                   Has(pruned.text, R"("primaryGroup": "default")") && !Has(pruned.text, "gold"),
+               "edit: a primary held only by the expired parent the write drops is written as default");
+
+    const std::string denied = R"({"primaryGroup":"default","permissions":["x.y"]})";
+    const EditPlan deny = Plan({{id, false, denied}}, {HolderKind::User, id}, [&](Model& m, std::string*) {
+        m.SetNode(HolderKind::User, id, N("group.default", false));
+        return true;
+    });
+    sink.Check(deny.result == EditResult::Changed && !deny.deleteFile &&
+                   LoadsBackEqual({}, id, deny.text, &primary) && !Has(deny.text, "false") &&
+                   Has(deny.text, "group.default") && Allows(deny.candidate, id, "x.y"),
+               "edit: a deny of group.default, which the default step overrides, is not written");
+}
+
 }  // namespace
 
 void RunEditCases(CheckSink& sink) {
@@ -196,6 +240,7 @@ void RunEditCases(CheckSink& sink) {
     DeleteCases(sink);
     OwnerCases(sink);
     RefusalCases(sink);
+    LoaderReadingCases(sink);
 }
 
 }  // namespace coop::permissions

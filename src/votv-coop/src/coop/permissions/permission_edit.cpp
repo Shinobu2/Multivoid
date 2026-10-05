@@ -31,6 +31,15 @@ bool Outcome(const Holder* h, int64_t now, std::string* text) {
     return true;
 }
 
+// The file a holder is written as: false for none (the holder is absent, or a user in the default
+// state once what has expired is pruned), else true with the pruned text.
+bool FileText(const Holder* h, int64_t now, std::string* text) {
+    if (h == nullptr) return false;
+    if (h->kind == HolderKind::User && IsDefaultUser(*h, now, true)) return false;
+    *text = SerializeHolder(*h, now, true);
+    return true;
+}
+
 // `texts` with the entry of `key` replaced by `text`, removed (null `text`), or, when the store has
 // none, inserted where ReadStoreTexts would list it: groups before users, each sorted by stem.
 std::vector<HolderText> WithEntry(const std::vector<HolderText>& texts, const HolderKey& key,
@@ -111,23 +120,32 @@ EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& keyIn,
         return plan;
     }
 
-    // The text written is the copy's holder, pruned of what has expired: the file is rewritten
-    // whole, as LuckPerms rewrites a holder from its model. The candidate is what the loader makes
-    // of it, so its default step may differ from the copy.
-    const Holder* copyHolder = FindHolder(copy, key);
-    const bool deleteFile =
-        copyHolder == nullptr || (copyHolder->kind == HolderKind::User && IsDefaultUser(*copyHolder, now, true));
+    // The text written is what the loader reads back. The first text is the copy's holder, pruned of
+    // what has expired; the candidate built from it may differ from the copy (a pruned parent leaves
+    // its stored primary without a holder, the default step overrides a deny of group.default). So the
+    // candidate's own holder is serialised again and, when that differs, it is the text and the
+    // candidate is built once more: a loaded holder re-serialises byte-equal, the fixed point.
     std::string newText;
-    if (!deleteFile) newText = SerializeHolder(*copyHolder, now, true);
+    bool deleteFile = !FileText(FindHolder(copy, key), now, &newText);
 
     EditPlan plan;
-    LoadReport candidateReport = LoadHolders(WithEntry(texts, key, deleteFile ? nullptr : &newText), plan.candidate);
-    if (!ShouldLoad(candidateReport)) {
+    const auto build = [&]() {
+        plan.candidate = Model();
+        LoadReport report = LoadHolders(WithEntry(texts, key, deleteFile ? nullptr : &newText), plan.candidate);
+        if (ShouldLoad(report)) return true;
         // The next host start would refuse the same files.
         plan.result = EditResult::Refused;
-        plan.why = candidateReport.problems.front();
-        plan.problems = std::move(candidateReport.problems);
-        return plan;
+        plan.why = report.problems.front();
+        plan.problems = std::move(report.problems);
+        return false;
+    };
+    if (!build()) return plan;
+    std::string reread;
+    const bool rereadDelete = !FileText(FindHolder(plan.candidate, key), now, &reread);
+    if (rereadDelete != deleteFile || reread != newText) {
+        deleteFile = rereadDelete;
+        newText = std::move(reread);
+        if (!build()) return plan;
     }
     if (!callerIsOwner && OwnerLoses(before, plan.candidate, ownerId, subject, now, nodes, &plan.why)) {
         plan.result = EditResult::OwnerLoses;

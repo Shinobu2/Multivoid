@@ -55,8 +55,9 @@ struct EditPlan {
 // judged for `ownerId`, and an empty `ownerId` refuses ("The host's identity is not loaded.").
 // Steps: the texts must load; `change`; the holder's outcome (no file, or its text without
 // pruning) before and after, equal = NoChange; the new text (pruned) or a delete; the texts with
-// that one replaced, added or removed must load; the owner invariant. PURE: nothing is read or
-// written.
+// that one replaced, added or removed must load; the text is then the loader's own reading of the
+// holder (the candidate's holder serialised again, pruned: when it differs it replaces the text and
+// the candidate is built once more); the owner invariant. PURE: nothing is read or written.
 EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& key,
                   const std::function<bool(Model& copy, std::string* why)>& change, bool callerIsOwner,
                   std::string_view ownerId, const ContextSet& subject, int64_t now,
