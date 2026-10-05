@@ -8,7 +8,7 @@
 #include "coop/net/net_clock.h"
 #include "coop/net/protocol.h"
 #include "coop/player/player_profile_store.h"
-#include "coop/session/net_pump.h"  // HasAnnouncedWorldReady
+#include "coop/session/net_pump.h"  // IsWorldSettled
 #include "coop/session/player_handshake.h"
 
 #include "ue_wrap/actors/effects.h"
@@ -299,7 +299,6 @@ void OnSlotDisconnected(uint8_t slot) {
 
 void OnDisconnect() {
     std::vector<Pending> held = g_table.TakeAll();
-    g_session = nullptr;
     for (int k = 0; k < kKinds; ++k) {
         g_saidRefused[k] = g_saidBadBytes[k] = false;
         for (int slot = 0; slot < coop::net::kMaxPeers; ++slot) g_saidMalformed[slot][k] = g_saidUnmatched[slot][k] = false;
@@ -320,7 +319,7 @@ void HandleOrder(Session& s, const Session::ReliableMessage& m) {
     Result r = Result::NotReady;
     float now = 0.f;
     bool profileSent = false;
-    if (coop::net_pump::HasAnnouncedWorldReady()) {
+    if (coop::net_pump::IsWorldSettled()) {
         r = ApplyOrder(w, &now);
         // The profile goes before the answer, on the lane the answer rides, so the host has stored it
         // when it handles the answer. MTA stamps a synced set with a sync-time context; here nothing
@@ -343,7 +342,7 @@ void HandleQuery(Session& s, const Session::ReliableMessage& m) {
             UE_LOGW("[STAT-ORDER] a query of %u bytes is not a StatQuery -- dropped", static_cast<unsigned>(m.payloadLen));
         return;
     }
-    const bool ready = coop::net_pump::HasAnnouncedWorldReady();
+    const bool ready = coop::net_pump::IsWorldSettled();
     const coop::net::StatQueryReplyPayload p =
         PackQueryReply(token, ready ? Result::Applied : Result::NotReady, ready ? ReadTable() : TableView{});
     if (!s.SendReliable(ReliableKind::StatQueryReply, &p, sizeof p))

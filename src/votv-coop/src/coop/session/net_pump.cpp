@@ -712,6 +712,11 @@ bool HasAnnouncedWorldReady() {
     return g_worldReadyAnnounced.load(std::memory_order_relaxed);
 }
 
+bool IsWorldSettled() {
+    return g_worldReadyAnnounced.load(std::memory_order_relaxed) &&
+           !g_reAnnounceWorldReady.load(std::memory_order_relaxed);
+}
+
 bool IsInAnnouncedWorld(void* obj) {
     if (!obj || !g_worldReadyAnnounced.load(std::memory_order_relaxed) ||
         g_reAnnounceWorldReady.load(std::memory_order_relaxed))

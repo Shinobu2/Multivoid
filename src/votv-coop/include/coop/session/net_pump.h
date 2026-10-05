@@ -72,6 +72,10 @@ void FleeAfterNativeMenuTravel(coop::net::Session& session, const char* why);
 // back as a duplicate, so peer-symmetric lanes stay mute until the announce.
 bool HasAnnouncedWorldReady();
 
+// HasAnnouncedWorldReady and not waiting on a world change's re-announce (the two terms the pose
+// gate reads, without the load tail); false on the host. A client applies a host's order only then.
+bool IsWorldSettled();
+
 // Whether `obj` belongs to the world THIS client announced world-ready in: false before the announce,
 // while a world change waits for its re-announce, and for an object of any other world, so a later
 // world's own load is told apart at the object itself, whatever the tick order (a level load runs

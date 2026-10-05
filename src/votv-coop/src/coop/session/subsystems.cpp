@@ -534,7 +534,7 @@ DisconnectStats DisconnectAll() {
     coop::inventory_pickup_sync::OnDisconnect();
     coop::chat_sync::OnDisconnect();
     coop::command_sync::OnDisconnect();  // every command rate bucket and notice clock
-    coop::stat_orders::OnDisconnect();  // every order and query still waiting is answered Left, the kept session cleared
+    coop::stat_orders::OnDisconnect();  // every order and query still waiting is answered Left, the kept session stays
     coop::turbine_sync::OnDisconnect();
     coop::upgrade_sync::OnDisconnect();  // and its own upgrade panel buys locally again
     coop::device_occupancy::OnDisconnect();

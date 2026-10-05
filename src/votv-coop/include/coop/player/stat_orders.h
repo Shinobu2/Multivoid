@@ -55,7 +55,7 @@ int PendingCount(uint8_t slot);
 void Install(coop::net::Session* session);
 // A slot's disconnect answers every token it holds with Left.
 void OnSlotDisconnected(uint8_t slot);
-// The session's end: every token answered Left, the kept session cleared.
+// The session's end: every token answered Left; the kept session stays, as command_sync's.
 void OnDisconnect();
 
 // The state family's receivers (event_feed -> here). A client takes an order or a query only from
