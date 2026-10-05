@@ -19,7 +19,11 @@
 // tagged-request and status-reply shape is MTA's takePlayerScreenShot
 // (reference/mtasa-blue/Server/mods/deathmatch/logic/CStaticFunctionDefinitions.cpp:3329-3349,
 // reference/mtasa-blue/Server/mods/deathmatch/logic/packets/CPlayerScreenShotPacket.cpp:16-60); ours
-// is stricter: the token, the slot and the generation must all match. Shapes only.
+// is stricter: the token, the slot and the generation must all match. The query is
+// a pull: MTA reads a server copy its own stream keeps fresh, while here the owner alone holds the
+// table. A client has no opt-out, unlike Source's FCVAR_SERVER_CANNOT_QUERY
+// (reference/source-sdk-2013/src/public/tier1/iconvar.h:75), because the host is the session's
+// admin. Shapes only.
 
 #include "coop/net/session.h"
 #include "coop/player/stat_orders_wire.h"

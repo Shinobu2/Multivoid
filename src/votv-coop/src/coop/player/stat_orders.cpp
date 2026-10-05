@@ -243,7 +243,7 @@ Sent SendOrder(uint8_t slot, const Order& order, OrderDone done) {
     uint32_t token = 0;
     if (!g_table.Add(std::move(entry), &token)) return Sent::Busy;
     w.token = token;
-    coop::net::StatOrderPayload p;
+    coop::net::StatOrderPayload p{};
     Pending back;
     PackOrder(w, &p);   // cannot fail: an effect op's name passed ValidEffectName above
     // MTA stamps a synced set with a sync-time context; the host writes no copy at send time, so nothing is stamped.
