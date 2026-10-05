@@ -1766,10 +1766,15 @@ struct ServerStatePayload {
 };
 static_assert(sizeof(ServerStatePayload) == 96, "ServerStatePayload must be 96 bytes");
 
-// A player's finished repair (ServerRepair), client to host: the box by its servers[] index.
+// A player's finished repair (ServerRepair), client to host: the box by its servers[] index, and what the
+// minigame's own reward reads -- its lol mode and the solve time -- so the host pays it in the same step as
+// the fix. A sender without the reward fields leaves the bytes zero and kRepairSettles clear: fix only.
+inline constexpr uint8_t kRepairSettles = 0x01;  // flags: the reward fields are filled
+inline constexpr uint8_t kRepairLol     = 0x02;  // flags: the widget ran in lol mode (the larger rewards)
 struct ServerRepairPayload {
-    uint8_t box;      // 1 -- servers[] index
-    uint8_t _pad[3];  // 3 -- zeroed
+    uint8_t  box;     // 1 -- servers[] index
+    uint8_t  flags;   // 1 -- kRepair* bits
+    uint16_t timeDs;  // 2 -- the solve time in tenths of a second, saturated; 0 = none
 };
 static_assert(sizeof(ServerRepairPayload) == 4, "ServerRepairPayload must be 4 bytes");
 
