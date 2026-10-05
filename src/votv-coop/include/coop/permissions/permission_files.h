@@ -97,6 +97,10 @@ std::string SerializeHolder(const Holder& h, int64_t now, bool pruneExpired);
 // expiry has passed is not counted; without it an expired node counts, as LuckPerms counts it. PURE.
 bool IsDefaultUser(const Holder& user, int64_t now, bool ignoreExpired);
 
+// True for the group named `default` with no node: the model always holds it, so an empty one is
+// the default state and keeps no file, as a default-state user keeps none. PURE.
+bool IsDefaultGroup(const Holder& g);
+
 // Writes `*text` as `dir\groups\<stem>.json` (a group) or `dir\users\<stem>.json`, creating the
 // folder when absent, through atomic_file::Write (Replace, ToDisk); with a null `text` deletes the
 // file, a missing file or folder being success. `dir` is `<server folder>\permissions`. A folder

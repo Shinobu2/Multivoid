@@ -342,6 +342,13 @@ void DefaultUserCases(CheckSink& sink) {
                    !IsDefaultUser(*m.FindUser(Id('d')), kNow, false) &&
                    !IsDefaultUser(*m.FindUser(Id('e')), kNow, true) && !IsDefaultUser(*m.FindUser(Id('e')), kNow, false),
                "no-file state: another live node, a context on group.default, or another primary is not it");
+
+    Model g;
+    g.CreateGroup("b");
+    sink.Check(IsDefaultGroup(*g.FindGroup("default")) && !IsDefaultGroup(*g.FindGroup("b")),
+               "no-file state: the empty group default is the default state, another empty group is not");
+    g.SetNode(HolderKind::Group, "default", N("a.b"));
+    sink.Check(!IsDefaultGroup(*g.FindGroup("default")), "no-file state: the default group holding a node is not it");
 }
 
 bool WriteByHand(const std::filesystem::path& p, const std::string& text) {

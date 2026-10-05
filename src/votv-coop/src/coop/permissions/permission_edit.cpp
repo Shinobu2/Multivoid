@@ -24,11 +24,13 @@ const Holder* FindHolder(const Model& m, const HolderKey& key) {
     return key.kind == HolderKind::Group ? m.FindGroup(key.name) : m.FindUser(key.name);
 }
 
-// The file a holder is written as: false for none (the holder is absent, or a user in the default
-// state once what has expired is pruned), else true with the pruned text.
+// The file a holder is written as: false for none (the holder is absent, a user in the default
+// state once what has expired is pruned, or the empty group `default`), else true with the pruned
+// text.
 bool FileText(const Holder* h, int64_t now, std::string* text) {
     if (h == nullptr) return false;
     if (h->kind == HolderKind::User && IsDefaultUser(*h, now, true)) return false;
+    if (IsDefaultGroup(*h)) return false;
     *text = SerializeHolder(*h, now, true);
     return true;
 }

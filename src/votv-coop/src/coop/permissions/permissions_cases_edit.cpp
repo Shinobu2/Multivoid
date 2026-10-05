@@ -308,6 +308,31 @@ void RefusedByCases(CheckSink& sink) {
                "edit: a delete of a group a holder names is the result's refusal");
 }
 
+// The empty group `default` is the default state: it keeps no file.
+void DefaultGroupCases(CheckSink& sink) {
+    const HolderKey key{HolderKind::Group, "default"};
+    const EditPlan noop = Plan({}, key, [](Model& m, std::string*) {
+        m.UnsetNode(HolderKind::Group, "default", N("x"));
+        return true;
+    });
+    sink.Check(noop.result == EditResult::NoChange,
+               "edit: unsetting what the default group lacks, with no file, is no change");
+
+    const EditPlan set = Plan({}, key, [](Model& m, std::string*) {
+        m.SetNode(HolderKind::Group, "default", N("x"));
+        return true;
+    });
+    sink.Check(set.result == EditResult::Changed && !set.deleteFile && Has(set.text, "\"x\""),
+               "edit: a node set on the default group writes its file");
+
+    const EditPlan unset = Plan({{"default", true, set.text}}, key, [](Model& m, std::string*) {
+        m.UnsetNode(HolderKind::Group, "default", N("x"));
+        return true;
+    });
+    sink.Check(unset.result == EditResult::Changed && unset.deleteFile,
+               "edit: the default group left empty has its file deleted");
+}
+
 void ProblemLinesCases(CheckSink& sink) {
     const std::vector<std::string> three = {"a", "b", "c"};
     sink.Check(ProblemLines(three) == three, "problem lines: three problems are three lines");
@@ -372,6 +397,7 @@ void RunEditCases(CheckSink& sink) {
     LoaderReadingCases(sink);
     StoredBytesCases(sink);
     RefusedByCases(sink);
+    DefaultGroupCases(sink);
     ProblemLinesCases(sink);
     ActionJsonCases(sink);
 }

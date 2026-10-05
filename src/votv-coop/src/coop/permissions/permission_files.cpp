@@ -449,6 +449,10 @@ bool IsDefaultUser(const Holder& user, int64_t now, bool ignoreExpired) {
     return counted == 1;
 }
 
+bool IsDefaultGroup(const Holder& g) {
+    return g.kind == HolderKind::Group && g.name == kDefaultGroup && g.nodes.Nodes().empty();
+}
+
 atomic_file::Result WriteHolderFile(const fs::path& dir, bool group, std::string_view stem, const std::string* text) {
     const fs::path folder = dir / (group ? L"groups" : L"users");
     const fs::path path = folder / (std::wstring(stem.begin(), stem.end()) + L".json");
