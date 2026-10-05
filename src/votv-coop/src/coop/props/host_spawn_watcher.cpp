@@ -234,7 +234,8 @@ void OnFinishSpawnFunc(void* /*context*/, void* /*srcObj*/, void* result) {
     // expressing a mirror as a fresh world prop is the dupe.
     if (coop::prop_echo_suppress::IsMirrorSpawn(actor)) return;
     if (!ue_wrap::prop::IsDescendantOfProp(actor)) return;  // KEYED Aprop_C lineage only
-    if (PT::GetPropElementIdForActor(actor) != coop::element::kInvalidId) return;  // already tracked
+    // An actor the init seam already tracked is queued too: its row is out, but its fall and its
+    // contents still need the drain's post-birth work (a spawn-menu barrel takes that route).
     if (g_pendingFinished.size() >= kMaxPendingFinished) {
         UE_LOGW("host_spawn_watcher: pending-finished cap %zu hit -- dropping %p (safety census catches it)",
                 kMaxPendingFinished, actor);
@@ -366,7 +367,15 @@ constexpr size_t kMaxCoastingBirths = 32;
 namespace {
 void CoastIfFalling(void* actor) {
     namespace pf = coop::net::propspawn_flags;
-    if (coop::prop_drive_host::Count() >= kMaxCoastingBirths) return;
+    if (coop::prop_drive_host::CoastingCount() >= kMaxCoastingBirths) {
+        static bool sSaid = false;
+        if (!sSaid) {
+            sSaid = true;
+            UE_LOGW("host_spawn_watcher: %zu births already coasting -- a further birth falls locally "
+                    "(said once)", kMaxCoastingBirths);
+        }
+        return;
+    }
     if (PT::GetPropElementIdForActor(actor) == coop::element::kInvalidId) return;
     const uint8_t flags = coop::prop_wire_parity::PhysFlagsOf(actor);
     if (flags & (pf::kFrozen | pf::kStatic | pf::kSleep)) return;
@@ -392,6 +401,7 @@ void DrainPendingSpawns(coop::net::Session* s) {
         // Tracked since the enqueue (the init seam expressed it first): someone owns its row, and
         // only its fall is left to give a channel.
         if (coop::element::Registry::Get().EidForActor(e.actor) != coop::element::kInvalidId) {
+            coop::props::container_contents_sync::NoteHostBirth(e.actor);
             CoastIfFalling(e.actor);
             continue;
         }
