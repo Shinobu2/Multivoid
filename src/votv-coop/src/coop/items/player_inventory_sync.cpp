@@ -13,6 +13,7 @@
 #include "coop/props/prop_synth_key.h"  // RandomKeyString, the fresh key of a copied record
 #include "coop/session/player_handshake.h"
 #include "ue_wrap/actors/begin_equipment.h"  // GiveFromClass, the starter-kit probe
+#include "ue_wrap/actors/effects.h"  // ResetOnSaveObject, the host's effects out of the joiner's save
 #include "ue_wrap/engine/engine.h"      // SetSaveObjectReadyHook, the pre-materialise apply point
 #include "ue_wrap/actors/inventory.h"
 #include "ue_wrap/actors/puppet.h"  // ReadCharacterIsFalling
@@ -204,6 +205,17 @@ void HostPersistTick(coop::net::Session* s) {
 // the stream stays shut for the session, so the profile on the host survives for the next join.
 void OnSaveObjectReady(void* saveSlotObject) {
     if (!g_joinApplyArmed.exchange(false, std::memory_order_acq_rel)) return;  // not a join's load
+    // The host's status effects are records among its world's in this save object, and a player
+    // joins without them: the game's own reset takes them out before the world is built, ahead of
+    // both branches below (the profile branch returns early).
+    bool gamemodeSet = false;
+    const int effectsReset = ue_wrap::effects::ResetOnSaveObject(saveSlotObject, &gamemodeSet);
+    if (effectsReset > 0)
+        UE_LOGI("player_inventory[client]: left the host's status effects out of this player's world "
+                "(%d record(s) reset; gamemode=%s)", effectsReset, gamemodeSet ? "set" : "none");
+    else if (effectsReset < 0)
+        UE_LOGW("player_inventory[client]: the game's effect reset did not run -- this player may "
+                "start with the host's effects");
     g_profileApplied = false;
     g_joinPose = {};
     g_joinPlacement = JoinStaysAtHost() ? JoinPlacement::AtHost : JoinPlacement::StartPoint;

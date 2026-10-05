@@ -1,5 +1,6 @@
 // ue_wrap/actors/effects.h -- the local player's status effects (engine substrate): the game's own
-// list of them, and add, remove and list through the gamemode's verbs and arrays.
+// list of them, add, remove and list through the gamemode's verbs and arrays, and the reset of a
+// save object's effect records.
 //
 // An effect is an `effect_C` actor the gamemode spawns from a row of its `list_effects` DataTable
 // and tracks in two parallel arrays, `effects_names` and `effects`. The names this module accepts
@@ -9,6 +10,9 @@
 // The game's own effect lifecycle shows through: a non-stacking effect already active is merged by
 // an add and spawns nothing, and lsd and foodPoison end by destroying themselves without leaving
 // the arrays, so List reports such an entry as not live.
+//
+// A joiner's save object arrives holding the host's effects as records among its world's, and the
+// game's own reset verb takes them out of that object before the world is built from it.
 
 #pragma once
 
@@ -45,5 +49,13 @@ bool Add(const std::wstring& name, float strength, float seconds);
 // destroyed actor), or a parameter does not set or the name does not convert to an FName. One call
 // takes one instance.
 bool Remove(const std::wstring& name);
+
+// The game's own saveSlot_C::reset_player_effects on `saveSlot`, which may be a save object whose world
+// does not exist yet: every effect record of its objectsData removed (and any empty record). Returns how
+// many records went (the array's length before less after); -1 when `saveSlot` is not live, the function
+// or objectsData does not resolve, an array header does not read, or the call fails. `gamemodeSet` (null
+// allowed) reports whether the save's gamemode field held an object when the call ran, the target of
+// the hint the game's verb ends with.
+int ResetOnSaveObject(void* saveSlot, bool* gamemodeSet);
 
 }  // namespace ue_wrap::effects

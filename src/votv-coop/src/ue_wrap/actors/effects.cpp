@@ -120,7 +120,64 @@ bool EnsureEffectOffsets() {
     return g_strengthOff >= 0 && g_timeOff >= 0;
 }
 
+// ---- the save object's reset, resolved per save class ----------------------------------------
+
+struct SaveSlot {
+    void*   cls = nullptr;
+    int32_t objectsData = -1;   // TArray<Fstruct_save>
+    int32_t gamemode = -1;      // UmainGamemode_C*, the hint's target
+    void*   resetFn = nullptr;  // reset_player_effects
+};
+SaveSlot g_slot;
+
+// `slot`'s class with the reset verb and its two rows resolved, the gamemode shape. A name that
+// does not resolve stays unresolved for that class and is logged once.
+const SaveSlot& SaveSlotFor(void* slot) {
+    if (void* const cls = R::ClassOf(slot); cls != g_slot.cls) {
+        g_slot = SaveSlot{};
+        g_slot.cls = cls;
+        g_slot.objectsData = R::FindPropertyOffset(cls, L"objectsData");
+        g_slot.gamemode = R::FindPropertyOffset(cls, L"gamemode");
+        g_slot.resetFn = R::FindFunction(cls, L"reset_player_effects");
+        const std::wstring label = R::ToString(R::NameOf(cls));
+        if (g_slot.objectsData < 0) UE_LOGE("effects: %ls.objectsData did not resolve", label.c_str());
+        if (g_slot.gamemode < 0) UE_LOGE("effects: %ls.gamemode did not resolve", label.c_str());
+        if (!g_slot.resetFn) UE_LOGE("effects: %ls.reset_player_effects did not resolve", label.c_str());
+    }
+    return g_slot;
+}
+
+// The array's length, false when its header does not read: save_record rejects a garbage header to
+// an empty one, which a raw Num then tells from a true empty.
+bool ArrayLength(const void* base, int32_t off, int32_t* num) {
+    const SR::Arr a = SR::ReadArr(base, off);
+    int32_t raw = 0;
+    std::memcpy(&raw, static_cast<const uint8_t*>(base) + off + 8, sizeof(raw));
+    if (a.num != raw) return false;
+    *num = a.num;
+    return true;
+}
+
 }  // namespace
+
+int ResetOnSaveObject(void* saveSlot, bool* gamemodeSet) {
+    if (gamemodeSet) *gamemodeSet = false;
+    if (!SR::PlausibleObjPtr(saveSlot) || !R::IsLive(saveSlot)) return -1;
+    const SaveSlot& s = SaveSlotFor(saveSlot);
+    if (s.objectsData < 0 || !s.resetFn) return -1;
+    int32_t before = 0;
+    if (!ArrayLength(saveSlot, s.objectsData, &before)) return -1;
+    if (gamemodeSet && s.gamemode >= 0) {
+        void* gm = nullptr;
+        std::memcpy(&gm, static_cast<const uint8_t*>(saveSlot) + s.gamemode, sizeof(gm));
+        *gamemodeSet = gm != nullptr;
+    }
+    ParamFrame f(s.resetFn);
+    if (!f.valid() || !Call(saveSlot, f)) return -1;
+    int32_t after = 0;
+    if (!ArrayLength(saveSlot, s.objectsData, &after)) return -1;
+    return before - after;
+}
 
 bool Names(std::vector<std::wstring>* out) {
     if (!out) return false;

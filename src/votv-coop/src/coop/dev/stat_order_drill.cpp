@@ -24,12 +24,12 @@ namespace SO = coop::stat_orders;
 namespace V = ue_wrap::vitals;
 using coop::net::Session;
 
-enum class Arm : uint8_t { Off, On, Red };
+enum class Arm : uint8_t { Off, On, Red, RedJoin };
 
 Arm ArmNow() {
     static const Arm arm = [] {
         const std::string v = coop::config::ResolveEnum(::coop::config_registry::rows::stat_order_drill);
-        return v == "on" ? Arm::On : v == "red" ? Arm::Red : Arm::Off;
+        return v == "on" ? Arm::On : v == "red" ? Arm::Red : v == "redjoin" ? Arm::RedJoin : Arm::Off;
     }();
     return arm;
 }
@@ -165,6 +165,14 @@ void JudgeFirstQuery(SO::Result r, const SO::TableView& v) {
     UE_LOGI("[STAT-ORDER] joiner effects: %s", names.empty() ? "none" : names.c_str());
     if (v.validMask != kAllRows) return Mismatch(what, r, 0.f, false, "not every row read");
     if (Find(v, kJoinerEffect)) return Unmeasurable("sleepy already active");
+    // The joiner's world is built without the host's effects: its save object has them reset out
+    // (PSA-2c). `redjoin` expects the opposite, so on a fixed build it prints the failing line.
+    const bool inherited = Find(v, kHostEffect) != nullptr;
+    const bool redJoin = ArmNow() == Arm::RedJoin;
+    if (inherited && !redJoin)
+        return Mismatch(what, r, 0.f, false, "the joiner inherited the host's effect");
+    if (!inherited && redJoin)
+        return Mismatch(what, r, 0.f, false, "redjoin: the joiner did not inherit the host's effect");
     g_food = Row(v, V::Field::Food);
     g_sleep = Row(v, V::Field::Sleep);
     Pass(what, r, g_food, false);
