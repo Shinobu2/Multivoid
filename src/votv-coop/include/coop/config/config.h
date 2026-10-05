@@ -129,8 +129,9 @@ void SessionLayerBegin(bool host);
 // A server-scope row's session value from the wire (a length-carried value: the wire's bytes are
 // not NUL-terminated): validated as the reader validates, held, logged `(from the host)` and
 // announced; a value the reader would refuse, or one that arrives with no client session running,
-// is dropped with a warning. Game thread (the receiver's).
-void SessionLayerPut(const config_registry::Row* row, const std::string& text);
+// is dropped with a warning. True when the value was held, false for either refusal. Game thread
+// (the receiver's).
+bool SessionLayerPut(const config_registry::Row* row, const std::string& text);
 // The session ended: the layer empties and the role is none, logged `config: SESSION cleared`;
 // every row it held tells its subscribers, so a consumer resolves the install's own value again.
 // Any thread. Idempotent: with nothing held and no role it logs nothing.

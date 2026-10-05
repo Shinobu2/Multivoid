@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 215;
+inline constexpr uint16_t kProtocolVersion = 216;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -930,8 +930,9 @@ enum class ReliableKind : uint8_t {
     // Host to client: one server-scope setting of the session, a row named by its KEY (as Source names a
     // replicated cvar on the wire by its name -- the SDK's SavedConvar message, gamerules.cpp:906-907;
     // NET_SetConVar's format is the engine's) and its value as text. The join carries every replicated row when the
-    // slot is ready, a change carries each again. A client never sends it. Never relayed. Pre-world.
-    // ServerSettingPayload.
+    // slot is ready, a change carries each again. A flags byte precedes the text: bit 0 says the change is
+    // announced (a notify row's value changed), which the join never sets. A client never sends it. Never relayed.
+    // Pre-world. ServerSettingPayload.
     ServerSetting = 165,
 
     // Client to host: one chat line that began with `/`, the text after the slash, as a command for the host to run
@@ -2006,19 +2007,23 @@ struct DeskPingVerdictPayload {
 static_assert(sizeof(DeskPingVerdictPayload) == 48, "DeskPingVerdictPayload must be 48 bytes");
 static_assert(sizeof(DeskPingVerdictPayload) <= 228, "DeskPingVerdictPayload must fit the inline reliable buffer");
 
-// A server-scope setting's session value (ServerSetting): the row's key, then its value as text,
-// `keyLen + valueLen` bytes of `text`, no terminator, sent as `2 + keyLen + valueLen` bytes. The two
+// A server-scope setting's session value (ServerSetting): a flags byte, then the row's key and its
+// value as text, `keyLen + valueLen` bytes of `text`, no terminator, sent as
+// `3 + keyLen + valueLen` bytes. Bit 0 of `flags` (kServerSettingAnnounced): the row is a notify row
+// whose value changed, so each peer prints one line; the receiver acts on that bit alone. The two
 // limits mirror config_registry::kServerSettingKeyMax (equal) and kServerSettingTextMax (the
 // registry's is at most this one), which this catalog cannot include; the sender's file asserts it.
 inline constexpr uint8_t kServerSettingKeyMax  = 24;
 inline constexpr uint8_t kServerSettingTextMax = 200;
+inline constexpr uint8_t kServerSettingAnnounced = 0x01;
 struct ServerSettingPayload {
     uint8_t keyLen;
     uint8_t valueLen;
+    uint8_t flags;
     char    text[kServerSettingKeyMax + kServerSettingTextMax];
 };
-static_assert(sizeof(ServerSettingPayload) == 226 && sizeof(ServerSettingPayload) <= 228,
-              "ServerSettingPayload must be 226 bytes and fit the inline reliable buffer");
+static_assert(sizeof(ServerSettingPayload) == 227 && sizeof(ServerSettingPayload) <= 228,
+              "ServerSettingPayload must be 227 bytes and fit the inline reliable buffer");
 
 // The shared payload of the keyed monotone-decreasing dirt scalars (WindowCleanState, GrimeState):
 // the instance's identity string (a Key for a window, a quantized position for a grime decal), the

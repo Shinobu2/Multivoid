@@ -135,11 +135,11 @@ void SessionLayerBegin(bool host) {
     }
 }
 
-void SessionLayerPut(const Row* row, const std::string& text) {
+bool SessionLayerPut(const Row* row, const std::string& text) {
     if (!ValueValidForKey(row->key, text, nullptr)) {
         UE_LOGW("config: SESSION %s REFUSED -- '%s' is not a valid value", row->key,
                 Shown(row, text).c_str());
-        return;
+        return false;
     }
     bool held = false;
     {
@@ -151,10 +151,11 @@ void SessionLayerPut(const Row* row, const std::string& text) {
     }
     if (!held) {
         UE_LOGW("config: SESSION %s ignored -- no client session is running", row->key);
-        return;
+        return false;
     }
     UE_LOGI("config: SESSION %s=%s (from the host)", row->key, Shown(row, text).c_str());
     internal::PostNotify(row);
+    return true;
 }
 
 void SessionLayerEnd() {

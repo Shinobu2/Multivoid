@@ -1,7 +1,8 @@
 // coop/session/server_settings_sync.h -- the host's replicated server-scope rows reach every
 // client: the snapshot when a slot is ready, a delta after a change, one row per message
-// (ReliableKind::ServerSetting). The session layer itself is the config's (coop/config/config.h);
-// this module is its lifecycle seams and its wire.
+// (ReliableKind::ServerSetting). A changed notify row is announced: the host prints one chat line,
+// and each client prints its own when the row arrives with the announced bit. The session layer
+// itself is the config's (coop/config/config.h); this module is its lifecycle seams and its wire.
 
 #pragma once
 

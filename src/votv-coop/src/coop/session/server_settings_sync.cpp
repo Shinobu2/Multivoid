@@ -1,19 +1,27 @@
 // coop/session/server_settings_sync.cpp -- the host's replicated server-scope rows reach every
-// client: the snapshot when a slot is ready, a delta after a change, one row per message.
+// client: the snapshot when a slot is ready, a delta after a change, one row per message. A changed
+// notify row is announced: the host prints one chat line, and each client prints its own when the
+// row arrives with the announced bit.
 
 #include "coop/session/server_settings_sync.h"
 
+#include "coop/comms/chat_feed.h"
 #include "coop/config/config.h"
 #include "coop/config/config_registry.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/roster_ledger.h"
+#include "coop/text/utf8_codec.h"
 
 #include "ue_wrap/core/hot_path_guard.h"
 #include "ue_wrap/core/log.h"
 
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace coop::server_settings_sync {
 
@@ -45,10 +53,32 @@ Session* g_session = nullptr;
 // the client's put is idempotent).
 coop::roster_ledger::PerSlotState<bool> g_snapshotSent;
 
+// The announced rows this client has taken in its session, the proofs' instrument: each client
+// numbers its own lines. Zeroed by both session seams, which run off the game thread; counted on
+// the game thread.
+std::atomic<uint32_t> g_announcedCount{0};
+
+// The value of a notify row as a reader holds it now: on or off for a flag, else its resolved
+// text. Notify rows are Flag, Int, Float or Enum, so the text is ASCII.
+std::string ShownText(const reg::Row* row) {
+    const std::string resolved = cfg::ResolvedText(*row, cfg::EffectiveText(*row));
+    if (row->kind == reg::Kind::Flag) return resolved == "1" ? "on" : "off";
+    return resolved;
+}
+
+// The chat line for a changed notify row: our own label and our own rendering of the value,
+// never the sender's text.
+std::wstring AnnouncementLine(const reg::Row* row) {
+    const char* label = reg::RowLabel(row);
+    const std::string shown = ShownText(row);
+    return L"Server setting changed: " + coop::text::FromUtf8Lossy(label, std::strlen(label)) +
+           L" is now " + coop::text::FromUtf8Lossy(shown.data(), shown.size()) + L".";
+}
+
 // One row to one slot. The value is printed through the registry's one printed form.
 // Returns false only when the send failed, so the caller's latch holds; a value the wire cannot
 // carry is warned and counts as sent, or it would hold its slot's latch for ever.
-bool SendRow(Session& s, int slot, const reg::Row* row, const char* why) {
+bool SendRow(Session& s, int slot, const reg::Row* row, uint8_t flags, const char* why) {
     const std::string v = cfg::EffectiveText(*row);
     const size_t k = std::strlen(row->key);  // at most kServerSettingKeyMax: a build-time check
     if (v.size() > net::kServerSettingTextMax) {
@@ -59,10 +89,11 @@ bool SendRow(Session& s, int slot, const reg::Row* row, const char* why) {
     ServerSettingPayload p{};
     p.keyLen = static_cast<uint8_t>(k);
     p.valueLen = static_cast<uint8_t>(v.size());
+    p.flags = flags;
     std::memcpy(p.text, row->key, k);
     std::memcpy(p.text + k, v.data(), v.size());
     const bool ok = s.SendReliableToSlot(slot, ReliableKind::ServerSetting, &p,
-                                         static_cast<int>(2 + k + v.size()));
+                                         static_cast<int>(3 + k + v.size()));
     if (ok)
         UE_LOGI("server_settings: sent %s=%s to slot %d (%s)", row->key,
                 reg::ValueForLog(row, v).c_str(), slot, why);
@@ -75,20 +106,32 @@ bool SendRow(Session& s, int slot, const reg::Row* row, const char* why) {
 // walk is cold). The session layer's own begin and end notify once per row yet send nothing: at
 // begin no slot holds a snapshot, at end the session no longer runs.
 //
+// It first takes the changed notify rows, before the gate, so a mark made while the gate refuses
+// dies with its change. The host prints one line per taken row, not per recipient; every send of a
+// taken row carries the announced bit, the join snapshot never.
+//
 // One row per message is ours: a payload is capped at 228 bytes. Source's rules say what is sent and
 // when (reference/source-sdk-2013/src/public/tier1/iconvar.h:57-62), not how many to a message (the
 // engine's NET_SetConVar format is outside the SDK); MTA's CSyncSettingsPacket sends the whole
 // set as one fixed packet
 // (reference/mtasa-blue/Server/mods/deathmatch/logic/packets/CSyncSettingsPacket.cpp).
 void OnReplicatedRowChanged() {
+    const std::vector<const reg::Row*> announced = cfg::TakePendingAnnouncements();
     Session* s = g_session;
     if (!s || !s->running() || s->role() != Role::Host) return;
+    for (const reg::Row* row : announced) {
+        coop::chat_feed::Push(AnnouncementLine(row), coop::chat_feed::Keep::History);
+        UE_LOGI("server_settings: host announced %s=%s", row->key, ShownText(row).c_str());
+    }
     size_t count = 0;
     const reg::Row* rows = reg::Rows(count);
     for (size_t i = 0; i < count; ++i) {
         if (!reg::IsReplicated(&rows[i])) continue;
+        const bool isAnnounced =
+            std::find(announced.begin(), announced.end(), &rows[i]) != announced.end();
+        const uint8_t flags = isAnnounced ? net::kServerSettingAnnounced : uint8_t{0};
         for (int slot = 1; slot < net::kMaxPeers; ++slot) {
-            if (g_snapshotSent[slot]) SendRow(*s, slot, &rows[i], "delta");
+            if (g_snapshotSent[slot]) SendRow(*s, slot, &rows[i], flags, "delta");
         }
     }
 }
@@ -111,6 +154,7 @@ void OnSessionStart(bool host) {
         UE_LOGW("server_settings: a session is already running; its layer is kept");
         return;
     }
+    g_announcedCount.store(0);
     cfg::SessionLayerBegin(host);
 }
 
@@ -122,7 +166,10 @@ void OnSessionStart(bool host) {
 // reference/source-sdk-2013/src/game/shared/gamerules.cpp:659-663).
 // Ours is a process-wide layer, because config's Resolve is process-wide and our one Session
 // outlives each session, so the transport's one stop listener ends it.
-void OnSessionEnd() { cfg::SessionLayerEnd(); }
+void OnSessionEnd() {
+    g_announcedCount.store(0);
+    cfg::SessionLayerEnd();
+}
 
 void HostTick(Session& session) {
     if (!session.running() || session.role() != Role::Host) return;
@@ -134,7 +181,7 @@ void HostTick(Session& session) {
         bool all = true;
         for (size_t i = 0; i < count; ++i) {
             if (!reg::IsReplicated(&rows[i])) continue;
-            if (!SendRow(session, slot, &rows[i], "snapshot")) all = false;
+            if (!SendRow(session, slot, &rows[i], 0, "snapshot")) all = false;
         }
         // The Join latch's rule: set only on success, retried next tick.
         if (all) g_snapshotSent[slot] = true;
@@ -143,13 +190,13 @@ void HostTick(Session& session) {
 
 void HandleServerSetting(Session& session, const Session::ReliableMessage& msg) {
     UE_ASSERT_GAME_THREAD("server_settings::HandleServerSetting");
-    if (msg.payloadLen < 2) {
+    if (msg.payloadLen < 3) {
         DropMalformed(msg.payloadLen);
         return;
     }
     const auto& p = *reinterpret_cast<const ServerSettingPayload*>(msg.payload);
     if (p.keyLen == 0 || p.keyLen > net::kServerSettingKeyMax ||
-        p.valueLen > reg::kServerSettingTextMax || msg.payloadLen != 2 + p.keyLen + p.valueLen) {
+        p.valueLen > reg::kServerSettingTextMax || msg.payloadLen != 3 + p.keyLen + p.valueLen) {
         DropMalformed(msg.payloadLen);
         return;
     }
@@ -174,7 +221,14 @@ void HandleServerSetting(Session& session, const Session::ReliableMessage& msg) 
         UE_LOGW("server_settings: ServerSetting dropped -- '%s' names no replicated row", key);
         return;
     }
-    cfg::SessionLayerPut(row, std::string(p.text + p.keyLen, p.valueLen));
+    const bool accepted = cfg::SessionLayerPut(row, std::string(p.text + p.keyLen, p.valueLen));
+    // Only bit 0 is read, and only for a notify row of this client's own registry: a forged bit on
+    // any other row reaches no line.
+    if (accepted && (p.flags & net::kServerSettingAnnounced) && reg::IsNotify(row)) {
+        const uint32_t n = g_announcedCount.fetch_add(1) + 1;
+        coop::chat_feed::Push(AnnouncementLine(row), coop::chat_feed::Keep::History);
+        UE_LOGI("server_settings: announced #%u %s=%s", n, row->key, ShownText(row).c_str());
+    }
 }
 
 }  // namespace coop::server_settings_sync

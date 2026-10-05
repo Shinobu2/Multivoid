@@ -324,7 +324,8 @@ inline bool IsPreWorldSendableKind(ReliableKind k) {
     // has a world, and the receiver only stamps a timestamp and two numbers.
     case ReliableKind::JoinPhaseNote:
     // A server-scope setting is pre-world by design: the joiner's snapshot goes when its slot is
-    // ready, and the receiver only fills the config layer's session values, touching no world.
+    // ready, and the receiver only fills the config layer's session values and, for an announced
+    // row, prints one chat line, touching no world.
     case ReliableKind::ServerSetting:
     // The machine's own local dev grants: the receiver fills one atomic word, touching no world.
     case ReliableKind::PermissionGrants:
