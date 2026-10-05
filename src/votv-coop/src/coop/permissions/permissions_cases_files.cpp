@@ -358,7 +358,8 @@ void DiskCases(CheckSink& sink, const std::filesystem::path& scratch) {
     namespace fs = std::filesystem;
     const std::string text = R"({"permissions":["staff.use"]})";
     const fs::path file = scratch / "groups" / "staff.json";
-    sink.Check(WriteHolderFile(scratch, true, "staff", &text).ok() && fs::is_regular_file(file),
+    std::error_code ec;
+    sink.Check(WriteHolderFile(scratch, true, "staff", &text).ok() && fs::is_regular_file(file, ec),
                "disk: a write creates the folder and the file");
     std::vector<HolderText> texts;
     LoadReport read;
@@ -377,7 +378,7 @@ void DiskCases(CheckSink& sink, const std::filesystem::path& scratch) {
                    again.size() == 1 && again[0].text == second,
                "disk: a second write replaces the file whole");
 
-    sink.Check(WriteHolderFile(scratch, true, "staff", nullptr).ok() && !fs::exists(file) &&
+    sink.Check(WriteHolderFile(scratch, true, "staff", nullptr).ok() && !fs::exists(file, ec) &&
                    WriteHolderFile(scratch, true, "staff", nullptr).ok() &&
                    WriteHolderFile(scratch, false, Id('a'), nullptr).ok(),
                "disk: a delete removes the file, and a delete of a missing file or folder is ok");
