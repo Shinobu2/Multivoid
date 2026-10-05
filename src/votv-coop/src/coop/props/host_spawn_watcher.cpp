@@ -11,6 +11,7 @@
 #include "coop/props/prop_element_tracker.h"
 #include "coop/props/prop_lifecycle.h"      // ExpressSpawnedProp (reuse the keyed broadcast)
 #include "coop/props/prop_save_data.h"      // Publish (the record behind the express)
+#include "coop/props/container_contents_sync.h"  // NoteHostBirth (a container's contents behind it)
 #include "coop/props/remote_prop_spawn.h"
 #include "coop/props/join_membership_sweep.h"  // the join claim and sweep
 #include "ue_wrap/core/game_thread.h"
@@ -387,6 +388,8 @@ void DrainPendingSpawns(coop::net::Session* s) {
             // another lane owns, and a key whose author's record is still owed (a birth from a
             // client's intent).
             coop::prop_save_data::Publish(s, e.actor, ue_wrap::prop::GetInteractableKeyString(e.actor));
+            // A container's contents are not in that record: its own lane publishes them.
+            coop::props::container_contents_sync::NoteHostBirth(e.actor);
         }
     }
     g_pendingFinished.clear();
