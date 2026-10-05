@@ -1,7 +1,7 @@
 // coop/commands/commands_selftest.h -- the commands' un-gated boot selftest, run at every session
 // start on both peers: pinned lines through the tokenizer, pinned players through the resolver, a
-// test command tree through the registry and the dispatcher, the moderation and settings commands
-// over fake ports, the grammar over test trees.
+// test command tree through the registry and the dispatcher, the moderation, settings and `/mv`
+// commands over fake ports, the grammar over test trees.
 
 #pragma once
 
@@ -27,5 +27,9 @@ void SettingsCases(Checker& check);
 // argument kinds, and the nodes a tree declares (leaves only, the Notify qualifier's own node),
 // called by RunSelftest.
 void GrammarCases(Checker& check);
+
+// The `/mv` commands over fake ports and an in-memory store (commands_cases_mv.cpp), called by
+// RunSelftest.
+void MvCases(Checker& check);
 
 }  // namespace coop::commands

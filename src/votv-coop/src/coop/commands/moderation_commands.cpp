@@ -20,8 +20,6 @@ using coop::moderation::ModResult;
 using coop::moderation::PlayerToken;
 using coop::moderation::TokenFor;
 
-constexpr const char* kNoSession = "There is no hosted session.";
-
 std::string ShortId(const std::string& id) { return id.substr(0, 8); }
 
 const char* ResultName(ModResult r) {

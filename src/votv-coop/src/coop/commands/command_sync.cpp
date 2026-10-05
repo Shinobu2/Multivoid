@@ -13,6 +13,7 @@
 #include "coop/commands/command_dispatcher.h"
 #include "coop/commands/command_line.h"
 #include "coop/commands/moderation_commands.h"
+#include "coop/commands/mv_commands.h"
 #include "coop/commands/settings_commands.h"
 
 #include "coop/comms/chat_feed.h"
@@ -175,6 +176,28 @@ coop::commands::settings::Ports RealSettingsPorts() {
     return p;
 }
 
+// Whether the host holds the permission log's node: the owner passes it unless it denied itself.
+bool HostHoldsLog() {
+    return coop::permissions::host::Allows(coop::net::peer_identity::LocalGuid(), coop::commands::kAdminLogNode,
+                                           false, /*owner=*/true);
+}
+
+// The /mv commands' ports: the permission host's edit, reload and live model, and this transport's
+// ReplyTo.
+coop::commands::mv::Ports RealMvPorts() {
+    coop::commands::mv::Ports p;
+    p.hosted = &coop::moderation::HostedSessionRunning;
+    p.apply = &coop::permissions::host::Apply;
+    p.reload = &coop::permissions::host::Reload;
+    p.live = &coop::permissions::host::Live;
+    p.storeBroken = &coop::permissions::host::StoreBroken;
+    p.recordNick = &RecordNick;
+    p.hostHoldsLog = &HostHoldsLog;
+    p.now = &coop::permissions::host::NowSeconds;
+    p.notify = &ReplyTo;
+    return p;
+}
+
 struct RegistryHolder {
     coop::commands::Registry registry;
     RegistryHolder() {
@@ -184,6 +207,8 @@ struct RegistryHolder {
             UE_LOGE("commands: the moderation commands did not register");
         if (!coop::commands::settings::Register(registry, RealSettingsPorts()))
             UE_LOGE("commands: the settings commands did not register");
+        if (!coop::commands::mv::Register(registry, RealMvPorts()))
+            UE_LOGE("commands: the /mv commands did not register");
     }
 };
 

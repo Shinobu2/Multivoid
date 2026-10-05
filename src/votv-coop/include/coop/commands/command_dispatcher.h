@@ -74,6 +74,10 @@ struct Context {
     void Reply(std::string line) { replies.push_back(std::move(line)); }
 };
 
+// The reply of a command that acts only inside a running hosted session, run outside one: the one
+// definition, used by every domain's handlers.
+inline constexpr const char* kNoSession = "There is no hosted session.";
+
 // The node every permission change's Notify qualifier names: its holders are told of each change.
 // RegisterBuiltins declares it; this is its one spelling.
 inline constexpr const char* kAdminLogNode = "multivoid.admin.log";

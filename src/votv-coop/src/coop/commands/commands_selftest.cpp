@@ -784,6 +784,7 @@ bool RunSelftest() {
     ModerationCases(check);
     SettingsCases(check);
     GrammarCases(check);
+    MvCases(check);
 
     if (check.pass == check.total) {
         UE_LOGI("commands selftest: ALL PASS (%d checks)", check.total);
