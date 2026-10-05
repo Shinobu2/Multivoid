@@ -11,7 +11,8 @@
 // appends the action log, the handlers are engine-free and cannot. The reading leaves (`info`,
 // `listgroups`) format the live model within one call; `reload` asks the host.
 //
-// Engine-free like the model files: it reaches coop/permissions only for the types.
+// Engine-free like the model files: it reaches coop/permissions only for the model, its types and its
+// pure helpers (key and group-name checks, node kinds), and the host only through the ports.
 
 #pragma once
 

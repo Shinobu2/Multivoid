@@ -9,8 +9,8 @@
 // flag, then the swap under the mutex); after the adoption nothing takes a lock. The order is
 // happens-before: a client's line reaches a check only after the net thread exists, so the publish
 // precedes every check it governs. The model is never cleared at a session's end; each host start
-// replaces it. Nothing here is called outside a running hosted session (the console passes every
-// node there).
+// replaces it. The checks are asked only inside a running hosted session (the console passes every
+// node there); outside one, Apply answers NoSession and Reload an empty vector.
 #pragma once
 
 #include "coop/permissions/permission_edit.h"

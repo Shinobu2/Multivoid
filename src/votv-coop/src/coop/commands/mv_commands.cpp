@@ -6,9 +6,8 @@
 // luckperms/common/command/abstraction/ParentCommand.java:61-121, commands/generic/permission/
 // CommandPermission.java:37-45), the texts of luckperms_en.properties (:178, :207-212, :305: "You
 // cannot delete the default group.") and the notice every online holder of the log node but the
-// actor receives (actionlog/LogDispatcher.java:70-81). Deliberate divergences: a settemp over a
-// timed node of the same identity replaces it (LuckPerms offers a merge modifier), and the actor
-// is never sent the notice: its own line is its reply.
+// actor receives (actionlog/LogDispatcher.java:70-81). Deliberate divergence: a settemp over a
+// timed node of the same identity replaces it (LuckPerms offers a merge modifier).
 
 #include "coop/commands/mv_commands.h"
 

@@ -53,7 +53,8 @@ struct ArgSpec {
 };
 
 // What a command checks about its target before the handler runs, each a node
-// `<the spec's node>.<name>` declared with the spec (default false).
+// `<the spec's node>.<name>` declared with the spec (default false); a Notify qualifier that carries
+// its own `node` declares nothing and asks that declared non-command node instead.
 enum class QualKind : uint8_t {
     GateOffline,  // acting on a player who is not seated needs `.offline`
     Exempt,       // a target that holds `.exempt` explicitly cannot be acted on
@@ -99,8 +100,9 @@ struct CommandSpec {
     // Only the console (a caller flagged isOperator) may run it: the dispatcher refuses any other
     // before the permission check, and /help does not list it to one.
     bool consoleOnly = false;
-    // Each qualifier's node is declared with the spec; a second spec naming the same node (through
-    // nodeOf) does not declare it again; one of another kind is refused.
+    // Each qualifier's node is declared with the spec, except a Notify one carrying its own `node`
+    // (it declares none); a second spec naming the same node (through nodeOf) does not declare it
+    // again; one of another kind is refused.
     std::vector<Qualifier> qualifiers;
     Handler handler = nullptr;
     // A spec with sub-verbs may also have its own handler. Without one, its words are the verbs a
