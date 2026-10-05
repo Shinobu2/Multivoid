@@ -96,9 +96,10 @@ Sig  SignBlob(const uint8_t* data, size_t len);
 bool VerifyBlob(const PubKey& pub, const uint8_t* data, size_t len, const Sig& sig);
 
 // The un-gated arithmetic and crypto selftest, run once per process (a later call returns the
-// first run's verdict, silently); logs an all-pass line or one failure line per failing check. Deliberately impossible to switch off, for the
-// same reason the movement ledger's is: a wrong verdict here does not crash, it either locks
-// every honest player out or admits anyone, and both read as working from outside.
+// first run's verdict, silently); logs an all-pass line or one failure line per failing check.
+// Deliberately impossible to switch off, for the same reason the movement ledger's is: a wrong
+// verdict here does not crash, it either locks every honest player out or admits anyone, and
+// both read as working from outside.
 bool RunSelftest();
 
 }  // namespace coop::net::peer_identity

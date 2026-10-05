@@ -3,10 +3,10 @@
 // kill or a full disk leaves the target as the old file or the new one and never a cut one.
 //
 // MTA writes a `_new_` file and swaps through an `_old_` one with a recovery flag
-// (reference/mtasa-blue/Shared/XML/CXMLFileImpl.cpp:138-180), because its CRT rename cannot
-// replace an existing file (reference/mtasa-blue/Shared/sdk/SharedUtil.File.hpp:1678);
-// MoveFileExW with MOVEFILE_REPLACE_EXISTING can, in one step, so no journal is needed -- the
-// target is the old file or the new one -- and the flush is ours.
+// (reference/mtasa-blue/Shared/XML/CXMLFileImpl.cpp:138-180); its rename is the CRT's _wrename
+// (reference/mtasa-blue/Shared/sdk/SharedUtil.File.hpp:1678), which does not replace an
+// existing file. MoveFileExW with MOVEFILE_REPLACE_EXISTING replaces in one step, so on NTFS no
+// journal is needed -- the target is the old file or the new one -- and the flush is ours.
 //
 // Engine-free (Win32 only) and silent: each caller keeps its own log line and its own failure
 // policy, since "the ban holds for this session only" and "the ini left unchanged" are the

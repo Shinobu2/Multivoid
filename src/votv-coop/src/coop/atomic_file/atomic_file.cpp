@@ -118,9 +118,9 @@ Result Write(const std::filesystem::path& target, std::string_view bytes, Mode m
         failed = Step::Close;
         error = ::GetLastError();
     }
-    // No fallback on a failed move, unlike MTA's FileRename
-    // (reference/mtasa-blue/Shared/sdk/SharedUtil.File.hpp:333): a copy or an in-place write
-    // would give up the atomicity.
+    // No fallback on a failed move. MTA's CXMLFile::Write falls back to an in-place SaveFile
+    // when WriteSafer fails (reference/mtasa-blue/Shared/XML/CXMLFileImpl.cpp:125-132); a copy
+    // or an in-place write here would give up the atomicity this module exists for.
     if (failed == Step::None && !::MoveFileExW(temp.c_str(), target.c_str(), MoveFlags(mode, sync))) {
         failed = Step::Move;
         error = ::GetLastError();
