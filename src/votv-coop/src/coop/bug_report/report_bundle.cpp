@@ -9,6 +9,7 @@
 #include "coop/bug_report/report_bundle.h"
 #include "report_stream.h"
 
+#include "coop/atomic_file/atomic_file.h"
 #include "coop/config/config_report.h"
 #include "coop/net/peer_identity.h"
 #include "coop/net/protocol.h"
@@ -159,14 +160,7 @@ void RemoveLeftovers(const fs::path& reports, const fs::path& tmpDir) {
         std::error_code rm;
         fs::remove(it->path(), rm);
     }
-    ec.clear();
-    for (fs::directory_iterator it(reports, ec), end; !ec && it != end; it.increment(ec)) {
-        const std::wstring name = it->path().filename().wstring();
-        if (name.size() > 9 && name.compare(name.size() - 9, 9, L".zip.part") == 0) {
-            std::error_code rm;
-            fs::remove(it->path(), rm);
-        }
-    }
+    atomic_file::RemoveLeftovers(reports, L"report-*.zip");
 }
 
 // The zip being written, on a FILE the writer owns; closed on every path out. A failing call
@@ -181,7 +175,7 @@ public:
     bool Open(const std::wstring& part) {
         int err = 0;
         if (!file_.Open(part, L"wb", err)) {
-            cause_ = "open the .part file: " + ErrnoText(err);
+            cause_ = "open the temporary zip: " + ErrnoText(err);
             return false;
         }
         if (!mz_zip_writer_init_cfile(&zip_, file_.get(), 0)) {
@@ -212,7 +206,7 @@ public:
         if (!ok) Remember("mz_zip_writer_finalize_archive");
         const bool closed = Close();
         if (ok && !closed) {
-            cause_ = "fclose of the .part file failed: " + ErrnoText(errno);
+            cause_ = "fclose of the temporary zip failed: " + ErrnoText(errno);
             ok = false;
         }
         return ok;
@@ -319,17 +313,18 @@ detail::ReadPlan PlanFor(const Entry& e) {
     return plan;
 }
 
-// Moves the finished .part to report-<stamp>.zip; a name already taken (two saves in one UTC
-// second) gets -2, -3 ... -99 and an existing report is never overwritten. Returns the final
+// Moves the finished temporary zip to report-<stamp>.zip; a name already taken (two saves in one
+// UTC second) gets -2, -3 ... -99 and an existing report is never overwritten. Returns the final
 // path, or empty with the Win32 error in `err`.
 std::wstring MoveToFreeName(const std::wstring& part, const std::wstring& base, DWORD& err) {
     constexpr int kLastSuffix = 99;
     const std::wstring stem = base.substr(0, base.size() - 4);  // base ends in ".zip"
     for (int n = 1; n <= kLastSuffix; ++n) {
         const std::wstring target = n == 1 ? base : stem + L"-" + std::to_wstring(n) + L".zip";
-        if (::MoveFileExW(part.c_str(), target.c_str(), 0)) return target;
-        err = ::GetLastError();
-        if (err != ERROR_ALREADY_EXISTS && err != ERROR_FILE_EXISTS) return {};
+        const atomic_file::Result r = atomic_file::Commit(part, target, atomic_file::Mode::CreateOnly);
+        if (r.ok()) return target;
+        err = r.error;
+        if (!atomic_file::TargetExisted(r)) return {};
     }
     return {};
 }
@@ -343,7 +338,7 @@ Status Build(const Form& form, const Capture& cap) {
     const std::wstring reports = exeDir + L"\\multivoid_reports";
     const std::wstring tmpDir = reports + L"\\.tmp";
     const std::wstring zipPath = reports + L"\\report-" + Widen(cap.stamp.c_str()) + L".zip";
-    Cleanup cleanup{tmpDir, zipPath + L".part"};
+    Cleanup cleanup{tmpDir, atomic_file::TempPathFor(zipPath).wstring()};
 
     std::error_code ec;
     fs::create_directories(fs::path(tmpDir), ec);
@@ -437,7 +432,7 @@ Status Build(const Form& form, const Capture& cap) {
     DWORD moveErr = 0;
     const std::wstring finalPath = MoveToFreeName(cleanup.part, zipPath, moveErr);
     if (finalPath.empty())
-        return Fail(kWriteFailed, "MoveFileExW of the .part file: error " + std::to_string(moveErr));
+        return Fail(kWriteFailed, "the move of the temporary zip: error " + std::to_string(moveErr));
 
     Status done;
     done.phase = Phase::Done;

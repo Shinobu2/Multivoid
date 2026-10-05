@@ -2,6 +2,9 @@
 
 #include "coop/net/peer_identity.h"
 
+#include "coop/atomic_file/atomic_file.h"
+#include "coop/config/config.h"
+#include "coop/config/config_registry.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/paths.h"
 
@@ -273,10 +276,14 @@ ReadResult ReadKeyFile(const std::wstring& path, uint8_t priv[kPrivKeyBytes], DW
     return ReadResult::Malformed;
 }
 
-// Writes the key under the private list, which rides the create so the file never exists with a
-// wider one, not even for the instant between a create and a set. `errorOut` carries the OS
-// error on failure, so the caller can tell a folder that refuses a write from anything else.
-bool WriteKeyFile(const std::wstring& path, const uint8_t priv[kPrivKeyBytes], DWORD* errorOut) {
+// Writes the key under the private list, which rides the create of the temporary and stays with
+// the file through the move, so the file never exists with a wider one, not even for the instant
+// between a create and a set. `errorOut` carries the OS error on failure, so the caller can tell a
+// folder that refuses a write from anything else. CreateOnly fails with ERROR_ALREADY_EXISTS when
+// the file is there (a second copy of the game minted first): the caller keeps its own key
+// TEMPORARY and the next launch loads the file's.
+bool WriteKeyFile(const std::wstring& path, const uint8_t priv[kPrivKeyBytes], DWORD* errorOut,
+                  coop::atomic_file::Mode mode) {
     if (errorOut) *errorOut = 0;
     if (path.empty()) return false;
     std::string text =
@@ -298,18 +305,65 @@ bool WriteKeyFile(const std::wstring& path, const uint8_t priv[kPrivKeyBytes], D
         ::SetSecurityDescriptorControl(&sd, SE_DACL_PROTECTED, SE_DACL_PROTECTED);
         sa.lpSecurityDescriptor = &sd;
     }
-    HANDLE h = ::CreateFileW(path.c_str(), GENERIC_WRITE, 0,
-                             sa.lpSecurityDescriptor ? &sa : nullptr, CREATE_ALWAYS,
-                             FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE) {
-        if (errorOut) *errorOut = ::GetLastError();
-        return false;
+    const coop::atomic_file::Result r = coop::atomic_file::Write(
+        path, text, mode, coop::atomic_file::Sync::ToDisk,
+        sa.lpSecurityDescriptor ? &sa : nullptr);
+    if (errorOut) *errorOut = r.error;
+    return r.ok();
+}
+
+// The selftest's scratch keys: `multivoid.selftest-identity.<pid>.key` beside the executable. A
+// run killed inside the selftest leaves its file (and a temporary of it); the next run removes
+// every one whose process is gone.
+constexpr const wchar_t* kScratchKeyPrefix = L"multivoid.selftest-identity.";
+
+void SweepDeadScratchKeys(const std::wstring& exeDir) {
+    const std::wstring prefix = kScratchKeyPrefix;
+    const std::wstring suffix = L".key";
+    WIN32_FIND_DATAW fd{};
+    HANDLE h = ::FindFirstFileW((exeDir + L"\\" + prefix + L"*" + suffix).c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+            const std::wstring name = fd.cFileName;
+            if (name.size() <= prefix.size() + suffix.size() || name.compare(0, prefix.size(), prefix) != 0 ||
+                name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
+                continue;
+            const std::wstring digits =
+                name.substr(prefix.size(), name.size() - prefix.size() - suffix.size());
+            if (digits.size() > 10) continue;
+            unsigned long long id = 0;
+            bool numeric = true;
+            for (wchar_t c : digits) {
+                if (c < L'0' || c > L'9') { numeric = false; break; }
+                id = id * 10 + static_cast<unsigned>(c - L'0');
+            }
+            if (!numeric || id > 0xFFFFFFFFull) continue;
+            if (coop::atomic_file::ProcessRunning(static_cast<unsigned long>(id))) continue;
+            ::DeleteFileW((exeDir + L"\\" + name).c_str());
+        } while (::FindNextFileW(h, &fd));
+        ::FindClose(h);
     }
-    DWORD written = 0;
-    const bool ok = ::WriteFile(h, text.data(), static_cast<DWORD>(text.size()), &written,
-                                nullptr) && written == text.size();
-    if (!ok && errorOut) *errorOut = ::GetLastError();
-    ::CloseHandle(h);
+    coop::atomic_file::RemoveLeftovers(exeDir, std::wstring(prefix) + L"*" + suffix);
+}
+
+// The access list of `path` as read back: protected, and its entry count.
+bool ReadKeyDacl(const std::wstring& path, bool& isProtected, DWORD& aceCount) {
+    PACL dacl = nullptr;
+    PSECURITY_DESCRIPTOR psd = nullptr;
+    if (::GetNamedSecurityInfoW(path.c_str(), SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, nullptr,
+                                nullptr, &dacl, nullptr, &psd) != ERROR_SUCCESS)
+        return false;
+    SECURITY_DESCRIPTOR_CONTROL ctrl = 0;
+    DWORD rev = 0;
+    ACL_SIZE_INFORMATION info{};
+    const bool ok = dacl != nullptr && ::GetSecurityDescriptorControl(psd, &ctrl, &rev) != 0 &&
+                    ::GetAclInformation(dacl, &info, sizeof(info), AclSizeInformation) != 0;
+    if (ok) {
+        isProtected = (ctrl & SE_DACL_PROTECTED) != 0;
+        aceCount = info.AceCount;
+    }
+    ::LocalFree(psd);
     return ok;
 }
 
@@ -331,6 +385,10 @@ bool Load() {
     std::wstring loadedFrom;   // the file the key was read from
     std::wstring target;       // where a minted key is written; empty = temporary
     bool minted = false;
+    // True only when the mint's target IS the file that read Malformed: only then may the write
+    // replace; every other mint writes a target that read Missing, and create-only keeps a key a
+    // second copy of the game minted a moment earlier.
+    bool replaceOnMint = false;
     bool temporary = false;    // a file that may exist could not be read: nothing is written
     DWORD readErr = 0;
     // This account's own file: used when it loads; an unreadable one ends TEMPORARY with nothing
@@ -354,6 +412,7 @@ bool Load() {
                     "identity into %ls", account.c_str(), mintTarget.c_str());
             minted = true;
             target = mintTarget;
+            replaceOnMint = mintTarget == account;
             break;
         case ReadResult::Missing:
             minted = true;
@@ -393,6 +452,7 @@ bool Load() {
                 "identity over it", installPath.c_str());
         minted = true;
         target = installPath;
+        replaceOnMint = true;
         break;
     case ReadResult::Missing:
         // No install key: an account whose owner deleted it keeps the identity it already has.
@@ -428,7 +488,9 @@ bool Load() {
                 "not be read, see above) -- dial=%s", g_guid.c_str(), g_identityString.c_str());
     } else if (minted) {
         DWORD err = 0;
-        if (!target.empty() && WriteKeyFile(target, g_priv, &err)) {
+        const coop::atomic_file::Mode mode =
+            replaceOnMint ? coop::atomic_file::Mode::Replace : coop::atomic_file::Mode::CreateOnly;
+        if (!target.empty() && WriteKeyFile(target, g_priv, &err, mode)) {
             ApplyKeyFileAcl(target);
             UE_LOGI("peer_identity: minted a new durable identity %s (saved to %ls) -- dial=%s",
                     g_guid.c_str(), target.c_str(), g_identityString.c_str());
@@ -651,6 +713,52 @@ bool RunSelftest() {
               AccountKeyFileName(systemSid, systemSidLen) ==
                   L"multivoid_identity_f53c7fa26c1476dc.key",
               "the account key name is not the hash of the SID bytes alone (SYSTEM known answer)");
+    }
+
+    // 25-29: the key file is written whole through coop/atomic_file, with the access list on the
+    // result: a malformed file replaced, a second create-only write refused, the list protected
+    // with the two entries. The file is a scratch one, never the install's key, and no g_ state is
+    // touched.
+    {
+        const bool breakIt =
+            coop::config::ResolveFlag(coop::config_registry::rows::selftest_break_identity);
+        const std::wstring exe = ue_wrap::paths::ExeDir();
+        if (exe.empty()) {
+            check(false, "the executable folder does not resolve (key-write case)");
+        } else {
+            SweepDeadScratchKeys(exe);
+            const std::wstring scratch =
+                exe + L"\\" + kScratchKeyPrefix + std::to_wstring(::GetCurrentProcessId()) + L".key";
+            ::DeleteFileW(scratch.c_str());
+            coop::atomic_file::Write(scratch, "malformed", coop::atomic_file::Mode::Replace,
+                                     coop::atomic_file::Sync::Cached);
+            uint8_t want[kPrivKeyBytes];
+            uint8_t expect[kPrivKeyBytes];
+            for (size_t i = 0; i < kPrivKeyBytes; ++i) {
+                want[i] = static_cast<uint8_t>(i + 1);
+                expect[i] = static_cast<uint8_t>(i + 1 + (breakIt ? 1 : 0));
+            }
+            DWORD werr = 0;
+            check(WriteKeyFile(scratch, want, &werr, coop::atomic_file::Mode::Replace),
+                  "the key file was not written over a malformed one (Replace)");
+            uint8_t got[kPrivKeyBytes]{};
+            DWORD rerr = 0;
+            check(ReadKeyFile(scratch, got, &rerr) == ReadResult::Loaded &&
+                      std::memcmp(got, expect, kPrivKeyBytes) == 0,
+                  "the key file does not read back as the key that was written");
+            DWORD cerr = 0;
+            check(!WriteKeyFile(scratch, want, &cerr, coop::atomic_file::Mode::CreateOnly) &&
+                      cerr == ERROR_ALREADY_EXISTS,
+                  "a create-only key write over an existing file was not refused");
+            if (coop::atomic_file::VolumeKeepsAcls(scratch) && KeyFileAcl().ok) {
+                bool isProtected = false;
+                DWORD aces = 0;
+                const bool read = ReadKeyDacl(scratch, isProtected, aces);
+                check(read && isProtected, "the written key file's access list is not protected");
+                check(read && aces == 2, "the written key file's access list is not two entries");
+            }
+            ::DeleteFileW(scratch.c_str());
+        }
     }
 
     if (pass == total) {
