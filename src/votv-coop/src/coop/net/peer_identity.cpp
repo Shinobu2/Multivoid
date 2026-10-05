@@ -501,11 +501,20 @@ bool Load() {
             // server-id.keys cannot be read or created
             // (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:758-762); a client of a
             // single-player game still plays, on a temporary identity.
-            UE_LOGW("peer_identity: minted identity %s but could NOT write %ls (error %lu) -- "
-                    "this identity is TEMPORARY and your stored inventory will not be found "
-                    "again next launch", g_guid.c_str(),
-                    target.empty() ? L"the key file (no folder resolved)" : target.c_str(),
-                    static_cast<unsigned long>(err));
+            if (!target.empty() && !replaceOnMint &&
+                (err == ERROR_ALREADY_EXISTS || err == ERROR_FILE_EXISTS)) {
+                // The create-only write found the file: the one failure that is a race, not a
+                // folder that refuses a write.
+                UE_LOGW("peer_identity: minted identity %s but another copy of the game minted "
+                        "the key first (%ls); this session runs on a TEMPORARY identity, the next "
+                        "launch loads that key", g_guid.c_str(), target.c_str());
+            } else {
+                UE_LOGW("peer_identity: minted identity %s but could NOT write %ls (error %lu) "
+                        "-- this identity is TEMPORARY and your stored inventory will not be "
+                        "found again next launch", g_guid.c_str(),
+                        target.empty() ? L"the key file (no folder resolved)" : target.c_str(),
+                        static_cast<unsigned long>(err));
+            }
         }
     } else {
         // Re-applied at every load, so a file an older build wrote, or one copied here from
@@ -743,6 +752,9 @@ static bool RunSelftestBody() {
                 expect[i] = static_cast<uint8_t>(i + 1 + (breakIt ? 1 : 0));
             }
             DWORD werr = 0;
+            // The seed's own failure is named here, and adds a check only when it fails.
+            if (!seeded)
+                check(false, "the key-write case's seed (a malformed file) was not written");
             check(seeded && WriteKeyFile(scratch, want, &werr, coop::atomic_file::Mode::Replace),
                   "the key file was not written over a malformed one (Replace)");
             uint8_t got[kPrivKeyBytes]{};

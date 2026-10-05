@@ -16,6 +16,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <aclapi.h>
+#include <tlhelp32.h>
 
 #include <cstdint>
 #include <fstream>
@@ -59,6 +60,24 @@ int CountTmp(const fs::path& dir) {
     } while (::FindNextFileW(h, &fd));
     ::FindClose(h);
     return n;
+}
+
+// Whether the process list holds `id`: the live-other-process arm of case 8 needs a process this
+// one may not open, and only Windows NT's System (id 4) is one by name; Wine need not list it.
+bool ProcessListed(DWORD id) {
+    HANDLE snap = ::CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return false;
+    PROCESSENTRY32W pe{};
+    pe.dwSize = sizeof(pe);
+    bool found = false;
+    for (BOOL more = ::Process32FirstW(snap, &pe); more; more = ::Process32NextW(snap, &pe)) {
+        if (pe.th32ProcessID == id) {
+            found = true;
+            break;
+        }
+    }
+    ::CloseHandle(snap);
+    return found;
 }
 
 bool AllDigits(const std::wstring& s) {
@@ -171,6 +190,12 @@ static bool RunSelftestBody() {
         if (ok) { ++pass; return; }
         UE_LOGE("atomic_file selftest FAIL: %s", what);
     };
+    // A seed write (the setup before a case's assertion) names its own failure, and adds a check
+    // only when it fails, so the case's own check never carries a setup fault under its label.
+    auto seeded = [&](bool ok, const char* what) {
+        if (!ok) check(false, what);
+        return ok;
+    };
     const bool breakIt =
         coop::config::ResolveFlag(coop::config_registry::rows::selftest_break_atomic_file);
 
@@ -234,32 +259,40 @@ static bool RunSelftestBody() {
         const fs::path z = scratch / L"z.zip";
         const fs::path z2 = scratch / L"z-2.zip";
         const fs::path tmp = TempPathFor(z);
-        const bool made1 = HandWrite(tmp, "zip1");
+        seeded(HandWrite(tmp, "zip1"), "case 7: its first hand-written temporary was not written");
         const Result r1 = Commit(tmp, z, Mode::CreateOnly);
-        const bool made2 = HandWrite(tmp, "zip2");
+        seeded(HandWrite(tmp, "zip2"), "case 7: its second hand-written temporary was not written");
         const Result r2 = Commit(tmp, z, Mode::CreateOnly);
         const bool stayed = fs::exists(tmp) && Reads(z, "zip1");
         const Result r3 = Commit(tmp, z2, Mode::CreateOnly);
-        check(made1 && made2 && r1.ok() && TargetExisted(r2) && stayed && r3.ok() &&
-                  Reads(z2, "zip2") && !fs::exists(tmp),
+        check(r1.ok() && TargetExisted(r2) && stayed && r3.ok() && Reads(z2, "zip2") &&
+                  !fs::exists(tmp),
               "case 7: Commit moves a temporary in, a refusal leaves it, the next name takes it");
     }
     // 8. Leftovers: a dead process's goes, a running one's and ours stay; a pattern with `*`.
+    // The live-other arm needs a process this one may not open: System (id 4) on Windows NT,
+    // which Wine/Proton need not have, so that arm runs only when the process list holds it.
     {
         const fs::path dead = scratch / L"y.json.1.tmp";
         const fs::path system = scratch / L"y.json.4.tmp";
         const fs::path ours = scratch / (L"y.json." + pidText + L".tmp");
-        const bool made = HandWrite(dead, "x") && HandWrite(system, "x") && HandWrite(ours, "x");
+        const bool liveOther = ProcessListed(4);
+        if (!liveOther)
+            UE_LOGI("atomic_file selftest: case 8 live-other arm not run (no process 4 here)");
+        seeded(HandWrite(dead, "x"), "case 8a: the dead process's temporary was not written");
+        if (liveOther)
+            seeded(HandWrite(system, "x"), "case 8a: process 4's temporary was not written");
+        seeded(HandWrite(ours, "x"), "case 8a: our own temporary was not written");
         const int removed = RemoveLeftovers(scratch, L"y.json");
-        const bool kept = !fs::exists(dead) && fs::exists(system) && fs::exists(ours);
-        check(made && removed == 1 && kept && !ProcessRunning(1) && ProcessRunning(4),
+        const bool kept = !fs::exists(dead) && fs::exists(ours) && (!liveOther || fs::exists(system));
+        check(removed == 1 && kept && !ProcessRunning(1) && (!liveOther || ProcessRunning(4)),
               "case 8a: RemoveLeftovers deletes only a dead process's temporary");
-        const bool deadMade = HandWrite(dead, "x");
+        seeded(HandWrite(dead, "x"), "case 8b: the dead process's temporary was not written");
         const Result r = Write(y, "ff", Mode::Replace, Sync::Cached);
-        check(deadMade && r.ok() && !fs::exists(dead) && Reads(y, "ff"),
+        check(r.ok() && !fs::exists(dead) && Reads(y, "ff"),
               "case 8b: a write sweeps its own target's dead leftover");
         const fs::path report = scratch / L"report-x.zip.1.tmp";
-        HandWrite(report, "x");
+        seeded(HandWrite(report, "x"), "case 8c: the report's dead temporary was not written");
         check(RemoveLeftovers(scratch, L"report-*.zip") == 1 && !fs::exists(report),
               "case 8c: RemoveLeftovers takes a pattern with a wildcard");
         fs::remove(system, ec);
