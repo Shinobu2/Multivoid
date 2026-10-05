@@ -2,8 +2,9 @@
 // effects: their bytes, every check of a peer's bytes, and the host's table of the ones awaiting
 // an answer. Engine-free: no engine type, no session, no clock. The game thread uses it.
 //
-// Every check of a peer's bytes is in an Unpack function, the length first; a caller never reads
-// a payload any other way. Tokens: the table below mints them and never expires one. The reliable
+// Every check of a client's ANSWER is in an Unpack function, the length first; the host never
+// reads an answer any other way, so a client's bytes cannot fault it. An order's op, row and
+// numbers are judged by the client that takes it, which answers Refused and never drops it. Tokens: the table below mints them and never expires one. The reliable
 // channel delivers or the slot disconnects, and a slot's disconnect answers every token it holds.
 //
 // Red arm: with the dev row selftest_break_stat_orders the selftest's first case expects the wrong
@@ -26,6 +27,8 @@ using coop::net::kStatRows;
 enum class Op : uint8_t { SetStat = 0, AddEffect = 1, RemoveEffect = 2 };
 
 // 0-3 travel; Left and Malformed are the host's own (a disconnect; an answer that failed its checks).
+// MTA drops a packet it cannot read (reference/mtasa-blue/ CPacketTranslator.cpp:252); here the
+// waiting caller is answered Malformed instead, so an admin's order never waits silently.
 enum class Result : uint8_t { Applied = 0, Refused = 1, NotFound = 2, NotReady = 3, Left = 4, Malformed = 5 };
 
 // What an order's caller is given. The flags are false unless the result is Applied.
@@ -72,6 +75,8 @@ struct Pending {
 
 // The host's table of what it sent and has no answer to yet. Two allowances per slot, so a polling
 // pane never starves an order.
+// The token is the Source SDK's convar-query cookie (reference/source-sdk-2013/ iserverplugin.h:
+// 36-44; its invalid cookie is -1, ours 0); nothing expires: the answer rides one reliable lane.
 class PendingTable {
 public:
     static constexpr int kMaxOrders = 16;   // per slot
