@@ -81,6 +81,7 @@ struct BuildIdentity {
 
 void ComputeSelf();                // boot thread, once, before harness::Start
 const BuildIdentity& Self();       // any thread
+// Unlatched: one ini read and one signature verify per call; a caller that wants it often latches it.
 bool SelfIsOfficial();             // step == SigPresent && SignatureVerifies(sig, ResolveFlag(rows::build_trust_test_key))
 const char* StepName(SelfStep step);
 const char* StatusSuffix();        // "" when SelfIsOfficial(), else " (unofficial build)"

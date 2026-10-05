@@ -1,7 +1,7 @@
 // coop/build_trust/build_trust_selftest.cpp -- the un-gated selftest of the signed message, the .sig
 // parser and the verifier, run once per process (shape: coop/player/stat_orders_wire_selftest.cpp).
-// Microseconds, no file, no engine: a parser that accepts a bent line, or a verifier that trusts an
-// unknown key, makes a fork read as official.
+// About a millisecond (a handful of signature verifies and one config read), no engine: a parser
+// that accepts a bent line, or a verifier that trusts an unknown key, makes a fork read as official.
 //
 // The vector is signed by the TEST key (id 255), which only a peer with the dev knob trusts. Red arm:
 // with the dev row selftest_break_build_trust check 2 expects the opposite, so the run must fail.
