@@ -173,7 +173,7 @@ void ProbeDefaults() {
 constexpr float kEffectStrength = 1.f;  // what an added effect is given, and what List must report
 constexpr float kEffectSeconds = 5.f;
 
-// The effects the probe adds: each one's removal leaves nothing behind.
+// The effects the probe adds: the removal of the one instance an add makes leaves nothing behind.
 const wchar_t* const kEffectsAdded[] = {L"bloodLoss", L"foodPoison", L"nausea", L"sleepy", L"vaccine_a"};
 
 // The effects the probe only lists by name, and what a removal of each would leave.
@@ -220,7 +220,8 @@ void ProbeEffectAdded(const std::wstring& name, bool red) {
     const int expected = (red && SameName(name, L"bloodLoss")) ? 2 : 1;
     const bool addedOk = added == expected && first && first->live && Near(strength, kEffectStrength) &&
                          Near(time, kEffectSeconds);
-    // The removal runs whatever the add read back, so a MISMATCH does not leave an effect behind.
+    // The removal runs whatever the add read back, but it takes one instance: a two-entry add (the
+    // red arm) or a failed List after the add leaves one.
     const bool removed = E::Remove(name);
     const bool listedAfter = E::List(&list);
     if (!listedAdded || !removed || !listedAfter) return EffectNotFound(name);
