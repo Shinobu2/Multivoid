@@ -107,7 +107,8 @@ inline Lane LaneForKind(ReliableKind k) {
     // The host-to-client inventory blob must reach the joiner before its world loads (the inventory
     // is substituted before materialisation), so it rides Normal, ahead of the Bulk streams, and is
     // pre-world sendable; a self-contained blob with no in-lane dependency.
-    case ReliableKind::PlayerInventoryBlob: return Lane::Normal;
+    case ReliableKind::PlayerInventoryBlob: return Lane::Normal;  // StatOrderReply is pinned with it
+    case ReliableKind::StatOrderReply: return Lane::Normal;  // pinned with the profile blob: an order's reply must arrive after the profile it answers for
     // PropStickState and PropRelease are order-paired: the release gate reads the frozen state the
     // stick writes, and a release overtaking its stick re-enables physics on a just-stuck mirror.
     // Pinned, so a single-kind lane move cannot split them.

@@ -56,6 +56,7 @@
 #include "coop/session/rig_ready.h"
 #include "coop/session/pause_guard.h"  // coop no-pause invariant (ESC pause froze clients)
 #include "coop/items/player_inventory_sync.h"  // per-player inventory (host file scaffold)
+#include "coop/player/stat_orders.h"  // an admin's orders to a player's stats: the kept session, the tokens answered Left
 #include "coop/voice/voice_chat.h"
 #include "coop/element/death_seam.h"  // an element's end of play, handed to the lanes that subscribed
 #include "coop/props/host_spawn_watcher.h"  // HOST mirror of those ambient spawner outputs (the pinecone scare)
@@ -218,6 +219,7 @@ void Install(coop::net::Session& session) {
     coop::inventory_pickup_sync::Install(&session);  // inventory-collect blip (PlaySound2D observer)
     coop::chat_sync::Install(&session);  // T-chat (the ui/chat_input send path)
     coop::command_sync::Install(&session);  // the chat input's `/` route: the host's own line, a client's request
+    coop::stat_orders::Install(&session);  // an admin's orders and queries of a player's stats: the session they are sent through
     coop::local_body::Install(&session);  // skins: local first-person body + SkinChange announce
     coop::local_body::Tick();  // applies the persisted skin to the local pawn + 1 Hz convergence
     coop::nameplate::Install(&session);  // plate-pref announce path (F1 checkbox -> NameplateChange)
@@ -433,6 +435,7 @@ void DisconnectSlot(coop::net::Session& session, int slot) {
     // it must get its seed before it hears a live line.
     coop::chat_sync::OnSlotDisconnected(slot);
     coop::command_sync::OnSlotDisconnected(slot);  // the leaver's command rate bucket and notice clocks
+    coop::stat_orders::OnSlotDisconnected(static_cast<uint8_t>(slot));  // every order and query still waiting on the leaver is answered Left
     // Per-slot cleanup: only subsystems with per-slot state are called here; the global-state ones
     // are handled by DisconnectAll.
     coop::trash_mirror::OnDisconnectForSlot(slot);  // phase 1: retire the leaver's trash mirrors BEFORE the generic mirror drain (else the rooted actor leaks)
@@ -531,6 +534,7 @@ DisconnectStats DisconnectAll() {
     coop::inventory_pickup_sync::OnDisconnect();
     coop::chat_sync::OnDisconnect();
     coop::command_sync::OnDisconnect();  // every command rate bucket and notice clock
+    coop::stat_orders::OnDisconnect();  // every order and query still waiting is answered Left, the kept session cleared
     coop::turbine_sync::OnDisconnect();
     coop::upgrade_sync::OnDisconnect();  // and its own upgrade panel buys locally again
     coop::device_occupancy::OnDisconnect();

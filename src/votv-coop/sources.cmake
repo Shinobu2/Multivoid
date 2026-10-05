@@ -451,6 +451,7 @@ set(VOTVCOOP_SOURCES
     src/coop/creatures/wisp_tear_mirror.cpp
     src/coop/items/player_inventory_sync.cpp
     src/coop/player/player_profile_store.cpp
+    src/coop/player/stat_orders.cpp
     src/coop/player/stat_orders_wire.cpp
     src/coop/player/stat_orders_wire_selftest.cpp
     src/coop/items/inventory_wire.cpp
