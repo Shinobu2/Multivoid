@@ -470,6 +470,22 @@ void InfoFormatCases(Checker& check) {
     check(capped.size() == 2 + 20 + 1 && capped[2] == "n.01" && capped[21] == "n.20" && capped[22] == "... and 5 more",
           "mv info: twenty node lines, then the count of the rest");
 
+    // Thirty parents beside `default`: the line holds what fits in 200 bytes, then the count left.
+    const perm::HolderKey crowded{perm::HolderKind::User, Id('4')};
+    for (int i = 1; i <= 30; ++i) {
+        const std::string name = "parentgroup" + std::string(i < 10 ? "0" : "") + std::to_string(i);
+        m.CreateGroup(name);
+        m.SetNode(perm::HolderKind::User, Id('4'), N("group." + name));
+    }
+    const std::vector<std::string> crowd = mv::InfoLines(m, crowded, "Cal", kNow);
+    check(crowd.size() == 3 && crowd[1].size() <= 200 &&
+              crowd[1].rfind("Parents: default, parentgroup01, parentgroup02, ", 0) == 0 &&
+              crowd[1].find("parentgroup11") != std::string::npos &&
+              crowd[1].find("parentgroup12") == std::string::npos &&
+              crowd[1].size() >= 197 &&
+              crowd[1].compare(crowd[1].size() - 16, 16, " ... and 19 more") == 0,
+          "mv info: thirty parents are cut to the line's 200 bytes, then ... and N more with the right N");
+
     m.CreateGroup("w");
     m.SetNode(perm::HolderKind::Group, "w", N("weight.5"));
     m.SetNode(perm::HolderKind::Group, "w", N("weight.10", true, 1000));

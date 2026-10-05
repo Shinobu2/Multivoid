@@ -58,7 +58,8 @@ bool Register(Registry& reg, const Ports& p);
 
 // The lines of `/mv user|group ... info`: the STORED holder `key` of `m` (what its file holds, never
 // a resolved answer), named `displayName`, with `now` for the expired marks and the weight rule
-// (mv_info.cpp). Pure; each line is one reply.
+// (mv_info.cpp). Pure; each line is one reply, the `Parents:` line at most 200 bytes (as many parents
+// as fit, then `... and N more`).
 std::vector<std::string> InfoLines(const coop::permissions::Model& m, const coop::permissions::HolderKey& key,
                                    const std::string& displayName, int64_t now);
 

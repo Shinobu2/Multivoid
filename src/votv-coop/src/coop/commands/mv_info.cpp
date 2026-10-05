@@ -50,6 +50,31 @@ void AppendCapped(std::vector<std::string>& out, std::vector<std::string> lines)
     if (lines.size() > kLineCap) out.push_back("... and " + std::to_string(lines.size() - kLineCap) + " more");
 }
 
+// A command reply line is cut at 203 bytes by the client's reply path with no marker: `info`'s
+// `Parents:` line is held to this many bytes, the `... and N more` it ends with included.
+constexpr size_t kReplyBytes = 200;
+
+// `Parents: a, b (expired)` from the entries, each a group with its marks. When they do not all fit
+// in kReplyBytes: as many as fit, then ` ... and N more`; the whole line at most kReplyBytes.
+std::string ParentsLine(const std::vector<std::string>& entries) {
+    const std::string head = "Parents: ";
+    const size_t count = entries.size();
+    // used[k] = the bytes of the head and the first k entries, comma-separated.
+    std::vector<size_t> used(count + 1, head.size());
+    for (size_t i = 0; i < count; ++i) used[i + 1] = used[i] + entries[i].size() + (i == 0 ? 0 : 2);
+    size_t shown = count;
+    std::string suffix;
+    if (used[count] > kReplyBytes) {
+        for (shown = count - 1;; --shown) {
+            suffix = std::string(shown == 0 ? "" : " ") + "... and " + std::to_string(count - shown) + " more";
+            if (shown == 0 || used[shown] + suffix.size() <= kReplyBytes) break;
+        }
+    }
+    std::string line = head;
+    for (size_t i = 0; i < shown; ++i) line += (i == 0 ? "" : ", ") + entries[i];
+    return line + suffix;
+}
+
 // `weight <n>` for the highest weight that applies at `now`, else `no weight`.
 std::string GroupWeightWords(const perm::Holder& g, int64_t now) {
     int weight = 0;
@@ -81,12 +106,9 @@ std::vector<std::string> InfoLines(const perm::Model& m, const perm::HolderKey& 
     std::stable_sort(parents.begin(), parents.end(), [](const perm::Node* a, const perm::Node* b) {
         return perm::GroupOf(a->key) < perm::GroupOf(b->key);
     });
-    std::string line = "Parents: ";
-    for (size_t i = 0; i < parents.size(); ++i) {
-        if (i != 0) line += ", ";
-        line += std::string(perm::GroupOf(parents[i]->key)) + Marks(*parents[i], now);
-    }
-    out.push_back(parents.empty() ? "Parents: none" : line);
+    std::vector<std::string> entries;
+    for (const perm::Node* p : parents) entries.push_back(std::string(perm::GroupOf(p->key)) + Marks(*p, now));
+    out.push_back(entries.empty() ? "Parents: none" : ParentsLine(entries));
 
     if (others.empty()) out.push_back("Nothing else is set.");
     else AppendCapped(out, std::move(others));
