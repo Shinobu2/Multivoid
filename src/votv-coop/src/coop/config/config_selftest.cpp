@@ -5,8 +5,9 @@
 // run the REAL lexer over corpus ini files and prove the tri-state branches
 // and the arc-3 default/sentinel semantics. The runtime layer's selftest also lives here:
 // SelftestRuntimeLayer drives SetValue's own code against a scratch ini, and SelftestQuotedValues
-// the writer's quoting against the reader's. Not for product use:
-// product code reads only the module-dir ini via the public config.h API.
+// the writer's quoting against the reader's, and SelftestAnnounce the notify decision
+// on pure inputs. Not for product use: product code reads only the module-dir ini
+// via the public config.h API.
 //
 // Extracted from config.cpp (arc 3, soft-cap discipline -- the C5a twins
 // pushed it past 800 LOC; the instrument seams are their own concept). All
