@@ -165,6 +165,8 @@ void JudgeFirstQuery(SO::Result r, const SO::TableView& v) {
     UE_LOGI("[STAT-ORDER] joiner effects: %s", names.empty() ? "none" : names.c_str());
     if (v.validMask != kAllRows) return Mismatch(what, r, 0.f, false, "not every row read");
     if (Find(v, kJoinerEffect)) return Unmeasurable("sleepy already active");
+    // The reply carries the first five entries only, so a vaccine_a absent from a cut list proves nothing.
+    if (static_cast<size_t>(v.effectTotal) > v.effects.size()) return Unmeasurable("the effect list is cut");
     // The joiner's world is built without the host's effects: its save object has them reset out
     // at the join (OnSaveObjectReady). `redjoin` expects the opposite, so on a fixed build it prints the failing line.
     const bool inherited = Find(v, kHostEffect) != nullptr;
