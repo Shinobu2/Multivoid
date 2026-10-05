@@ -6,6 +6,7 @@
 
 #include "coop/commands/moderation_commands.h"
 
+#include "coop/commands/action_source.h"
 #include "coop/commands/command_dispatcher.h"
 
 #include <algorithm>
@@ -60,6 +61,30 @@ std::string ReasonText(const Context& ctx, size_t arg) {
     return ctx.given[arg] ? ctx.texts[arg] : std::string();
 }
 
+// MTA's verbs log a prose line each
+// (reference/mtasa-blue/Server/mods/deathmatch/logic/CStaticFunctionDefinitions.cpp:11915-11919,
+// 12050-12054: target, actor, reason; UNBAN the actor only, :12238); ours keeps LuckPerms' action
+// record, the description being the command line, so the one log reads in one grammar with `/mv`'s.
+// Called after the verb's outcome is known, only for the outcomes that acted.
+void Record(const Ports& p, const Context& ctx, const std::string& targetId, const std::string& targetName,
+            const std::string& description) {
+    if (!p.log) return;
+    coop::permissions::Action a;
+    FillSource(ctx, a);
+    a.targetType = "user";
+    a.targetId = targetId;
+    a.targetName = targetName;
+    a.description = description;
+    p.log(a);
+}
+
+std::string IdOrUnproved(const std::string& id) { return id.empty() ? "unproved" : id; }
+
+// The typed reason, else the verb's default: the text the command line names in the record.
+std::string ReasonOrDefault(const std::string& reason, const char* fallback) {
+    return reason.empty() ? std::string(fallback) : reason;
+}
+
 // "<caller> kicked|banned <target>[: <reason>]" to every player the dispatcher listed as holding
 // the notify node, and to the host's own feed when a client acted (the host's reply is its own).
 void NotifyOthers(const Ports& p, const Context& ctx, const char* verb, const std::string& target,
@@ -94,6 +119,9 @@ Handler KickHandler(const Ports& p) {
             case ModResult::Done:
                 ctx.Reply("Kicked " + v->nick + ".");
                 NotifyOthers(p, ctx, "kicked", v->nick, reason);
+                Record(p, ctx, v->playerId, v->nick,
+                       "/kick " + IdOrUnproved(v->playerId) + " " +
+                           ReasonOrDefault(reason, coop::moderation::kKickDefaultReason));
                 break;
             case ModResult::Gone: ctx.Reply(v->nick + " already left."); break;
             case ModResult::NoSession: ctx.Reply(kNoSession); break;
@@ -116,6 +144,9 @@ Handler BanHandler(const Ports& p, bool byAddress) {
                 case ModResult::Done:
                     ctx.Reply("Banned " + who + " (offline).");
                     NotifyOthers(p, ctx, "banned", who, reason);
+                    Record(p, ctx, t.offlineId, recorded,
+                           std::string(byAddress ? "/ban " : "/banid ") + t.offlineId + " " +
+                               ReasonOrDefault(reason, coop::moderation::kBanDefaultReason));
                     break;
                 case ModResult::NoSession: ctx.Reply(kNoSession); break;
                 default: ctx.Reply(Unmapped("ban", who, r)); break;
@@ -129,6 +160,9 @@ Handler BanHandler(const Ports& p, bool byAddress) {
             case ModResult::Done:
                 ctx.Reply("Banned " + v->nick + " (" + ShortId(v->playerId) + ").");
                 NotifyOthers(p, ctx, "banned", v->nick, reason);
+                Record(p, ctx, v->playerId, v->nick,
+                       std::string(byAddress ? "/ban " : "/banid ") + v->playerId + " " +
+                           ReasonOrDefault(reason, coop::moderation::kBanDefaultReason));
                 break;
             case ModResult::NoId: ctx.Reply(v->nick + "'s identity is not proved yet."); break;
             case ModResult::Gone: ctx.Reply(v->nick + " already left."); break;
@@ -161,7 +195,10 @@ Handler UnbanHandler(const Ports& p) {
         const std::string id8 = ShortId(ids[0]);
         const ModResult r = p.unban(ids[0].c_str());
         switch (r) {
-            case ModResult::Done: ctx.Reply("Unbanned " + id8 + "."); break;
+            case ModResult::Done:
+                ctx.Reply("Unbanned " + id8 + ".");
+                Record(p, ctx, ids[0], std::string(), "/unban " + ids[0]);
+                break;
             case ModResult::NotBanned: ctx.Reply(id8 + " is not banned."); break;
             case ModResult::NoSession: ctx.Reply(kNoSession); break;
             default: ctx.Reply(Unmapped("unban", id8, r)); break;
@@ -177,7 +214,10 @@ Handler TeleportHandler(const Ports& p) {
         if (!v->worldReady) { ctx.Reply(v->nick + " is still joining."); return; }
         const ModResult r = p.teleport(TokenOf(*v));
         switch (r) {
-            case ModResult::Done: ctx.Reply("Teleported " + v->nick + " to you."); break;
+            case ModResult::Done:
+                ctx.Reply("Teleported " + v->nick + " to you.");
+                Record(p, ctx, v->playerId, v->nick, "/tphere " + IdOrUnproved(v->playerId));
+                break;
             case ModResult::Gone: ctx.Reply(v->nick + " already left."); break;
             case ModResult::NoSession: ctx.Reply(kNoSession); break;
             default: ctx.Reply(Unmapped("teleport", v->nick, r)); break;

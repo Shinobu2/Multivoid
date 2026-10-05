@@ -8,13 +8,15 @@
 // who may run a command and has checked its qualifiers (offline target, an offline id the host
 // has no record of, exempt target, who is told): a handler here never asks the permission system.
 //
-// Engine-free like the model files: it reaches coop/moderation only for the verbs' types.
+// Engine-free like the model files: it reaches coop/moderation only for the verbs' types, and
+// coop/permissions for the action record.
 
 #pragma once
 
 #include "coop/commands/command_registry.h"
 #include "coop/commands/command_targets.h"
 #include "coop/moderation/moderation.h"
+#include "coop/permissions/action_log.h"
 
 #include <string>
 #include <string_view>
@@ -39,6 +41,8 @@ struct Ports {
     std::string (*recordNick)(std::string_view id) = nullptr;
     // One reply line to a caller, now or later (a seated player, or the host's own feed).
     void (*notify)(const Caller& to, std::string_view line) = nullptr;
+    // Records an admin action the verb carried out; null records nothing.
+    void (*log)(const coop::permissions::Action& action) = nullptr;
 };
 
 // Registers /kick, /ban, /banid, /unban, /tphere into `reg`, in that order. False (and the

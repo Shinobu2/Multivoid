@@ -26,6 +26,7 @@
 #include "coop/net/peer_identity.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
+#include "coop/permissions/action_log.h"
 #include "coop/permissions/permission_host.h"
 #include "coop/player/players_registry.h"
 #include "coop/player/remote_player.h"
@@ -123,6 +124,20 @@ std::string RecordNick(std::string_view id) {
     return e.nick;
 }
 
+// The admin-action port: appends one record to the action log inside a hosted session. The record is
+// the host's account of what an admin did, so a failure to write it is a warning, never a refusal of
+// the action that already ran.
+void LogAction(const coop::permissions::Action& a) {
+    if (!coop::moderation::HostedSessionRunning()) return;
+    const auto folder = coop::permissions::host::ActionLogFolder();
+    if (folder.empty()) {
+        UE_LOGW("action log: not recorded -- the server folder is unknown");
+        return;
+    }
+    if (!coop::permissions::AppendAction(folder, a, coop::permissions::host::NowSeconds()))
+        UE_LOGW("action log: could not append to actions.jsonl -- the action stands");
+}
+
 // The moderation commands' ports: the verbs of coop/moderation and this transport's ReplyTo.
 coop::commands::moderation::Ports RealModerationPorts() {
     coop::commands::moderation::Ports p;
@@ -135,6 +150,7 @@ coop::commands::moderation::Ports RealModerationPorts() {
     p.idsWithPrefix = &coop::ban_list::IdsWithPrefix;
     p.recordNick = &RecordNick;
     p.notify = &ReplyTo;
+    p.log = &LogAction;
     return p;
 }
 
