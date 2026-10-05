@@ -452,7 +452,7 @@ def drill_keygen_wiring():
     check("main's default runner is subprocess.run",
           inspect.signature(rs.main).parameters["runner"].default is REAL_RUN)
     routes = set(process_routes(REAL_OS)) | {n for n in PROCESS_NAMES if hasattr(REAL_OS, n)}
-    check("the process guards are armed on every route (nothing is started to prove it)",
+    check("the process guards are armed on the routes they cover (nothing is started to prove it)",
           rs.subprocess is not subprocess and rs.subprocess.run is not REAL_RUN
           and subprocess.Popen is not REAL_POPEN and rs.subprocess.Popen is not REAL_POPEN
           and rs.os is not REAL_OS
