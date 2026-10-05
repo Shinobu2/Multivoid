@@ -41,6 +41,7 @@
 #include "coop/player/puppet_drive.h"
 #include "coop/player/remote_player.h"
 #include "coop/player/roster.h"
+#include "coop/player/stat_orders_wire.h"
 #include "coop/props/container_park.h"
 #include "coop/props/container_write_policy.h"
 #include "coop/props/prop_lifecycle.h"
@@ -208,6 +209,10 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // And the bug report's redactor, form check and the printed forms it rests on: a redactor that
     // misses a shape leaves a stranger's address in a file a player sends, and nothing else notices.
     coop::bug_report::RunSelftest();
+    // And the order / query wire an admin's commands will ride: a length or a float taken on trust
+    // faults the host on a client's bytes, and a token table that answers the wrong slot answers an
+    // order nobody sent.
+    coop::stat_orders::RunSelftest();
     // And the newest-wins latch every received stream keeps: no LAN run reorders a datagram, so the
     // batch that arrives behind one already taken is refused here, on pinned sequences.
     coop::net::stream_slot::RunSelftest();

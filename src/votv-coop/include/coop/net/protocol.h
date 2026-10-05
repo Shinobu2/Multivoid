@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 213;
+inline constexpr uint16_t kProtocolVersion = 214;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -3295,6 +3295,72 @@ struct JoinPhaseNotePayload {
     uint32_t total;
 };
 static_assert(sizeof(JoinPhaseNotePayload) == 12, "JoinPhaseNotePayload must be 12 bytes");
+
+// The admin's order and query of one player's stats and effects (coop/player/stat_orders_wire; the
+// kinds that carry them come with their handlers). The packing, every check of a peer's bytes and
+// the table of the tokens awaiting an answer live in that module.
+constexpr int kStatRows = 22;        // the stat table's rows (ue_wrap::vitals::Field::Count), carried by a query reply
+constexpr int kStatEffectName = 12;  // an effect name: up to 11 ASCII characters and a NUL
+
+// Host to one client: set a row, add an effect or remove one. `token` is the host's, echoed in the reply.
+struct StatOrderPayload {
+    uint32_t token;
+    uint8_t  op;       // stat_orders::Op
+    uint8_t  field;    // the stat table's row, for a set
+    uint16_t pad;
+    float    value;    // a set's value
+    float    strength; // an added effect's strength
+    float    seconds;  // an added effect's seconds
+    char     effect[kStatEffectName];
+};
+static_assert(sizeof(StatOrderPayload) == 32, "StatOrderPayload must be 32 bytes");
+static_assert(sizeof(StatOrderPayload) <= 256 - 20 - 8,
+              "StatOrderPayload must fit in one reliable datagram");
+
+// Client to host: what became of the order. `valueNow` is the row's read after the write, or the
+// number of live entries of the effect's name listed after.
+struct StatOrderReplyPayload {
+    uint32_t token;
+    uint8_t  result;   // stat_orders::Result, 0-3 on the wire
+    uint8_t  op;
+    uint16_t pad;
+    float    valueNow;
+};
+static_assert(sizeof(StatOrderReplyPayload) == 12, "StatOrderReplyPayload must be 12 bytes");
+static_assert(sizeof(StatOrderReplyPayload) <= 256 - 20 - 8,
+              "StatOrderReplyPayload must fit in one reliable datagram");
+
+// Host to one client: send the whole stat table and the effects.
+struct StatQueryPayload {
+    uint32_t token;
+};
+static_assert(sizeof(StatQueryPayload) == 4, "StatQueryPayload must be 4 bytes");
+static_assert(sizeof(StatQueryPayload) <= 256 - 20 - 8,
+              "StatQueryPayload must fit in one reliable datagram");
+
+struct StatEffectEntry {
+    char     name[kStatEffectName];
+    float    strength;
+    float    time;
+    uint8_t  live;
+};
+static_assert(sizeof(StatEffectEntry) == 21, "StatEffectEntry must be 21 bytes");
+
+// Client to host: every row's value with a mask of the rows that read, the first five effect
+// entries and the total. 23 bytes are left: five more rows (row 27); a 28th row changes this layout.
+struct StatQueryReplyPayload {
+    uint32_t token;
+    uint32_t validMask;               // bit i: row i read
+    float    values[kStatRows];
+    uint8_t  effectTotal;             // the effects listed, clamped to 255
+    uint8_t  effectCount;             // the entries below
+    uint8_t  result;                  // stat_orders::Result, 0-3 on the wire
+    uint8_t  pad;
+    StatEffectEntry effects[5];
+};
+static_assert(sizeof(StatQueryReplyPayload) == 205, "StatQueryReplyPayload must be 205 bytes");
+static_assert(sizeof(StatQueryReplyPayload) <= 256 - 20 - 8,
+              "StatQueryReplyPayload must fit in one reliable datagram");
 
 #pragma pack(pop)
 

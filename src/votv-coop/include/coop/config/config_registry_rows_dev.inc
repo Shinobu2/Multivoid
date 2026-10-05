@@ -85,7 +85,9 @@ CFG_FLAG(selftest_break_bug_report, "selftest_break_bug_report", "dev", false, "
     "Makes the bug-report selftest fail one check on purpose (a red arm).")
 CFG_FLAG(selftest_break_atomic_file, "selftest_break_atomic_file", "dev", false, "VOTVCOOP_SELFTEST_BREAK_ATOMIC_FILE",
     "Makes the atomic-file selftest fail one check on purpose (a red arm).")
-CFG_FLAG(selftest_break_identity, "selftest_break_identity", "dev", false, "VOTVCOOP_SELFTEST_BREAK_IDENTITY",
+CFG_FLAG(selftest_break_stat_orders, "selftest_break_stat_orders", "dev", false, "VOTVCOOP_SELFTEST_BREAK_STAT_ORDERS",
+    "Makes the stat-order wire selftest fail one check on purpose (a red arm).")
+CFG_FLAG(selftest_break_identity,"selftest_break_identity", "dev", false, "VOTVCOOP_SELFTEST_BREAK_IDENTITY",
     "Makes the identity selftest's key-write case fail on purpose (a red arm).")
 CFG_ENUM(subject_drill, "subject_drill", "dev", "off", "off|insert|own|carry|carryred", "VOTVCOOP_SUBJECT_DRILL",
     "Drill (BOTH peers), a remote action never takes the local player as its subject. insert: before any "
