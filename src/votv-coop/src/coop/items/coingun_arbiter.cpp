@@ -14,6 +14,7 @@
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
+#include "coop/player/roster_ledger.h"   // PerSlotState: the refusal throttle leaves with its sender
 #include "coop/player/remote_player.h"   // the sender's puppet body, its reach
 #include "coop/props/prop_echo_suppress.h"   // MarkArbiterConsumedKey
 #include "coop/props/prop_element_tracker.h"
@@ -26,6 +27,7 @@
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/engine/engine.h"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -117,10 +119,10 @@ bool Refuse(coop::net::Session* s, uint8_t slot, coop::net::CoinGunResultCode co
     SendResult(s, slot, code, 0);
     // Per sender as well as per code: a global counter would let one peer's flood silence another's
     // first legitimate refusal.
-    static uint32_t sSeen[8][coop::players::kMaxPeers] = {};
+    static coop::roster_ledger::PerSlotState<std::array<uint32_t, 8>> sSeen;
     const unsigned ci = static_cast<unsigned>(code) < 8u ? static_cast<unsigned>(code) : 0u;
     const unsigned si = slot < coop::players::kMaxPeers ? slot : 0u;
-    const uint32_t n = ++sSeen[ci][si];
+    const uint32_t n = ++sSeen[static_cast<int>(si)][ci];
     return n <= 5 || (n <= 100 && n % 10 == 0) || n % 100 == 0;
 }
 

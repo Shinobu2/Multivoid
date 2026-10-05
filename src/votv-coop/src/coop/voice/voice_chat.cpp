@@ -368,12 +368,17 @@ void ReplayPeerStatesToSlot(int peerSlot) {
 void OnDisconnectSlot(int slot) {
     if (slot < 0 || slot >= coop::net::kMaxPeers) return;
     g_playback.ResetSlot(slot);
+    // The local player's volume for the person in this slot leaves with them; not in ResetSlot,
+    // which also runs at a device reopen (Tick) for people who stay.
+    g_playback.SetSlotVolume(slot, 1.0f);
     g_peerState[slot] = WireState{};
 }
 
 void OnDisconnect() {
     g_capture.Stop();
     g_playback.Stop();
+    // A session's volumes end with it (Stop returns early when playback never ran, so it cannot be the place).
+    for (int i = 0; i < coop::net::kMaxPeers; ++i) g_playback.SetSlotVolume(i, 1.0f);
     g_started = false;
     g_installed = false;   // the next session's Install must decide again
     g_sentOnce = false;

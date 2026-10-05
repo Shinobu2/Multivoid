@@ -59,7 +59,9 @@ public:
     void SetListener(float x, float y, float z, float yawDeg);
     void SetSpeaker(int slot, float x, float y, float z, bool valid);
 
-    // Game thread: a peer left -- drop its channel state.
+    // Game thread: drop a channel's stream state -- when its peer left, and for every slot at Stop,
+    // which also runs at a device reopen while everyone stays. The per-person volume is not stream
+    // state: voice_chat resets it where the person leaves.
     void ResetSlot(int slot);
 
     // Icon surface (any thread). True if a frame decoded < 250 ms ago.

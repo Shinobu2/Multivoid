@@ -10,6 +10,7 @@
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"  // kMaxPeers
+#include "coop/player/roster_ledger.h"     // PerSlotState
 
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
@@ -173,7 +174,7 @@ void ApplyState(const coop::net::ServerStatePayload& p) {
 
 // ---- the verbs at the gate ------------------------------------------------------------------------
 std::chrono::steady_clock::time_point g_nextBreakSay{}, g_nextFixSay{};
-std::chrono::steady_clock::time_point g_nextRefusedSay[coop::players::kMaxPeers]{};
+coop::roster_ledger::PerSlotState<std::chrono::steady_clock::time_point> g_nextRefusedSay;
 
 bool SayNow(std::chrono::steady_clock::time_point& next) {
     const auto now = std::chrono::steady_clock::now();
