@@ -33,13 +33,18 @@ struct HolderKey {
 
 enum class EditResult : uint8_t { Changed, NoChange, Refused, OwnerLoses };
 
+// Who refused: the change itself (a rule of the leaf, a missing group), the store as it is (`before`
+// did not load), or the result (the candidate did not load: the next host start would refuse it).
+enum class RefusedBy : uint8_t { Change, Store, Candidate };
+
 struct EditPlan {
     EditResult result = EditResult::Refused;
+    RefusedBy refusedBy = RefusedBy::Change;
     // Refused: the change's text, or the loader's first problem; OwnerLoses: the node.
     std::string why;
-    // Refused by the loader: every problem (the host answers the first five).
+    // Refused by the loader (Store, Candidate): every problem (the host answers the first five).
     std::vector<std::string> problems;
-    // Changed: the next live model.
+    // Changed: the next live model. NoChange: `before`, the disk's reading, which the host publishes.
     Model candidate;
     // Changed: the holder's file goes.
     bool deleteFile = false;
@@ -50,14 +55,15 @@ struct EditPlan {
 // Plans `change` applied to the holder `key` of the store `texts` (as ReadStoreTexts returned them).
 // `change` edits the copy through the Model API. It returns false ONLY to refuse (a missing group,
 // an invalid key, a rule of the leaf), with `*why`; a Model setter's own `false` that means
-// "already so" is NOT a refusal and the closure returns true: NoChange is the plan's answer, from
-// the holder's outcome before and after. When `callerIsOwner` is false, every node of `nodes` is
-// judged for `ownerId`, and an empty `ownerId` refuses ("The host's identity is not loaded.").
-// Steps: the texts must load; `change`; the holder's outcome (no file, or its text without
-// pruning) before and after, equal = NoChange; the new text (pruned) or a delete; the texts with
-// that one replaced, added or removed must load; the text is then the loader's own reading of the
-// holder (the candidate's holder serialised again, pruned: when it differs it replaces the text and
-// the candidate is built once more); the owner invariant. PURE: nothing is read or written.
+// "already so" is NOT a refusal and the closure returns true. When `callerIsOwner` is false, every
+// node of `nodes` is judged for `ownerId`, and an empty `ownerId` refuses ("The host's identity is
+// not loaded."). Steps: the texts must load; `change`; the new text (pruned) or a delete; the texts
+// with that one replaced, added or removed must load; the text is then the loader's own reading of
+// the holder (the candidate's holder serialised again, pruned: when it differs it replaces the
+// text and the candidate is built once more); NoChange when that final text equals the holder's
+// entry in `texts` byte for byte, or both are absent (a hand-written file the change left the same
+// in meaning is still rewritten in canonical form; a deny the default step overrides is no
+// change); the owner invariant. PURE: nothing is read or written.
 EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& key,
                   const std::function<bool(Model& copy, std::string* why)>& change, bool callerIsOwner,
                   std::string_view ownerId, const ContextSet& subject, int64_t now,
@@ -69,5 +75,23 @@ EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& key,
 // takes a node away from the owner. PURE.
 bool OwnerLoses(const Model& before, const Model& after, std::string_view ownerId, const ContextSet& subject,
                 int64_t now, const std::vector<std::string>& nodes, std::string* which);
+
+// One permission change as the host logs it and appends it to the action log: who (the proved id
+// and the nick), what it acted on (`user` or `group`, its id or name, its display name) and the
+// description (`/mv ` and the canonical line). LuckPerms' LoggedAction fields
+// (LoggedAction.java:69-72).
+struct Action {
+    std::string sourceId, sourceName, targetType, targetId, targetName, description;
+};
+
+// The lines a host answers for a list of loader problems: at most five, each at most 200 bytes
+// INCLUDING the `...` it ends with when it was cut (cut on a UTF-8 boundary at or before byte 197),
+// then `... and N more` when there are more than five. PURE.
+std::vector<std::string> ProblemLines(const std::vector<std::string>& problems);
+
+// The action log's line without its `\n`: the compact `ordered_json` `{"timestamp", "source": {"id",
+// "name"}, "target": {"type", "id", "name"}, "description"}` in that key order, `timestamp` in epoch
+// seconds, a byte that is not UTF-8 replaced (ActionJsonSerializer's keys). PURE.
+std::string ActionJson(const Action& a, int64_t timestamp);
 
 }  // namespace coop::permissions

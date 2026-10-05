@@ -1,6 +1,7 @@
 // coop/permissions/permissions_cases_edit.cpp -- the checks of coop/permissions/permission_edit.h:
 // an edit planned over the store's texts as read, the file text it yields, the candidate model the
-// loader builds from the texts with that one replaced, and the owner invariant.
+// loader builds from the texts with that one replaced, the owner invariant, who refused, the
+// problem lines a host answers and the action log's line.
 
 #include "coop/permissions/permission_edit.h"
 #include "coop/permissions/permissions_selftest.h"
@@ -231,6 +232,130 @@ void LoaderReadingCases(CheckSink& sink) {
                "edit: a deny of group.default, which the default step overrides, is not written");
 }
 
+// The canonical text of a holder after the loader read `text` for it: what an edit writes, and so
+// what the store holds once an edit has written it.
+std::string CanonicalUser(const std::vector<HolderText>& others, const std::string& id, const std::string& text) {
+    std::vector<HolderText> texts = others;
+    texts.push_back({id, false, text});
+    Model m;
+    LoadHolders(texts, m);
+    const Holder* h = m.FindUser(id);
+    return h != nullptr ? SerializeHolder(*h, kNow, true) : std::string();
+}
+
+// NoChange is the stored bytes' verdict, and its candidate is what the disk holds.
+void StoredBytesCases(CheckSink& sink) {
+    Model made;
+    made.CreateGroup("staff");
+    made.SetNode(HolderKind::Group, "staff", N("staff.use"));
+    made.SetNode(HolderKind::User, Id('a'), N("group.staff"));
+    const std::string staffText = SerializeHolder(*made.FindGroup("staff"), kNow, true);
+    const std::string memberText = SerializeHolder(*made.FindUser(Id('a')), kNow, true);
+    const std::vector<HolderText> texts = {{"staff", true, staffText}, {Id('a'), false, memberText}};
+    const EditPlan same = Plan(texts, {HolderKind::Group, "staff"}, [](Model& m, std::string*) {
+        m.SetNode(HolderKind::Group, "staff", N("staff.use"));
+        return true;
+    });
+    sink.Check(same.result == EditResult::NoChange && Allows(same.candidate, Id('a'), "staff.use"),
+               "edit: no change, and the candidate is what the texts grant");
+
+    // A hand-written file the edit does not change in meaning is rewritten in canonical form.
+    const std::string id = Id('1');
+    const std::string handWritten = R"({"primaryGroup":"default","permissions":["group.default","a.b"]})";
+    const EditPlan rewrite = Plan({{id, false, handWritten}}, {HolderKind::User, id}, [&](Model& m, std::string*) {
+        m.SetNode(HolderKind::User, id, N("a.b"));
+        return true;
+    });
+    sink.Check(rewrite.result == EditResult::Changed && !rewrite.deleteFile && rewrite.text != handWritten &&
+                   rewrite.text == CanonicalUser({}, id, handWritten),
+               "edit: a hand-written file the edit leaves the same in meaning is rewritten as a change");
+
+    // A deny of group.default is overridden by the default step: over the canonical file it writes
+    // nothing, so it is no change.
+    const std::string denied = R"({"primaryGroup":"default","permissions":["x.y"]})";
+    const std::string canonical = CanonicalUser({}, id, denied);
+    const EditPlan deny = Plan({{id, false, canonical}}, {HolderKind::User, id}, [&](Model& m, std::string*) {
+        m.SetNode(HolderKind::User, id, N("group.default", false));
+        return true;
+    });
+    sink.Check(deny.result == EditResult::NoChange && Allows(deny.candidate, id, "x.y"),
+               "edit: a deny of group.default over the canonical file is no change");
+}
+
+// Who refused is told apart: the closure, the store as it is, the result.
+void RefusedByCases(CheckSink& sink) {
+    const EditPlan change = Plan({}, {HolderKind::Group, "nowhere"}, [](Model&, std::string* why) {
+        *why = "No such group.";
+        return false;
+    });
+    sink.Check(change.result == EditResult::Refused && change.refusedBy == RefusedBy::Change,
+               "edit: a closure's refusal is the change's");
+
+    const EditPlan store = Plan({{"a", true, R"({"parents":["ghost"]})"}}, {HolderKind::Group, "a"},
+                                [](Model&, std::string*) { return true; });
+    sink.Check(store.result == EditResult::Refused && store.refusedBy == RefusedBy::Store,
+               "edit: texts that do not load are the store's refusal");
+
+    const std::string id = Id('2');
+    const std::string member = R"({"primaryGroup":"staff","permissions":["group.staff"]})";
+    const EditPlan candidate = Plan({{"staff", true, "{}"}, {id, false, member}}, {HolderKind::Group, "staff"},
+                                    [](Model& m, std::string*) {
+                                        m.DeleteGroup("staff");
+                                        return true;
+                                    });
+    sink.Check(candidate.result == EditResult::Refused && candidate.refusedBy == RefusedBy::Candidate &&
+                   !candidate.problems.empty(),
+               "edit: a delete of a group a holder names is the result's refusal");
+}
+
+void ProblemLinesCases(CheckSink& sink) {
+    const std::vector<std::string> three = {"a", "b", "c"};
+    sink.Check(ProblemLines(three) == three, "problem lines: three problems are three lines");
+
+    std::vector<std::string> seven;
+    for (int i = 1; i <= 7; ++i) seven.push_back("p" + std::to_string(i));
+    const std::vector<std::string> cut = ProblemLines(seven);
+    sink.Check(cut.size() == 6 && cut[4] == "p5" && cut[5] == "... and 2 more",
+               "problem lines: seven problems are five lines and the count of the rest");
+
+    const std::vector<std::string> ascii = ProblemLines({std::string(250, 'x')});
+    sink.Check(ascii.size() == 1 && ascii[0] == std::string(197, 'x') + "..." && ascii[0].size() == 200,
+               "problem lines: a long ASCII problem is its first 197 bytes and the dots");
+
+    // A 3-byte character (U+20AC) over bytes 195..197 is dropped whole; one that starts at byte 197
+    // is dropped whole as well.
+    const std::string euro = "\xE2\x82\xAC";
+    const std::vector<std::string> across = ProblemLines({std::string(195, 'x') + euro + std::string(60, 'y')});
+    sink.Check(across.size() == 1 && across[0] == std::string(195, 'x') + "...",
+               "problem lines: a character across byte 197 is cut before it");
+
+    const std::vector<std::string> exact = ProblemLines({std::string(200, 'z'), std::string(201, 'z')});
+    sink.Check(exact.size() == 2 && exact[0] == std::string(200, 'z') && exact[1] == std::string(197, 'z') + "...",
+               "problem lines: 200 bytes stay whole and 201 are cut");
+}
+
+void ActionJsonCases(CheckSink& sink) {
+    Action a;
+    a.sourceId = Id('a');
+    a.sourceName = "Host";
+    a.targetType = "user";
+    a.targetId = Id('b');
+    a.targetName = "Bob";
+    a.description = "/mv user " + Id('b') + " permission set a.b true";
+    const std::string want = R"({"timestamp":1700000000,"source":{"id":")" + Id('a') +
+                             R"(","name":"Host"},"target":{"type":"user","id":")" + Id('b') +
+                             R"(","name":"Bob"},"description":"/mv user )" + Id('b') +
+                             R"( permission set a.b true"})";
+    sink.Check(ActionJson(a, kNow) == want, "action json: the compact line, its keys in order");
+
+    a.sourceName = std::string("Bo\"b\x01");
+    a.targetName = "\xFF";
+    const std::string escaped = ActionJson(a, kNow);
+    sink.Check(Has(escaped, R"("name":"Bo\"b\u0001")") && Has(escaped, "\"name\":\"\xEF\xBF\xBD\"") &&
+                   escaped.find('\n') == std::string::npos,
+               "action json: a quote and a control byte are escaped, a byte that is not UTF-8 is replaced");
+}
+
 }  // namespace
 
 void RunEditCases(CheckSink& sink) {
@@ -241,6 +366,10 @@ void RunEditCases(CheckSink& sink) {
     OwnerCases(sink);
     RefusalCases(sink);
     LoaderReadingCases(sink);
+    StoredBytesCases(sink);
+    RefusedByCases(sink);
+    ProblemLinesCases(sink);
+    ActionJsonCases(sink);
 }
 
 }  // namespace coop::permissions

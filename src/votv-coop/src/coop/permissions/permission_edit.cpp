@@ -4,7 +4,10 @@
 
 #include "coop/permissions/resolution.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
+#include <string>
 #include <utility>
 
 namespace coop::permissions {
@@ -21,16 +24,6 @@ const Holder* FindHolder(const Model& m, const HolderKey& key) {
     return key.kind == HolderKind::Group ? m.FindGroup(key.name) : m.FindUser(key.name);
 }
 
-// What the holder's file is, as the edit sees it: false for no file (the holder is absent, or a user
-// in the default state), else true with the text the holder serialises to without pruning. An
-// expired node is part of it: removing one is a change, and the file may go with it.
-bool Outcome(const Holder* h, int64_t now, std::string* text) {
-    if (h == nullptr) return false;
-    if (h->kind == HolderKind::User && IsDefaultUser(*h, now, false)) return false;
-    *text = SerializeHolder(*h, now, false);
-    return true;
-}
-
 // The file a holder is written as: false for none (the holder is absent, or a user in the default
 // state once what has expired is pruned), else true with the pruned text.
 bool FileText(const Holder* h, int64_t now, std::string* text) {
@@ -38,6 +31,15 @@ bool FileText(const Holder* h, int64_t now, std::string* text) {
     if (h->kind == HolderKind::User && IsDefaultUser(*h, now, true)) return false;
     *text = SerializeHolder(*h, now, true);
     return true;
+}
+
+// The entry of `key` in `texts` (a group or a user, its lower-cased stem), or null.
+const HolderText* EntryOf(const std::vector<HolderText>& texts, const HolderKey& key) {
+    const bool group = key.kind == HolderKind::Group;
+    const auto it = std::find_if(texts.begin(), texts.end(), [&](const HolderText& t) {
+        return t.group == group && Lowered(t.stem) == key.name;
+    });
+    return it == texts.end() ? nullptr : &*it;
 }
 
 // `texts` with the entry of `key` replaced by `text`, removed (null `text`), or, when the store has
@@ -67,9 +69,10 @@ std::vector<HolderText> WithEntry(const std::vector<HolderText>& texts, const Ho
     return out;
 }
 
-EditPlan Refuse(std::string why, std::vector<std::string> problems = {}) {
+EditPlan Refuse(RefusedBy by, std::string why, std::vector<std::string> problems = {}) {
     EditPlan plan;
     plan.result = EditResult::Refused;
+    plan.refusedBy = by;
     plan.why = std::move(why);
     plan.problems = std::move(problems);
     return plan;
@@ -96,7 +99,7 @@ EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& keyIn,
                   const std::function<bool(Model& copy, std::string* why)>& change, bool callerIsOwner,
                   std::string_view ownerId, const ContextSet& subject, int64_t now,
                   const std::vector<std::string>& nodes) {
-    if (!callerIsOwner && ownerId.empty()) return Refuse("The host's identity is not loaded.");
+    if (!callerIsOwner && ownerId.empty()) return Refuse(RefusedBy::Change, "The host's identity is not loaded.");
     const HolderKey key{keyIn.kind, Lowered(keyIn.name)};
 
     Model before;
@@ -104,21 +107,12 @@ EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& keyIn,
     if (!ShouldLoad(beforeReport)) {
         // The message is built before the call: Refuse takes the vector by value.
         std::string why = "The permission files do not load: " + beforeReport.problems.front();
-        return Refuse(std::move(why), std::move(beforeReport.problems));
+        return Refuse(RefusedBy::Store, std::move(why), std::move(beforeReport.problems));
     }
 
     Model copy = before;
     std::string why;
-    if (!change(copy, &why)) return Refuse(std::move(why));
-
-    std::string beforeText, copyText;
-    const bool beforeHasFile = Outcome(FindHolder(before, key), now, &beforeText);
-    const bool copyHasFile = Outcome(FindHolder(copy, key), now, &copyText);
-    if (beforeHasFile == copyHasFile && beforeText == copyText) {
-        EditPlan plan;
-        plan.result = EditResult::NoChange;
-        return plan;
-    }
+    if (!change(copy, &why)) return Refuse(RefusedBy::Change, std::move(why));
 
     // The text written is what the loader reads back. The first text is the copy's holder, pruned of
     // what has expired; the candidate built from it may differ from the copy (a pruned parent leaves
@@ -135,6 +129,7 @@ EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& keyIn,
         if (ShouldLoad(report)) return true;
         // The next host start would refuse the same files.
         plan.result = EditResult::Refused;
+        plan.refusedBy = RefusedBy::Candidate;
         plan.why = report.problems.front();
         plan.problems = std::move(report.problems);
         return false;
@@ -147,6 +142,16 @@ EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& keyIn,
         newText = std::move(reread);
         if (!build()) return plan;
     }
+    // NoChange is judged on the bytes the store holds: the final text against the holder's entry, or
+    // both absent. A hand-written file the command leaves the same in meaning is rewritten in
+    // canonical form (a change); a deny the default step overrides writes nothing (no change).
+    const HolderText* stored = EntryOf(texts, key);
+    if (deleteFile ? stored == nullptr : (stored != nullptr && stored->text == newText)) {
+        EditPlan same;
+        same.result = EditResult::NoChange;
+        same.candidate = std::move(before);  // the disk's reading, which the host publishes
+        return same;
+    }
     if (!callerIsOwner && OwnerLoses(before, plan.candidate, ownerId, subject, now, nodes, &plan.why)) {
         plan.result = EditResult::OwnerLoses;
         return plan;
@@ -155,6 +160,43 @@ EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& keyIn,
     plan.deleteFile = deleteFile;
     plan.text = std::move(newText);
     return plan;
+}
+
+std::vector<std::string> ProblemLines(const std::vector<std::string>& problems) {
+    constexpr size_t kMaxLines = 5;
+    constexpr size_t kMaxBytes = 200;
+    constexpr size_t kDots = 3;  // the `...` a cut line ends with, counted in kMaxBytes
+    std::vector<std::string> lines;
+    const size_t shown = std::min(problems.size(), kMaxLines);
+    for (size_t i = 0; i < shown; ++i) {
+        const std::string& p = problems[i];
+        if (p.size() <= kMaxBytes) {
+            lines.push_back(p);
+            continue;
+        }
+        // The kept prefix ends where the first dropped byte starts a character.
+        size_t keep = kMaxBytes - kDots;
+        while (keep > 0 && (static_cast<unsigned char>(p[keep]) & 0xC0) == 0x80) --keep;
+        lines.push_back(p.substr(0, keep) + "...");
+    }
+    if (problems.size() > kMaxLines)
+        lines.push_back("... and " + std::to_string(problems.size() - kMaxLines) + " more");
+    return lines;
+}
+
+std::string ActionJson(const Action& a, int64_t timestamp) {
+    using OJson = nlohmann::ordered_json;
+    OJson line = OJson::object();
+    line["timestamp"] = timestamp;
+    line["source"] = OJson::object();
+    line["source"]["id"] = a.sourceId;
+    line["source"]["name"] = a.sourceName;
+    line["target"] = OJson::object();
+    line["target"]["type"] = a.targetType;
+    line["target"]["id"] = a.targetId;
+    line["target"]["name"] = a.targetName;
+    line["description"] = a.description;
+    return line.dump(-1, ' ', false, OJson::error_handler_t::replace);
 }
 
 }  // namespace coop::permissions

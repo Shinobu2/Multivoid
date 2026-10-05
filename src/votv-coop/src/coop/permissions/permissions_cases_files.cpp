@@ -378,7 +378,7 @@ void DiskCases(CheckSink& sink, const std::filesystem::path& scratch) {
                    again.size() == 1 && again[0].text == second,
                "disk: a second write replaces the file whole");
 
-    sink.Check(WriteHolderFile(scratch, true, "staff", nullptr).ok() && !fs::exists(file, ec) &&
+    sink.Check(WriteHolderFile(scratch, true, "staff", nullptr).ok() && !fs::exists(file, ec) && !ec &&
                    WriteHolderFile(scratch, true, "staff", nullptr).ok() &&
                    WriteHolderFile(scratch, false, Id('a'), nullptr).ok(),
                "disk: a delete removes the file, and a delete of a missing file or folder is ok");
