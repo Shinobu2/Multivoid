@@ -7,8 +7,11 @@ temporary working directory with stdout and stderr captured. The fake answers on
 commands keygen may run, with the output a real `gh` prints (so an echo of it is seen), and acts
 on the keyword arguments the way `subprocess.run` does. Two mutants are always run and the same
 assertion helper as the green arms must flag each of them. The drill names a repository that does
-not exist, and for its whole run `release_sign`'s own reference to `subprocess` answers `run` with
-an AssertionError, so a bypass of the injected runner is a FAIL line and starts nothing.
+not exist, and for its whole run every route to a process refuses with an AssertionError:
+`subprocess.Popen` (which `run`, `check_output`, `check_call`, `call` and a by-name `run` all reach),
+`release_sign`'s own `subprocess.run`, and its own `os` process routes (`system`, `popen`, `spawn*`,
+`exec*`, `startfile`). A bypass of the injected runner is then a FAIL line and starts no process
+through those routes; the guards are restored when the run ends.
 
 Run: python -I -B .github/ci/release_sign_keygen_drill.py
 """
@@ -42,6 +45,9 @@ leaks = lib.leaks
 
 
 REAL_RUN = subprocess.run
+REAL_POPEN = subprocess.Popen
+REAL_OS = os
+REAL_SYSTEM = os.system
 REPO = "drill-owner/drill-repo"
 ENV_ARGV = ["gh", "api", "repos/%s/environments/release" % REPO]
 POLICIES_ARGV = ["gh", "api", "repos/%s/environments/release/deployment-branch-policies" % REPO]
@@ -160,21 +166,37 @@ def via_main(args, runner, out):
                    runner=runner)
 
 
+def refuse(*args, **kwargs):
+    raise AssertionError("the drill must never start a process")
+
+
+def process_routes(namespace):
+    """The names in `namespace` that start a process on this platform."""
+    return [n for n in dir(namespace)
+            if n in ("system", "popen", "startfile") or n.startswith(("spawn", "exec"))]
+
+
 @contextlib.contextmanager
 def no_process():
-    """`release_sign`'s own `subprocess` is replaced by a copy whose `run` raises: the copy is local
-    to that module's namespace, so the shared standard library module is never touched."""
-    def refuse(*args, **kwargs):
-        raise AssertionError("the drill must never start a process")
-
-    real = rs.subprocess
-    stub = types.SimpleNamespace(**vars(real))
-    stub.run = refuse
-    rs.subprocess = stub
+    """Every route to a process refuses for the run. `subprocess.Popen` is replaced on the shared
+    module, because `run`, `check_output`, `check_call`, `call` and a `run` imported by name all
+    reach it through the module's globals; `release_sign`'s own `subprocess` (its `run` and `Popen`)
+    and its own `os` process routes (`system`, `popen`, `spawn*`, `exec*`, `startfile`) are replaced
+    by copies local to that module's namespace. Nothing else is blocked; all are restored in the
+    `finally`."""
+    real_sub, real_os, real_popen = rs.subprocess, rs.os, subprocess.Popen
+    sub_stub = types.SimpleNamespace(**vars(real_sub))
+    sub_stub.run = sub_stub.Popen = refuse
+    os_stub = types.SimpleNamespace(**vars(real_os))
+    for name in process_routes(real_os):
+        setattr(os_stub, name, refuse)
+    rs.subprocess, rs.os = sub_stub, os_stub
+    subprocess.Popen = refuse
     try:
         yield
     finally:
-        rs.subprocess = real
+        subprocess.Popen = real_popen
+        rs.subprocess, rs.os = real_sub, real_os
 
 
 def keygen_flaws(keygen, fake, table, key_id=2, seeds=None):
@@ -406,13 +428,10 @@ def drill_keygen_wiring():
           rs._REPO.fullmatch(REPO) is not None)
     check("main's default runner is subprocess.run",
           inspect.signature(rs.main).parameters["runner"].default is REAL_RUN)
-    try:
-        rs.subprocess.run(["gh"])
-        armed = False
-    except AssertionError:
-        armed = True
-    check("the process guard is armed and subprocess.run itself is untouched",
-          armed and subprocess.run is REAL_RUN)
+    check("the process guards are armed (nothing is started to prove it)",
+          rs.subprocess is not subprocess and rs.subprocess.run is not REAL_RUN
+          and subprocess.Popen is not REAL_POPEN and rs.os is not REAL_OS
+          and rs.os.system is not REAL_SYSTEM)
 
 
 def main():
@@ -422,6 +441,10 @@ def main():
         for group in (drill_keygen_green, drill_keygen_mutants, drill_keygen_refuses,
                       drill_keygen_secret, drill_keygen_readback, drill_keygen_ids):
             guarded(group, tmp)
+    check("the process guards are restored after the run: subprocess.run, subprocess.Popen, "
+          "release_sign's subprocess and os, and os.system",
+          subprocess.run is REAL_RUN and subprocess.Popen is REAL_POPEN
+          and rs.subprocess is subprocess and rs.os is REAL_OS and os.system is REAL_SYSTEM)
     return lib.finish("release_sign keygen drill")
 
 
