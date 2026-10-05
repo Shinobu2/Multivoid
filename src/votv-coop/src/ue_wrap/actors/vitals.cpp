@@ -72,6 +72,15 @@ constexpr bool RowsInOrder() {
 static_assert(kRowCount == static_cast<size_t>(Field::Count), "one row per Field value");
 static_assert(RowsInOrder(), "kRows[i].field == i: a reordered row does not compile");
 
+// The snapshot's rows are the leading save-slot floats, ending on Agility.
+constexpr bool SnapshotRowsShape() {
+    for (size_t i = 0; i < kSnapshotRows; ++i)
+        if (kRows[i].owner != Owner::SaveSlot || kRows[i].type != Type::Float) return false;
+    return kRows[kSnapshotRows - 1].field == Field::Agility;
+}
+static_assert(kSnapshotRows <= kRowCount && SnapshotRowsShape(),
+              "rows 0..kSnapshotRows-1 are SaveSlot floats and the last is Agility");
+
 // Where each row's property sits on its owner's class. mask 0 is a Float; a Bool carries its byte
 // and bit mask. -1: it did not resolve for the class the owner's stamp names.
 struct Resolved { int32_t off = -1; uint8_t mask = 0; };
