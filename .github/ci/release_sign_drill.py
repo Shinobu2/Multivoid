@@ -101,6 +101,7 @@ def drill_ed25519():
         check(tag + " refuses a 63-byte signature", rs.ed25519_verify(pub, msg, sig[:63]) is False)
     sec, pub, msg, sig = (bytes.fromhex(v) for v in RFC_VECTORS[1])
     big_s = int.from_bytes(sig[32:], "little") + rs._L
+    # The game's own verifier checks only the top bits of S, so it is laxer than this one here.
     check("ed25519 refuses S plus the group order",
           not rs.ed25519_verify(pub, msg, sig[:32] + big_s.to_bytes(32, "little")))
     check("ed25519 refuses a 31-byte public key", rs.ed25519_verify(pub[:31], msg, sig) is False)

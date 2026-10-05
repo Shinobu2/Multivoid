@@ -5,8 +5,8 @@
     python -I -B .github/ci/release_sign.py verify --dll <path> --sig <path> [--trust-test-key]
 
 `sign` writes the six-line `.sig` file the game parses (`coop/build_trust`): the DLL's SHA-256, the
-build it belongs to and an Ed25519 signature over `signed_message`. `verify` is the same judgement
-the game makes, in the same order, and prints which step refused.
+build it belongs to and an Ed25519 signature over `signed_message`. `verify` applies the same
+grammar and steps as the game, with the RFC's stricter range for S, and prints which step refused.
 
 The job that holds the release key installs nothing, so the signature scheme is written here from
 the algorithm of RFC 8032 section 5.1 (field arithmetic, point encoding and decoding, extended
