@@ -191,68 +191,65 @@ bool ReportMentions(const LoadReport& r, std::string_view needle) {
     return false;
 }
 
-// A store held in memory, loaded through LoadHolders as a store read from disk is.
-struct MemoryStore {
-    Model model;
-    LoadReport report;
-};
-
-MemoryStore LoadMemory(const std::vector<HolderText>& texts) {
-    MemoryStore s;
-    s.report = LoadHolders(texts, s.model);
-    return s;
-}
-
 void WholeStoreCases(CheckSink& sink) {
     // A report with a problem is a broken store (ShouldLoad false); a report without one, and the
-    // report of a server with no store, are not.
-    const MemoryStore clean = LoadMemory({{"a", true, R"({"parents":["b"],"permissions":["ok.node"]})"},
+    // report of a server with no store, are not. Each store is a HolderText vector loaded through
+    // LoadHolders, as the texts read from disk are.
+    Model cleanModel;
+    const LoadReport clean = LoadHolders({{"a", true, R"({"parents":["b"],"permissions":["ok.node"]})"},
                                           {"b", true, R"({"permissions":["other.node"]})"},
-                                          {Id('a'), false, R"({"primaryGroup":"a","parents":["a"]})"}});
-    sink.Check(clean.report.problems.empty() && clean.report.groups == 2 && clean.report.users == 1 &&
-                   ShouldLoad(clean.report),
+                                          {Id('a'), false, R"({"primaryGroup":"a","parents":["a"]})"}},
+                                         cleanModel);
+    sink.Check(clean.problems.empty() && clean.groups == 2 && clean.users == 1 && ShouldLoad(clean),
                "whole: a clean store loads, a parent group that sorts later is no miss");
 
     const Parsed bad = Parse(R"({"permissions":[{"permission":"deny.me","value":"no"},"b"]})");
-    const MemoryStore oneBad =
-        LoadMemory({{"a", true, R"({"permissions":["ok.node"]})"},
-                    {"b", true, R"({"permissions":[{"permission":"deny.me","value":"no"},"b"]})"},
-                    {Id('a'), false, R"({"permissions":["ok.node"]})"}});
-    sink.Check(HasProblem(bad, "permission entry 0 refused (value)") && !oneBad.report.problems.empty() &&
-                   !ShouldLoad(oneBad.report),
+    Model oneBadModel;
+    const LoadReport oneBad =
+        LoadHolders({{"a", true, R"({"permissions":["ok.node"]})"},
+                     {"b", true, R"({"permissions":[{"permission":"deny.me","value":"no"},"b"]})"},
+                     {Id('a'), false, R"({"permissions":["ok.node"]})"}},
+                    oneBadModel);
+    sink.Check(HasProblem(bad, "permission entry 0 refused (value)") && !oneBad.problems.empty() &&
+                   !ShouldLoad(oneBad),
                "whole: one refused entry among good holders makes the store broken");
 
     sink.Check(ShouldLoad(LoadReport{}), "whole: no store is not a broken store");
 
-    const MemoryStore key = LoadMemory({{"g1", true, R"({"permissions":["has space"]})"}});
-    sink.Check(ReportHas(key.report, "g1: key \"has space\" refused") && !ShouldLoad(key.report) &&
-                   key.report.groups == 1,
+    Model keyModel;
+    const LoadReport key = LoadHolders({{"g1", true, R"({"permissions":["has space"]})"}}, keyModel);
+    sink.Check(ReportHas(key, "g1: key \"has space\" refused") && !ShouldLoad(key) && key.groups == 1,
                "whole: a refused key is a problem and the holder still loads");
 
-    const MemoryStore holder = LoadMemory({{"g1", true, "{}"}, {"g1", true, "{}"}, {"zz", false, "{}"}});
-    sink.Check(ReportHas(holder.report, "g1: refused") && ReportHas(holder.report, "zz: refused") &&
-                   holder.report.groups == 1 && holder.report.users == 0 && !ShouldLoad(holder.report),
+    Model holderModel;
+    const LoadReport holder =
+        LoadHolders({{"g1", true, "{}"}, {"g1", true, "{}"}, {"zz", false, "{}"}}, holderModel);
+    sink.Check(ReportHas(holder, "g1: refused") && ReportHas(holder, "zz: refused") && holder.groups == 1 &&
+                   holder.users == 0 && !ShouldLoad(holder),
                "whole: a refused holder (a duplicate group, an invalid user id) is a problem");
 
-    const MemoryStore primary = LoadMemory({{Id('a'), false, R"({"primaryGroup":"ghost"})"}});
-    sink.Check(ReportHas(primary.report, Id('a') + ": primary group \"ghost\" does not exist") &&
-                   !ShouldLoad(primary.report),
+    Model primaryModel;
+    const LoadReport primary = LoadHolders({{Id('a'), false, R"({"primaryGroup":"ghost"})"}}, primaryModel);
+    sink.Check(ReportHas(primary, Id('a') + ": primary group \"ghost\" does not exist") && !ShouldLoad(primary),
                "whole: a user whose primary group is missing is a problem");
 
     // The holder file has no primaryGroup field: its primary is `default`, which exists, so no
     // primary line; the default step then promotes the missing parent to the stored primary, which
     // must not raise one either.
-    const MemoryStore parent = LoadMemory({{"g1", true, R"({"parents":["phantom"]})"},
-                                           {Id('b'), false, R"({"parents":["nowhere"]})"}});
-    sink.Check(ReportHas(parent.report, "g1: parent group \"phantom\" does not exist") &&
-                   ReportHas(parent.report, Id('b') + ": parent group \"nowhere\" does not exist") &&
-                   !ReportMentions(parent.report, ": primary group") && !ShouldLoad(parent.report),
+    Model parentModel;
+    const LoadReport parent = LoadHolders({{"g1", true, R"({"parents":["phantom"]})"},
+                                           {Id('b'), false, R"({"parents":["nowhere"]})"}},
+                                          parentModel);
+    sink.Check(ReportHas(parent, "g1: parent group \"phantom\" does not exist") &&
+                   ReportHas(parent, Id('b') + ": parent group \"nowhere\" does not exist") &&
+                   !ReportMentions(parent, ": primary group") && !ShouldLoad(parent),
                "whole: a group or user naming a missing parent group is a problem, and only that");
 
-    const MemoryStore falseParent =
-        LoadMemory({{Id('c'), false, R"({"permissions":[{"permission":"group.ghost","value":false}]})"}});
-    sink.Check(falseParent.report.problems.empty() && ShouldLoad(falseParent.report) &&
-                   falseParent.report.users == 1,
+    Model falseParentModel;
+    const LoadReport falseParent =
+        LoadHolders({{Id('c'), false, R"({"permissions":[{"permission":"group.ghost","value":false}]})"}},
+                    falseParentModel);
+    sink.Check(falseParent.problems.empty() && ShouldLoad(falseParent) && falseParent.users == 1,
                "whole: a false group node is no parent, so a missing group it names is no problem");
 }
 
@@ -288,10 +285,11 @@ void RoundTripCases(CheckSink& sink) {
     std::vector<HolderText> texts;
     m.ForEachGroup([&](const Holder& g) { texts.push_back({g.name, true, SerializeHolder(g, kNow, true)}); });
     texts.push_back({Id('a'), false, SerializeHolder(*m.FindUser(Id('a')), kNow, true)});
-    const MemoryStore back = LoadMemory(texts);
-    bool equal = back.report.problems.empty() && texts.size() == 4;
+    Model backModel;
+    const LoadReport back = LoadHolders(texts, backModel);
+    bool equal = back.problems.empty() && texts.size() == 4;
     for (const HolderText& t : texts) {
-        const Holder* h = t.group ? back.model.FindGroup(t.stem) : back.model.FindUser(t.stem);
+        const Holder* h = t.group ? backModel.FindGroup(t.stem) : backModel.FindUser(t.stem);
         equal = equal && h != nullptr && SerializeHolder(*h, kNow, true) == t.text;
     }
     sink.Check(equal, "write: every node form of a group and a user reads back to the same text");
