@@ -95,6 +95,7 @@ uint32_t g_verbCanceled = 0;
 ue_wrap::script_gate::Verdict OnDamageVerbPre(const ue_wrap::script_gate::Call& c) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected() || !c.object) return ue_wrap::script_gate::Verdict::Run;
+    if (c.fromOurCode) return ue_wrap::script_gate::Verdict::Run;   // the mod's own call: a drill hits a puppet on purpose
     void* localPawn = g_localPawn.load(std::memory_order_acquire);
     if (!localPawn || c.object == localPawn) return ue_wrap::script_gate::Verdict::Run;
     if (!coop::players::Registry::Get().IsPuppet(c.object)) return ue_wrap::script_gate::Verdict::Run;

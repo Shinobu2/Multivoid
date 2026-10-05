@@ -131,7 +131,7 @@ std::wstring WireToWide(const uint8_t len, const char* data, size_t cap) {
 // a settled session for place detection. Chains after the host spawn watcher's callback on
 // the same UFunction, role-disjoint (that one is host-only, this client-only). Runs on the
 // dispatching thread; the finish spawn is game-thread only in UE4 (actor construction).
-void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
+void OnClientFinishSpawn(void* /*context*/, void* srcObj, void* result) {
     if (!GT::IsGameThread()) return;
     auto* s = LoadSession();
     if (!s || !s->connected()) return;
@@ -190,9 +190,16 @@ void OnClientFinishSpawn(void* /*context*/, void* /*srcObj*/, void* result) {
     const bool fromContainerExtract = coop::props::container_contents_sync::TakeObjInFlight();
     if (coop::dev::prop_birth_key_probe::IsEnabled()) {
         // The seam reading the probe exists for: is the Key there before any drain tick waits?
+        // Who spawned it, read now: the calling frame exists only while this callback runs. The
+        // source object's class and the Blueprint function name the birth's origin -- a rod, a farm,
+        // a morph -- which the class alone does not.
+        const void* fn = ue_wrap::ufunction_hook::CurrentCallerFrame().function;
+        std::wstring caller = srcObj ? R::ClassNameOf(srcObj) : std::wstring(L"<none>");
+        caller += L" / ";
+        caller += fn ? R::ToString(R::NameOf(const_cast<void*>(fn))) : std::wstring(L"<native>");
         coop::dev::prop_birth_key_probe::NoteEnqueue(
             actor, R::ClassNameOf(actor), ue_wrap::prop::GetInteractableKeyString(actor),
-            fromContainerExtract);
+            fromContainerExtract, caller);
     }
     g_pending.push_back(PendingPlace{actor, R::InternalIndexOf(actor), 0, fromContainerExtract,
                                      playerAuthored});

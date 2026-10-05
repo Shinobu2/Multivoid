@@ -26,7 +26,7 @@ bool IsEnabled();
 // that is the actor's FINAL identity are different facts: a spawn can carry a freshly minted key
 // there and take its saved one a statement later, and only comparing the two tells them apart.
 void NoteEnqueue(void* actor, const std::wstring& cls, const std::wstring& seamKey,
-                 bool containerExtract);
+                 bool containerExtract, const std::wstring& caller);
 
 // The pending vector was full, so this spawn was never enqueued.
 void NotePendingCapHit(void* actor);

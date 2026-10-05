@@ -54,7 +54,7 @@ bool IsEnabled() {
 }
 
 void NoteEnqueue(void* actor, const std::wstring& cls, const std::wstring& seamKey,
-                 bool containerExtract) {
+                 bool containerExtract, const std::wstring& caller) {
     if (!IsEnabled() || !actor) return;
     g_anyRecorded = true;
     ++g_enqueued;
@@ -62,8 +62,9 @@ void NoteEnqueue(void* actor, const std::wstring& cls, const std::wstring& seamK
     if (present) ++g_keyAtSeam;
     if (g_live.size() < kLiveCap)
         g_live[actor] = Entry{cls, present ? seamKey : std::wstring(), containerExtract};
-    UE_LOGW("prop_birth_key_probe: ENQUEUE actor=%p cls='%ls' key-at-seam='%ls' container-extract=%d",
-            actor, cls.c_str(), present ? seamKey.c_str() : L"<none>", containerExtract ? 1 : 0);
+    UE_LOGW("prop_birth_key_probe: ENQUEUE actor=%p cls='%ls' key-at-seam='%ls' container-extract=%d "
+            "caller='%ls'", actor, cls.c_str(), present ? seamKey.c_str() : L"<none>",
+            containerExtract ? 1 : 0, caller.c_str());
     g_dirty = true;
 }
 
