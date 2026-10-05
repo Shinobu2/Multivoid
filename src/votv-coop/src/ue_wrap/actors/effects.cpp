@@ -31,7 +31,8 @@ bool g_saidAbsent = false;  // log-once latches only: neither one decides a resu
 bool g_saidRows = false;
 
 // A table not loaded yet, or not yet readable, is not a verdict; each costs one walk of the object
-// array a call until it reads.
+// array a call until it reads. Our warning prints once, but data_table::Rows logs its own error at
+// each retry.
 bool ReadNamesOnce() {
     void* const table = R::FindObject(L"list_effects", L"DataTable");
     if (!table) {
@@ -40,8 +41,8 @@ bool ReadNamesOnce() {
         return false;
     }
     std::vector<DT::RowRef> rows;
-    if (!DT::Rows(table, rows, "effects") || rows.empty()) {
-        if (!g_saidRows) UE_LOGW("effects: list_effects' rows did not read (%zu rows) -- asked again at the next call", rows.size());
+    if (!DT::Rows(table, rows, "effects")) {
+        if (!g_saidRows) UE_LOGW("effects: list_effects' rows did not read -- asked again at the next call");
         g_saidRows = true;
         return false;
     }

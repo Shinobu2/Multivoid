@@ -27,7 +27,8 @@ struct Entry { std::wstring name; bool live; float strength; float time; };
 
 // The gamemode's effects, effects_names[i] beside effects[i]. False when the gamemode or a
 // property does not resolve, the two arrays differ in length, or effect_C's strength and time do
-// not resolve while the arrays hold an entry; an empty pair of arrays lists as empty.
+// not resolve while the arrays hold an entry; an empty pair, or a pair whose headers save_record
+// rejects, lists as empty.
 bool List(std::vector<Entry>* out);
 
 // gamemode addEffect(effect, strength, time, incrementStrength=false, incrementTime=false). False,

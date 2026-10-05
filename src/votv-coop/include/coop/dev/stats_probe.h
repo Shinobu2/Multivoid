@@ -8,9 +8,9 @@
 // effects leg then takes every row of the game's effect table: five are added, listed, removed
 // and listed, three only listed by name, an unvetted one is a MISMATCH, an active one skipped.
 // A stat write is restored inside the call, so the streams never carry a test value; an effect's
-// removal takes one instance, so a two-entry add or a failed list after an add leaves one. `red`
-// expects a wrong Health read-back and two bloodLoss entries, so it must fail. A client starts once
-// ClientReady holds (its join's profile is applied); the host once one row of each owner reads.
+// removal takes the one instance an add makes, so an add that made two, or a failed list after an
+// add, leaves one. `red` adds once but expects a wrong Health read-back and two bloodLoss entries,
+// so it fails. A client starts at ClientReady; the host once one row of each owner reads.
 // [STATS-PROBE]: one line per row, snapshot, refusals, defaults and effect, then 'DONE bad=<m>
 // ok=<n>' (a green run with no active effect prints bad=0 ok=33).
 

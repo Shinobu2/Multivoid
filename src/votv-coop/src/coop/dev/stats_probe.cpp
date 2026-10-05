@@ -220,8 +220,8 @@ void ProbeEffectAdded(const std::wstring& name, bool red) {
     const int expected = (red && SameName(name, L"bloodLoss")) ? 2 : 1;
     const bool addedOk = added == expected && first && first->live && Near(strength, kEffectStrength) &&
                          Near(time, kEffectSeconds);
-    // The removal runs whatever the add read back, but it takes one instance: a two-entry add (the
-    // red arm) or a failed List after the add leaves one.
+    // The removal runs whatever the add read back, and takes the one instance an add makes. An add
+    // that unexpectedly made two (a MISMATCH), or a failed List after the add, leaves one.
     const bool removed = E::Remove(name);
     const bool listedAfter = E::List(&list);
     if (!listedAdded || !removed || !listedAfter) return EffectNotFound(name);
