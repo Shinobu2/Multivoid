@@ -9,6 +9,7 @@ Run: python -I -B .github/ci/release_sign_drill.py
 """
 import argparse
 import base64
+import contextlib
 import importlib.util
 import io
 import os
@@ -34,6 +35,21 @@ def check(name, ok):
 
 def flip_first_bit(data):
     return bytes([data[0] ^ 1]) + data[1:]
+
+
+def write_ascii(path, text):
+    """Bytes, never write_text(newline=): that parameter needs Python 3.10, the floor is 3.9."""
+    path.write_bytes(text.encode("ascii"))
+
+
+@contextlib.contextmanager
+def table_at(path):
+    original = rs.inc_path
+    rs.inc_path = lambda: path
+    try:
+        yield
+    finally:
+        rs.inc_path = original
 
 
 # RFC 8032 section 7.1, tests 1 to 3: (secret, public, message, signature).
@@ -90,6 +106,38 @@ def drill_ed25519():
     check("ed25519 refuses a 31-byte public key", rs.ed25519_verify(pub[:31], msg, sig) is False)
     check("ed25519 refuses a coordinate past the field prime",
           rs.ed25519_verify(b"\xff" * 32, msg, sig) is False)
+    drill_noncanonical(msg, sec)
+
+
+def drill_noncanonical(msg, seed):
+    """Signatures that verify when a non-canonical point encoding is read as the identity.
+
+    Each forgery is valid for the identity point, so a verifier that decodes the odd encoding
+    accepts it: the refusal is then the decoder's canonical checks and nothing else."""
+    identity = b"\x01" + bytes(31)
+    y_past_p = b"\xee" + b"\xff" * 30 + b"\x7f"
+    zero_x_odd = b"\x01" + bytes(30) + b"\x80"
+    odd_encodings = (("y = p + 1", y_past_p), ("x = 0 with the sign bit", zero_x_odd))
+
+    sig = rs._encode(rs._mul(5, rs._BASE)) + (5).to_bytes(32, "little")
+    check("ed25519 control: the canonical identity key takes its forged signature",
+          rs.ed25519_verify(identity, msg, sig) is True)
+    for name, enc in odd_encodings:
+        check("ed25519 refuses a public key with " + name,
+              rs.ed25519_verify(enc, msg, sig) is False)
+
+    pub = rs.ed25519_public(seed)
+    secret = rs._expand(seed)[0]
+
+    def forged_for_r(r_bytes):
+        k = rs._digest_int(r_bytes, pub, msg) % rs._L
+        return r_bytes + (k * secret % rs._L).to_bytes(32, "little")
+
+    check("ed25519 control: the canonical identity R takes its forged signature",
+          rs.ed25519_verify(pub, msg, forged_for_r(identity)) is True)
+    for name, enc in odd_encodings:
+        check("ed25519 refuses a signature R with " + name,
+              rs.ed25519_verify(pub, msg, forged_for_r(enc)) is False)
 
 
 def refused_grammar(text):
@@ -127,6 +175,8 @@ def drill_vector_and_grammar():
 
     refusals = {
         "header 2": with_line(0, "multivoid-build-sig 2"),
+        "header 10": with_line(0, "multivoid-build-sig 10"),
+        "header with a suffix": with_line(0, "multivoid-build-sig 1 x"),
         "sig line missing": "\n".join(VEC_LINES[:5]) + "\n",
         "63-character sha256": with_line(4, "sha256 " + VEC_SHA_HEX[:-1]),
         "upper-case hex": with_line(4, "sha256 " + VEC_SHA_HEX.upper()),
@@ -134,10 +184,11 @@ def drill_vector_and_grammar():
         "key 0": with_line(1, "key 0"),
         "key 256": with_line(1, "key 256"),
         "key with a leading zero": with_line(1, "key 07"),
+        "key with a trailing Arabic-Indic digit": with_line(1, "key 1\u0665"),
         "build abc": with_line(3, "build abc"),
         "build 1_0": with_line(3, "build 1_0"),
         "build +5": with_line(3, "build +5"),
-        "build with an Arabic-Indic digit": with_line(3, "build ٥"),
+        "build with a trailing Arabic-Indic digit": with_line(3, "build 1\u0665"),
         "build with a leading zero": with_line(3, "build 007"),
         "build past the u32 ceiling": with_line(3, "build 4294967296"),
         "build with 11 digits": with_line(3, "build 12345678901"),
@@ -145,6 +196,10 @@ def drill_vector_and_grammar():
         "24-character target": with_line(2, "target " + "t" * 24),
         "target with a space": with_line(2, "target a b"),
         "empty target": with_line(2, "target "),
+        "target with a DEL byte": with_line(2, "target a\x7fb"),
+        "126-character signature": with_line(5, "sig " + VEC_SIG_HEX[:126]),
+        "127-character signature":with_line(5, "sig " + VEC_SIG_HEX[:127]),
+        "129-character signature": with_line(5, "sig " + VEC_SIG_HEX + "0"),
         "a seventh line": VEC_TEXT + "extra\n",
         "a blank last line": VEC_TEXT + "\n",
         "empty text": "",
@@ -188,6 +243,8 @@ def drill_rows():
     for bad in (0, 255, 1000):
         check("rows refuse id %d" % bad, refused_at(rs.format_row(bad, pub, fixture), 3))
     check("rows refuse id 010", refused_at(row.replace("(7,", "(010,"), 3))
+    check("rows refuse an id with a trailing Arabic-Indic digit",
+          refused_at(row.replace("(7,", "(1\u0665,"), 3))
     check("rows refuse a missing space", refused_at(row.replace(", ", ",", 1), 3))
     check("rows refuse an indented row", refused_at(" " + row, 3))
     try:
@@ -238,10 +295,31 @@ def drill_test_key_path(tmp):
     check("test-key: verify exits 0", rc == 0)
     check("test-key: verify says the key", buf.getvalue() == "release_sign: verified key 255\n")
 
+    for name, prefill in (("a valid file", None), ("a longer junk file", b"junk" * 500)):
+        if prefill is not None:
+            sig.write_bytes(prefill)
+        rc = rs.main(sign_argv, environ={}, out=io.StringIO())
+        check("test-key: signing over %s replaces it" % name, rc == 0 and sig.read_bytes() == raw)
+        rc = rs.main(verify_argv, environ={}, out=io.StringIO())
+        check("test-key: the replaced file verifies (%s)" % name, rc == 0)
+
     buf = io.StringIO()
     rc = rs.main(["verify", "--dll", str(dll), "--sig", str(sig)], environ={}, out=buf)
     check("test-key: not trusted without the switch",
           rc == 1 and buf.getvalue() == "release_sign: verify failed at key\n")
+
+    no_rows = tmp / "tk_none.inc"
+    one_row = tmp / "tk_one.inc"
+    write_ascii(no_rows, "// no rows\n")
+    write_ascii(one_row, rs.format_row(9, rs.ed25519_public(os.urandom(32)), bytes(64)) + "\n")
+    for key_id, table_file, step in ((7, no_rows, "key"), (9, one_row, "signature")):
+        relabelled = raw.decode("ascii").replace("key 255\n", "key %d\n" % key_id)
+        sig.write_bytes(relabelled.encode("ascii"))
+        with table_at(table_file):
+            rc, out = call(rs.cmd_verify, verify_ns(dll, sig, True))
+        check("test-key: a test-key .sig relabelled key %d fails at %s" % (key_id, step),
+              rc == 1 and out == "release_sign: verify failed at %s\n" % step)
+    sig.write_bytes(raw)
 
     dll.write_bytes(dll.read_bytes()[:-1] + b"!")
     buf = io.StringIO()
@@ -271,7 +349,9 @@ def drill_test_key_path(tmp):
 
     for label, ns in (("target", sign_ns(dll, sig, True, target="a b")),
                       ("build", sign_ns(dll, sig, True, build="4294967296")),
-                      ("build text", sign_ns(dll, sig, True, build="1_0"))):
+                      ("build text", sign_ns(dll, sig, True, build="1_0")),
+                      ("build zero-led", sign_ns(dll, sig, True, build="007")),
+                      ("target with a DEL byte", sign_ns(dll, sig, True, target="a\x7fb"))):
         rc, out = call(rs.cmd_sign, ns, {})
         check("test-key: sign refuses a bad " + label, rc == 2 and "--" + label.split()[0] in out)
     rc, out = call(rs.cmd_sign, sign_ns(tmp / "none.dll", sig, True), {})
@@ -296,8 +376,7 @@ def drill_release_path(tmp):
     original = rs.inc_path
     try:
         rs.inc_path = lambda: table
-        table.write_text(comment + rs.format_row(9, pub, fixture) + "\n", encoding="ascii",
-                         newline="\n")
+        write_ascii(table, comment + rs.format_row(9, pub, fixture) + "\n")
         rc, out = call(rs.cmd_sign, sign_ns(dll, sig), env)
         check("release: sign with the table's key",
               rc == 0 and out == "release_sign: signed sha %s with key 9\n" % sha8)
@@ -305,7 +384,7 @@ def drill_release_path(tmp):
         check("release: verify without the test-key switch",
               rc == 0 and out == "release_sign: verified key 9\n")
 
-        table.write_text(comment, encoding="ascii", newline="\n")
+        write_ascii(table, comment)
         rc, out = call(rs.cmd_sign, sign_ns(dll, sig), env)
         check("release: an empty table refuses sign",
               rc == 2 and out == "release_sign: the key is not in release_keys.inc\n")
@@ -321,11 +400,40 @@ def drill_release_path(tmp):
         check("release: no table file refuses verify",
               rc == 2 and out == "release_sign: release_keys.inc not found at the checkout\n")
 
-        table.write_text(comment + "not a row\n", encoding="ascii", newline="\n")
+        write_ascii(table, comment + "not a row\n")
         rc, out = call(rs.cmd_verify, verify_ns(dll, sig))
         check("release: a malformed table is exit 2 inside verify", rc == 2)
     finally:
         rs.inc_path = original
+    drill_release_two_rows(tmp, dll, sig, sha8)
+
+
+def drill_release_two_rows(tmp, dll, sig, sha8):
+    """A table of two rows: the row is chosen by the key, never by position."""
+    seeds = {9: os.urandom(32), 10: os.urandom(32)}
+    stranger = os.urandom(32)
+    fixture_msg = rs.signed_message("selftest-fixture", 0, bytes(32))
+    table = tmp / "two_rows.inc"
+    write_ascii(table, "".join(
+        rs.format_row(i, rs.ed25519_public(sd), rs.ed25519_sign(sd, fixture_msg)) + "\n"
+        for i, sd in seeds.items()))
+    with table_at(table):
+        for key_id, sd in seeds.items():
+            rc, out = call(rs.cmd_sign, sign_ns(dll, sig), {rs.SEED_ENV: sd.hex()})
+            check("release two rows: the seed of row %d signs under id %d" % (key_id, key_id),
+                  rc == 0 and out == "release_sign: signed sha %s with key %d\n" % (sha8, key_id))
+            rc, out = call(rs.cmd_verify, verify_ns(dll, sig))
+            check("release two rows: its file verifies under id %d" % key_id,
+                  rc == 0 and out == "release_sign: verified key %d\n" % key_id)
+        rc, out = call(rs.cmd_sign, sign_ns(dll, sig), {rs.SEED_ENV: stranger.hex()})
+        check("release two rows: a seed in no row is refused by sign",
+              rc == 2 and out == "release_sign: the key is not in release_keys.inc\n")
+        sha = rs.hashlib.sha256(dll.read_bytes()).digest()
+        wrong = rs.ed25519_sign(seeds[9], rs.signed_message("0.9.0n", 216, sha))
+        write_ascii(sig, rs.format_sig(10, "0.9.0n", 216, sha, wrong))
+        rc, out = call(rs.cmd_verify, verify_ns(dll, sig))
+        check("release two rows: row 9's signature under id 10 fails at signature",
+              rc == 1 and out == "release_sign: verify failed at signature\n")
 
 
 def drill_seed():
@@ -357,7 +465,7 @@ def drill_process(tmp):
     script.parent.mkdir(parents=True)
     inc.parent.mkdir(parents=True)
     shutil.copyfile(HERE / "release_sign.py", script)
-    inc.write_text("// an empty table\n", encoding="ascii", newline="\n")
+    write_ascii(inc, "// an empty table\n")
     dll = tmp / "proc.dll"
     sig = tmp / "proc.sig"
     dll.write_bytes(b"process dll bytes " * 32)
@@ -382,8 +490,7 @@ def drill_process(tmp):
     check("process: a valid seed with an empty table exits 2 at the key",
           rc == 2 and out == "release_sign: the key is not in release_keys.inc\n")
     check("process: the seed is nowhere in that output", not leaks(seed, both))
-    inc.write_text("// one row\n" + rs.format_row(4, pub, fixture) + "\n", encoding="ascii",
-                   newline="\n")
+    write_ascii(inc, "// one row\n" + rs.format_row(4, pub, fixture) + "\n")
     rc, out, both = run(seed.hex())
     check("process: the seed with its row exits 0 with key 4",
           rc == 0 and out.endswith("with key 4\n"))
