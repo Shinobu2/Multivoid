@@ -107,7 +107,10 @@ S3 = re.compile(r"(?:flag (?:it )?for|file (?:it )?(?:as|under)|belongs in|shoul
 # grants_core.h's Projected enum, the kProjected table and ReadBit's declaration verbatim -- doc quoting code.
 # 69 -> 70 (2026-10-05), CONTENT, the line read: C-4a's sheet (PERMISSIONS_ARC.md 15.10) dictated
 # command_args.h's ParseDuration declaration verbatim -- doc quoting code.
-OVERLAP_BASELINE = 70
+# 70 -> 85 (2026-10-05), CONTENT, all fifteen lines read: C-4-0's sheets (PERMISSIONS_ARC.md 15.12-15.15) dictated
+# atomic_file.h's interface (nine lines), Write's definition line in atomic_file.cpp, the two dev break rows (four lines),
+# and config_ini_write.cpp's RemoveDuplicateKeyLinesLayered line SETTINGS_ARC.md quotes -- doc quoting code.
+OVERLAP_BASELINE = 85
 # EXCLUDED because it is a deliberate practice, not a leak: copying memory topics into the public
 # piles archive. It alone contributes ~1,263 of the raw 1,300 overlaps.
 OVERLAP_SKIP = ("docs/piles/_archive/session-log/",)
