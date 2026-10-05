@@ -14,6 +14,7 @@
 #include "ue_wrap/desk/device_screen.h"
 #include "ue_wrap/devices/atv.h"          // EnsureResolved / IsAtv
 #include "ue_wrap/engine/engine.h"
+#include "ue_wrap/engine/engine_mainplayer.h"  // ReadMainPlayerRagdollState: a claim held past control
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
@@ -54,6 +55,7 @@ std::unordered_map<std::wstring, uint8_t> g_busy;
 void* g_localWidget = nullptr;
 std::wstring g_localKey;
 bool g_pendingSend = false;
+bool g_claimLostSaid = false;   // the held-while-dead/ragdolled line, once per episode
 
 // The deny-gate dispatch state (game thread only; a pre and post pair within one dispatch).
 bool g_denyPending = false;
@@ -338,6 +340,21 @@ void Tick() {
     }
 
     void* w = DS::ReadActiveInterface(local);
+    // Does a claim outlive the player's control of the screen? Said once per episode: a body that
+    // died or went ragdoll while its interface is still set holds the device for every peer. The
+    // measurement the release rule waits for, not a release: what the game does to the interface
+    // on death or ragdoll is not read yet.
+    if (!g_localKey.empty()) {
+        bool ragdoll = false, dead = false;
+        const bool lost = ue_wrap::engine::ReadMainPlayerRagdollState(local, ragdoll, dead) && (ragdoll || dead);
+        if (lost && !g_claimLostSaid) {
+            UE_LOGW("device_occupancy: claim '%ls' still held while the local body is %s (interface %p)",
+                    g_localKey.c_str(), dead ? "dead" : "ragdolled", w);
+        }
+        g_claimLostSaid = lost;
+    } else {
+        g_claimLostSaid = false;
+    }
     if (w == g_localWidget) return;  // no edge -- the per-tick steady state
 
     // The falling edge (or a direct widget switch): release what we held.
