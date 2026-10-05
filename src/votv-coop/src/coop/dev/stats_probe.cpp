@@ -120,13 +120,21 @@ void ProbeSnapshot() {
 }
 
 // What the table refuses: a write to a read-only row, a non-finite write, an id past the last row.
+// A refusal that was accepted instead is written back, so a regressed guard leaves the game as it was.
 void ProbeRefusals() {
     const char* which = nullptr;
-    float before = 0.f, after = 0.f;
+    float before = 0.f, after = 0.f, deadBefore = 0.f;
     V::Field id = V::Field::Health;
-    if (V::Write(V::Field::Dead, 1.f)) which = "a write to the read-only Dead was accepted";
+    const bool deadRead = V::Read(V::Field::Dead, &deadBefore);
+    if (V::Write(V::Field::Dead, 1.f)) {
+        which = "a write to the read-only Dead was accepted";
+        if (deadRead) V::Write(V::Field::Dead, deadBefore);
+    }
     else if (!V::Read(V::Field::Health, &before)) which = "Health did not read";
-    else if (V::Write(V::Field::Health, std::nanf(""))) which = "a NaN write to Health was accepted";
+    else if (V::Write(V::Field::Health, std::nanf(""))) {
+        which = "a NaN write to Health was accepted";
+        V::Write(V::Field::Health, before);
+    }
     else if (!V::Read(V::Field::Health, &after) || !Near(before, after)) which = "a refused NaN write changed Health";
     else if (V::FieldFromId(static_cast<uint8_t>(V::Field::Count), &id)) which = "id 22 was accepted";
     else if (!V::FieldFromId(static_cast<uint8_t>(V::Field::Glasses), &id)) which = "id 21 was refused";
