@@ -110,7 +110,9 @@ S3 = re.compile(r"(?:flag (?:it )?for|file (?:it )?(?:as|under)|belongs in|shoul
 # 70 -> 85 (2026-10-05), CONTENT, all fifteen lines read: C-4-0's sheets (PERMISSIONS_ARC.md 15.12-15.15) dictated
 # atomic_file.h's interface (nine lines), Write's definition line in atomic_file.cpp, the two dev break rows (four lines),
 # and config_ini_write.cpp's RemoveDuplicateKeyLinesLayered line SETTINGS_ARC.md quotes -- doc quoting code.
-OVERLAP_BASELINE = 85
+# 85 -> 90 (2026-10-05), CONTENT, the five lines read: C-4b's sheet (PERMISSIONS_ARC.md 15.18) dictated
+# permission_edit.h's EditResult, PlanEdit and OwnerLoses declarations (four lines) and OwnerLoses' definition line.
+OVERLAP_BASELINE = 90
 # EXCLUDED because it is a deliberate practice, not a leak: copying memory topics into the public
 # piles archive. It alone contributes ~1,263 of the raw 1,300 overlaps.
 OVERLAP_SKIP = ("docs/piles/_archive/session-log/",)
