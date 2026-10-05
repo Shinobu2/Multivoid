@@ -69,9 +69,15 @@ HostInfo LobbyAnnouncer::Host(const std::string& masterUrl, const std::string& n
     info.signalingToken = J::Str(j, "signalingToken");
     info.stun           = J::Str(j, "stun");
     info.turn           = J::ParseTurnCredential(j);
+    // A DIRECT host is answered without the signaling block (the master's h_host: a direct host
+    // never uses signaling), so only a P2P announce needs signalingUrl.
     info.ok = !info.sessionId.empty() && !info.token.empty() &&
-              !info.hostIdentity.empty() && !info.signalingUrl.empty();
-    if (!info.ok) { UE_LOGW("lobby: host announce -- response missing session/token/identity"); return info; }
+              !info.hostIdentity.empty() && (directPort > 0 || !info.signalingUrl.empty());
+    if (!info.ok) {
+        UE_LOGW("lobby: host announce -- response missing session/token/identity%s",
+                directPort > 0 ? "" : "/signaling");
+        return info;
+    }
 
     // Stash the creds + (re)start the heartbeat under threadMu_ so a concurrent Host
     // can never move-assign over a joinable hbThread_ (which would std::terminate).

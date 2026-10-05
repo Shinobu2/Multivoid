@@ -423,9 +423,11 @@ bool HostWithSave(const SaveChoice& choice, const std::string& name, bool locked
         try {
             if (coop::shutdown::IsShuttingDown()) { g_actionBusy.store(false); return; }
             // Hosting never depends on a reachable master: the announce lists the lobby and
-            // collects the master-issued signaling and TURN, but the boot is queued either way
-            // (announce ok: the master's P2P Config, listed; announce failed: a DIRECT listen,
-            // unlisted but in-game). MTA precedent: the server runs regardless of the master list.
+            // collects the master-issued signaling and TURN (a P2P lobby's; a DIRECT one gets none),
+            // but the boot is queued either way (a DIRECT pick: a DIRECT listen, listed when the announce
+            // is ok; AUTO with the announce ok: the master's P2P Config, listed; AUTO with it failed: a
+            // DIRECT listen, unlisted but in-game). MTA precedent: the server runs regardless of the
+            // master list.
             // The harness loads the world, then starts.
             const std::string world = choice.newGame ? choice.newName : choice.slot;
             // DIRECT hosts a plain LanDirect UDP listen and announces it with the listen port (the

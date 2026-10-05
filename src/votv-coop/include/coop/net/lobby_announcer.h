@@ -27,7 +27,9 @@ namespace coop::net::lobby {
 
 // What POST /v1/host returns: the host's session creds + identities + ICE block.
 // Everything needed to build a P2P host coop::net::Config and to keep the lobby
-// alive (sessionId + token). ok=false on any failure.
+// alive (sessionId + token). ok=false on any failure. A DIRECT lobby's answer
+// carries no signaling or ICE block (the master's h_host never gives one to a
+// direct host), so its ok needs only the session, the token and the identity.
 struct HostInfo {
     bool ok = false;
     std::string sessionId;
