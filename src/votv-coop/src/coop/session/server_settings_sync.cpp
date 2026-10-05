@@ -67,7 +67,8 @@ std::string ShownText(const reg::Row* row) {
 }
 
 // The chat line for a changed notify row: our own label and our own rendering of the value,
-// never the sender's text.
+// never the sender's text. Source prints the event's cvar name and value string
+// (clientmode_shared.cpp:1235-1251); we print our label and our own rendering of the held value.
 std::wstring AnnouncementLine(const reg::Row* row) {
     const char* label = reg::RowLabel(row);
     const std::string shown = ShownText(row);
@@ -76,6 +77,7 @@ std::wstring AnnouncementLine(const reg::Row* row) {
 }
 
 // One row to one slot. The value is printed through the registry's one printed form.
+// `flags` is kServerSettingAnnounced for an announced delta, 0 for a plain re-send and the snapshot.
 // Returns false only when the send failed, so the caller's latch holds; a value the wire cannot
 // carry is warned and counts as sent, or it would hold its slot's latch for ever.
 bool SendRow(Session& s, int slot, const reg::Row* row, uint8_t flags, const char* why) {

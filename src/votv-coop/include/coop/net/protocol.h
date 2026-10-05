@@ -2010,9 +2010,12 @@ static_assert(sizeof(DeskPingVerdictPayload) <= 228, "DeskPingVerdictPayload mus
 // A server-scope setting's session value (ServerSetting): a flags byte, then the row's key and its
 // value as text, `keyLen + valueLen` bytes of `text`, no terminator, sent as
 // `3 + keyLen + valueLen` bytes. Bit 0 of `flags` (kServerSettingAnnounced): the row is a notify row
-// whose value changed, so each peer prints one line; the receiver acts on that bit alone. The two
-// limits mirror config_registry::kServerSettingKeyMax (equal) and kServerSettingTextMax (the
-// registry's is at most this one), which this catalog cannot include; the sender's file asserts it.
+// whose value changed, so each peer prints one line; the receiver acts on that bit alone. The bit
+// means changed since the last take; a change undone inside one take still announces. Source raises
+// a separate server_cvar event (clientmode_shared.cpp:1235); here the bit rides the value, so the
+// line cannot overtake it. The two limits mirror config_registry::kServerSettingKeyMax (equal) and
+// kServerSettingTextMax (the registry's is at most this one), which this catalog cannot include; the
+// sender's file asserts it.
 inline constexpr uint8_t kServerSettingKeyMax  = 24;
 inline constexpr uint8_t kServerSettingTextMax = 200;
 inline constexpr uint8_t kServerSettingAnnounced = 0x01;
