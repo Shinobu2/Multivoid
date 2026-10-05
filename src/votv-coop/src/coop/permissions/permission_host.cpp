@@ -11,6 +11,7 @@
 #include "ue_wrap/core/log.h"
 
 #include <atomic>
+#include <chrono>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -181,6 +182,13 @@ bool HoldsExplicitly(std::string_view playerId, std::string_view node) {
 ApplyResult Apply(const HolderKey& key, const std::function<bool(Model& copy, std::string* why)>& change,
                   bool callerIsOwner, const std::vector<std::string>& nodes, const Action& action) {
     UE_ASSERT_GAME_THREAD("permission_host::Apply");
+    const auto started = std::chrono::steady_clock::now();
+    // The microseconds since `started`: the cost of one edit, the whole-store read included.
+    const auto spentUs = [&]() {
+        return static_cast<long long>(
+            std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - started)
+                .count());
+    };
     ApplyResult out;
     if (!coop::moderation::HostedSessionRunning()) {
         out.outcome = ApplyOutcome::NoSession;
@@ -204,6 +212,7 @@ ApplyResult Apply(const HolderKey& key, const std::function<bool(Model& copy, st
         case EditResult::NoChange:
             // `candidate` is what the disk holds: a hand edit to another file goes live here too.
             ReplaceLive(std::move(plan.candidate));
+            UE_LOGI("permissions: no change: %s in %lld us", action.description.c_str(), spentUs());
             out.outcome = ApplyOutcome::NoChange;
             out.replies.push_back("No change.");
             return out;
@@ -228,7 +237,7 @@ ApplyResult Apply(const HolderKey& key, const std::function<bool(Model& copy, st
         return Refused({"Could not write the permission file."});
     }
     ReplaceLive(std::move(plan.candidate));
-    UE_LOGI("permissions: %s (by %.8s)", action.description.c_str(), action.sourceId.c_str());
+    UE_LOGI("permissions: %s (by %.8s) in %lld us", action.description.c_str(), action.sourceId.c_str(), spentUs());
     AppendActionLog(dir, action);
     out.outcome = ApplyOutcome::Changed;
     out.replies.push_back("Done: " + action.description);
