@@ -93,8 +93,9 @@ EditPlan PlanEdit(const std::vector<HolderText>& texts, const HolderKey& keyIn,
     Model before;
     LoadReport beforeReport = LoadHolders(texts, before);
     if (!ShouldLoad(beforeReport)) {
-        return Refuse("The permission files do not load: " + beforeReport.problems.front(),
-                      std::move(beforeReport.problems));
+        // The message is built before the call: Refuse takes the vector by value.
+        std::string why = "The permission files do not load: " + beforeReport.problems.front();
+        return Refuse(std::move(why), std::move(beforeReport.problems));
     }
 
     Model copy = before;
