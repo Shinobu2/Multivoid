@@ -691,6 +691,7 @@ set(VOTVCOOP_SOURCES
     src/coop/commands/command_registry.cpp
     src/coop/commands/command_dispatcher.cpp
     src/coop/commands/command_args.cpp
+    src/coop/commands/action_source.cpp
     src/coop/commands/commands_selftest.cpp
     src/coop/commands/commands_cases_moderation.cpp
     src/coop/commands/commands_cases_settings.cpp

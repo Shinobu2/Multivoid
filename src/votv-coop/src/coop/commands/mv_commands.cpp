@@ -11,6 +11,7 @@
 
 #include "coop/commands/mv_commands.h"
 
+#include "coop/commands/action_source.h"
 #include "coop/commands/command_dispatcher.h"
 #include "coop/permissions/model.h"
 #include "coop/permissions/node.h"
@@ -39,12 +40,6 @@ std::string Lowered(std::string s) {
 }
 
 std::string ShortId(const std::string& id) { return id.substr(0, 8); }
-
-const PlayerView* ViewOf(const std::vector<PlayerView>& players, int slot) {
-    for (const PlayerView& v : players)
-        if (v.slot == slot) return &v;
-    return nullptr;
-}
 
 // A player as a person reads it: the seated nick, else the seen-players record's, else the first
 // eight characters of the id.
@@ -105,11 +100,8 @@ void NotifyChange(const Ports& p, const Context& ctx, const std::string& line) {
 
 // Hands the host the edit, sends every line it composed, and tells the others of a change.
 void RunEdit(const Ports& p, Context& ctx, Edit edit) {
-    const PlayerView* actor = ViewOf(ctx.players, ctx.caller.slot);
-    const std::string actorNick = actor != nullptr ? actor->nick : std::string("Someone");
     perm::Action action;
-    action.sourceId = ctx.caller.playerId;
-    action.sourceName = actorNick;
+    FillSource(ctx, action);
     action.targetType = edit.targetType;
     action.targetId = edit.targetId;
     action.targetName = edit.targetName;
@@ -126,7 +118,7 @@ void RunEdit(const Ports& p, Context& ctx, Edit edit) {
     }
     for (const std::string& line : result.replies) ctx.Reply(line);
     if (result.outcome == perm::host::ApplyOutcome::Changed)
-        NotifyChange(p, ctx, "[mv] " + actorNick + ": " + edit.canonical);
+        NotifyChange(p, ctx, "[mv] " + action.sourceName + ": " + edit.canonical);
 }
 
 enum class Op : uint8_t { Set, Unset, SetTemp, UnsetTemp, ParentAdd, ParentRemove, SetWeight };
