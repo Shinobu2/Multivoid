@@ -165,10 +165,4 @@ SetResult SetValueAt(const std::wstring& iniPath, const config_registry::Row* ro
 // from the ini at `iniPath`, logged, announced.
 SetResult ResetValueAt(const std::wstring& iniPath, const config_registry::Row* row);
 
-// The ONE atomic-swap file writer (.new + checked writes + MoveFileExW),
-// shared with the T8 catalog generator (config_example.cpp; arc 4) -- never a
-// second swap implementation. Defined in config_ini_write.cpp.
-bool AtomicWriteAllLines(const std::wstring& path, const std::vector<std::string>& lines,
-                         const char* what);
-
 }  // namespace coop::config::internal

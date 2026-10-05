@@ -16,6 +16,7 @@
 #include "coop/config/config.h"
 
 #include "config_internal.h"
+#include "coop/atomic_file/atomic_file.h"
 #include "coop/config/config_registry.h"
 #include "coop/net/protocol.h"   // kDefaultDirectAddr (the retired-value migration)
 #include "coop/version.h"
@@ -202,9 +203,12 @@ void GenerateExampleCatalog() {
         UE_LOGI("config: settings catalog up-to-date (multivoid.ini.example, %d keys)", keys);
         return;
     }
-    if (!internal::AtomicWriteAllLines(path, lines, "ExampleCatalog")) {
+    const atomic_file::Result wr =
+        atomic_file::Write(path, fresh, atomic_file::Mode::Replace, atomic_file::Sync::Cached);
+    if (!wr.ok()) {
         g_status.store(ExampleGen::FailedWrite, std::memory_order_relaxed);
-        UE_LOGW("config: multivoid.ini.example write FAILED (disk/perms?) -- non-fatal");
+        UE_LOGW("config: multivoid.ini.example write FAILED (%s) -- non-fatal",
+                atomic_file::Describe(wr).c_str());
         return;
     }
     g_status.store(ExampleGen::Regenerated, std::memory_order_relaxed);

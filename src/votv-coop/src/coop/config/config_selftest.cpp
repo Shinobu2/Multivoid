@@ -284,7 +284,6 @@ int SelftestRuntimeLayer(void (*drain)(), bool (*onNotifyThread)()) {
 
     ::SetEnvironmentVariableA(kEnv, (oldLen > 0 && oldLen < sizeof(old)) ? old : nullptr);
     ::DeleteFileW(scratch.c_str());
-    ::DeleteFileW((scratch + L".new").c_str());
     return fail;
 }
 
@@ -379,7 +378,6 @@ int SelftestQuotedValues() {
     }
 
     ::DeleteFileW(scratch.c_str());
-    ::DeleteFileW((scratch + L".new").c_str());
     return fail;
 }
 

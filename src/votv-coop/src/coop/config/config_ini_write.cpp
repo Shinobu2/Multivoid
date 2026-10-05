@@ -3,13 +3,15 @@
 // dedup. Shares the reader core's primitives through config_internal.h; every public entry holds
 // the one ini mutex.
 // The destruction guards: never rebuild from a file that exists but cannot be read cleanly (a
-// lock, a mid-stream error, bytes that are not text), and every rebuild goes .new, checked
-// writes, then an atomic move; a locked-file write once rebuilt the host's ini from an empty line
-// list, and a file saved as UTF-16 was once cut to the one line a mint appended.
+// lock, a mid-stream error, bytes that are not text), and every rebuild is written whole by
+// coop/atomic_file (checked writes, a flush, one move); a locked-file write once rebuilt the
+// host's ini from an empty line list, and a file saved as UTF-16 was once cut to the one line a
+// mint appended.
 
 #include "coop/config/config.h"
 
 #include "config_internal.h"
+#include "coop/atomic_file/atomic_file.h"
 #include "coop/config/config_registry.h"
 #include "ue_wrap/core/log.h"
 
@@ -38,38 +40,26 @@ bool IsSectionHeader(const std::string& line, std::string& nameOut) {
     return true;
 }
 
-// The checked .new-then-atomic-swap tail shared by every file rebuild (the single-key write,
-// the reset's line removal, the reformat, the keep-line dedup). Every write is checked before
-// the swap: a disk-full .new must never replace the good ini.
+// The tail shared by every file rebuild (the single-key write, the reset's line removal, the
+// reformat, the keep-line dedup): every rebuild is written whole by coop/atomic_file, so a
+// disk-full write never replaces the good ini. The bytes are exactly the lines given (each ends in
+// its own newline): text mode translated every '\n' to CRLF on disk, which made the catalog's
+// byte compare permanently false, so every boot re-swapped. Rebuilds emit LF endings; the lexer
+// reads both.
 bool AtomicWriteLines(const std::wstring& path, const std::vector<std::string>& lines,
                       const char* what) {
-    const std::wstring tmp = path + L".new";
-    FILE* f = nullptr;
-    // Binary mode: the primitive writes exactly the bytes given. Text mode translated every '\n'
-    // to CRLF on disk, which made the catalog's byte compare permanently false, so every boot
-    // re-swapped. Rebuilds emit LF endings; the lexer reads both.
-    if (_wfopen_s(&f, tmp.c_str(), L"wb") != 0 || !f) {
-        UE_LOGW("config: %s could not open multivoid.ini.new for write", what);
-        return false;
-    }
-    bool wrote = true;
-    for (const auto& l : lines)
-        if (std::fputs(l.c_str(), f) == EOF) { wrote = false; break; }
-    if (std::ferror(f)) wrote = false;
-    if (std::fclose(f) != 0) wrote = false;
-    if (!wrote) {
-        ::DeleteFileW(tmp.c_str());
-        UE_LOGW("config: %s writing multivoid.ini.new FAILED (disk?) -- ini left unchanged",
-                what);
-        return false;
-    }
-    if (!::MoveFileExW(tmp.c_str(), path.c_str(),
-                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        UE_LOGW("config: %s atomic swap failed (err=%lu) -- ini left unchanged, "
-                "multivoid.ini.new kept", what, ::GetLastError());
-        return false;
-    }
-    return true;
+    std::string bytes;
+    for (const auto& l : lines) bytes += l;
+    const atomic_file::Result r =
+        atomic_file::Write(path, bytes, atomic_file::Mode::Replace, atomic_file::Sync::ToDisk);
+    if (r.ok()) return true;
+    if (r.failedAt == atomic_file::Step::Move)
+        UE_LOGW("config: %s atomic swap failed (%s) -- ini left unchanged", what,
+                atomic_file::Describe(r).c_str());
+    else
+        UE_LOGW("config: %s could not write multivoid.ini (%s) -- ini left unchanged", what,
+                atomic_file::Describe(r).c_str());
+    return false;
 }
 
 // The ini section a key belongs to, for write placement and the reformat: a literal row's
@@ -231,42 +221,21 @@ bool EnsureIniSkeleton() {
                 content += std::string(rows[r].key) + "=" +
                            config_registry::kMyNameDefault + "\n";
     }
-    // Atomic create: .new, then a move without replace-existing, so if the file appeared
-    // concurrently the seeder loses the race gracefully.
-    const std::wstring tmp = path + L".new";
-    FILE* f = nullptr;
-    if (_wfopen_s(&f, tmp.c_str(), L"w") != 0 || !f) {
-        UE_LOGW("config: skeleton seeder could not open multivoid.ini.new for write");
-        return false;
-    }
-    bool wrote = std::fputs(content.c_str(), f) != EOF;
-    if (std::ferror(f)) wrote = false;
-    if (std::fclose(f) != 0) wrote = false;
-    if (!wrote) {
-        ::DeleteFileW(tmp.c_str());
-        UE_LOGW("config: skeleton seeder write FAILED (disk?) -- no ini created");
-        return false;
-    }
-    if (!::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_WRITE_THROUGH)) {
-        ::DeleteFileW(tmp.c_str());
-        UE_LOGW("config: skeleton seeder lost the create race (err=%lu) -- existing ini kept",
-                ::GetLastError());
+    // Created whole and only when absent (CreateOnly): a file that appeared meanwhile is kept.
+    const atomic_file::Result r = atomic_file::Write(path, content, atomic_file::Mode::CreateOnly,
+                                                     atomic_file::Sync::ToDisk);
+    if (!r.ok()) {
+        if (atomic_file::TargetExisted(r))
+            UE_LOGW("config: skeleton seeder lost the create race -- existing ini kept");
+        else
+            UE_LOGW("config: skeleton seeder could not create multivoid.ini (%s) -- no ini created",
+                    atomic_file::Describe(r).c_str());
         return false;
     }
     UE_LOGI("config: seeded fresh multivoid.ini skeleton ([net] first, net.nick=%s, [dev] last)",
             config_registry::kMyNameDefault);
     return true;
 }
-
-// The internal seam for the catalog generator: the same atomic-swap primitive every ini
-// rebuild uses, path-parameterised (the .example is never the live ini; a single writer at
-// boot, so no lock).
-namespace internal {
-bool AtomicWriteAllLines(const std::wstring& path, const std::vector<std::string>& lines,
-                         const char* what) {
-    return AtomicWriteLines(path, lines, what);
-}
-}  // namespace internal
 
 namespace internal {
 // Scrub CR and LF from the value (an embedded newline, pasted into a text field, would split the
