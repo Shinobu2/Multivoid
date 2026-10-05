@@ -329,6 +329,10 @@ void ProblemLinesCases(CheckSink& sink) {
     sink.Check(across.size() == 1 && across[0] == std::string(195, 'x') + "...",
                "problem lines: a character across byte 197 is cut before it");
 
+    const std::vector<std::string> atCut = ProblemLines({std::string(197, 'x') + euro + std::string(60, 'y')});
+    sink.Check(atCut.size() == 1 && atCut[0] == std::string(197, 'x') + "...",
+               "problem lines: a character that starts at byte 197 is dropped whole");
+
     const std::vector<std::string> exact = ProblemLines({std::string(200, 'z'), std::string(201, 'z')});
     sink.Check(exact.size() == 2 && exact[0] == std::string(200, 'z') && exact[1] == std::string(197, 'z') + "...",
                "problem lines: 200 bytes stay whole and 201 are cut");

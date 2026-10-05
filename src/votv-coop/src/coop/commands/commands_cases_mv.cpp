@@ -288,6 +288,8 @@ void GroupRows(Checker& check, const Registry& reg) {
           "mv: creategroup refuses a word that is no group name");
     check(Replied(Run(reg, console, "mv user Cy parent add staff"), "Done: /mv user " + cy + " parent add staff"),
           "mv: parent add");
+    check(Replied(Run(reg, console, "mv user Cy parent remove staff"), "Done: /mv user " + cy + " parent remove staff"),
+          "mv: parent remove of a group that is not default");
     check(Replied(Run(reg, console, "mv user Cy parent add nosuch"), "No group named nosuch."),
           "mv: parent add of a group that does not exist");
     check(Replied(Run(reg, console, "mv group staff setweight 5"), "Done: /mv group staff setweight 5") &&
@@ -303,6 +305,15 @@ void GroupRows(Checker& check, const Registry& reg) {
           "mv: a group leaf names its holder by the lower-cased word");
     check(Replied(Run(reg, console, "mv group Staff permission unsettemp s.use"), "No change."),
           "mv: unsettemp of a node that is not timed is no change");
+    check(Replied(Run(reg, console, "mv group staff permission unset s.use"),
+                  "Done: /mv group staff permission unset s.use"),
+          "mv: a group's permission unset is done");
+    check(Replied(Run(reg, console, "mv group staff permission settemp s.use 1h"),
+                  "Done: /mv group staff permission settemp s.use true until 1700003600"),
+          "mv: a group's permission settemp is done");
+    check(Replied(Run(reg, console, "mv group staff permission unsettemp s.use"),
+                  "Done: /mv group staff permission unsettemp s.use"),
+          "mv: a group's permission unsettemp is done when the node is timed");
     check(Replied(Run(reg, console, "mv group nosuch permission set a.b"), "No group named nosuch.") &&
               Replied(Run(reg, console, "mv group nosuch parent add staff"), "No group named nosuch.") &&
               Replied(Run(reg, console, "mv group nosuch setweight 3"), "No group named nosuch."),
