@@ -114,7 +114,8 @@ def drill_noncanonical(msg, seed):
     """Signatures that verify when a non-canonical point encoding is read as the identity.
 
     Each forgery is valid for the identity point, so a verifier that decodes the odd encoding
-    accepts it: the refusal is then the decoder's canonical checks and nothing else."""
+    accepts it. A public key is refused by the decoder's canonical checks; a signature R is never
+    decoded, so its odd encoding is refused because the encoded R' differs from it byte for byte."""
     identity = b"\x01" + bytes(31)
     y_past_p = b"\xee" + b"\xff" * 30 + b"\x7f"
     zero_x_odd = b"\x01" + bytes(30) + b"\x80"
@@ -139,6 +140,56 @@ def drill_noncanonical(msg, seed):
     for name, enc in odd_encodings:
         check("ed25519 refuses a signature R with " + name,
               rs.ed25519_verify(pub, msg, forged_for_r(enc)) is False)
+
+
+def drill_small_order(tmp):
+    """A signature whose R carries a small-order component: the game refuses it, so must verify.
+
+    Start from a valid signature (R = rB, S = r + k*a) and add the order-2 point T to R. The new
+    signature is (R2 = R + T, S2 = r + k2*a), with k2 hashed over the NEW R bytes. The cofactored
+    equation [8][S2]B == [8](R2 + [k2]A) holds (8T is the identity), but the cofactorless R' =
+    [S2]B - [k2]A is R, whose bytes differ from R2: only the byte-exact check refuses it."""
+    seed = VEC_SEED
+    dll = tmp / "so.dll"
+    sig_path = tmp / "so.dll.sig"
+    dll.write_bytes(b"small order dll bytes " * 50)
+    sha = rs.hashlib.sha256(dll.read_bytes()).digest()
+    msg = rs.signed_message(VEC_TARGET, VEC_BUILD, sha)
+    secret, prefix, pub = rs._expand(seed)
+    a_point = rs._decode(pub)
+
+    good = rs.ed25519_sign(seed, msg)
+    r = rs._digest_int(prefix, msg) % rs._L
+    r_point = rs._mul(r, rs._BASE)
+    check("small order: the honest signature verifies", rs.ed25519_verify(pub, msg, good))
+    check("small order: the honest R is rB", rs._encode(r_point) == good[:32])
+
+    order2 = rs._decode(b"\xec" + b"\xff" * 30 + b"\x7f")
+    check("small order: T = (0, -1) is the order-2 point",
+          order2 is not None and rs._encode(order2) != rs._encode(rs._NEUTRAL)
+          and rs._encode(rs._double(order2)) == rs._encode(rs._NEUTRAL))
+
+    r2_point = rs._add(r_point, order2)
+    r2_bytes = rs._encode(r2_point)
+    k2 = rs._digest_int(r2_bytes, pub, msg) % rs._L
+    s2 = (r + k2 * secret) % rs._L
+    forged = r2_bytes + s2.to_bytes(32, "little")
+    check("small order: R2 differs from R", r2_bytes != good[:32])
+
+    lhs = rs._mul(8, rs._mul(s2, rs._BASE))
+    rhs = rs._mul(8, rs._add(r2_point, rs._mul(k2, a_point)))
+    check("small order control: the cofactored equation accepts it",
+          rs._encode(lhs) == rs._encode(rhs))
+    check("small order: ed25519_verify refuses it", rs.ed25519_verify(pub, msg, forged) is False)
+
+    write_ascii(sig_path, rs.format_sig(rs.TEST_KEY_ID, VEC_TARGET, VEC_BUILD, sha, forged))
+    rc, out = call(rs.cmd_verify, verify_ns(dll, sig_path, True))
+    check("small order: verify refuses it at signature",
+          rc == 1 and out == "release_sign: verify failed at signature\n")
+    write_ascii(sig_path, rs.format_sig(rs.TEST_KEY_ID, VEC_TARGET, VEC_BUILD, sha, good))
+    rc, out = call(rs.cmd_verify, verify_ns(dll, sig_path, True))
+    check("small order control: the honest file verifies",
+          rc == 0 and out == "release_sign: verified key 255\n")
 
 
 def refused_grammar(text):
@@ -515,6 +566,7 @@ def main():
         tmp = pathlib.Path(t)
         guarded(drill_ed25519)
         guarded(drill_vector_and_grammar)
+        guarded(drill_small_order, tmp)
         guarded(drill_rows)
         guarded(drill_test_key_path, tmp)
         guarded(drill_release_path, tmp)
