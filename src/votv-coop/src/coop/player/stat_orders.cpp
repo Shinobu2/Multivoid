@@ -245,10 +245,8 @@ Sent SendOrder(uint8_t slot, const Order& order, OrderDone done) {
     w.token = token;
     coop::net::StatOrderPayload p;
     Pending back;
-    if (!PackOrder(w, &p)) {
-        g_table.Take(token, slot, generation, Kind::Order, &back);
-        return Sent::BadName;
-    }
+    PackOrder(w, &p);   // cannot fail: an effect op's name passed ValidEffectName above
+    // MTA stamps a synced set with a sync-time context; the host writes no copy at send time, so nothing is stamped.
     if (!s->SendReliableToSlot(slot, ReliableKind::StatOrder, &p, sizeof p)) {
         g_table.Take(token, slot, generation, Kind::Order, &back);
         return Sent::SendFailed;
@@ -322,8 +320,7 @@ void HandleOrder(Session& s, const Session::ReliableMessage& m) {
     if (coop::net_pump::IsWorldSettled()) {
         r = ApplyOrder(w, &now);
         // The profile goes before the answer, on the lane the answer rides, so the host has stored it
-        // when it handles the answer. MTA stamps a synced set with a sync-time context; here nothing
-        // is stamped, since the owner's profile precedes its answer on one lane.
+        // when it handles the answer.
         if (r == Result::Applied && w.op == Op::SetStat && InProfile(w.field))
             profileSent = coop::player_inventory_sync::SendProfileNow(&s);
     }
