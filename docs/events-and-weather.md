@@ -76,8 +76,10 @@ A connected client ticks no shared-world spawner and rolls no shared-world spawn
 tick or its entry function, each refused at the script gate by a watch on its class and function
 names while a client session runs. Shared-world content then arrives only from the host
 through the character, world-actor and prop mirrors. A spawner anchored to the player's camera
-(the pinecone drops) is the exception: each peer rolls its own
-and the drops are shared peer-symmetrically. The remaining randomness is closed shape by shape:
+(the pinecone drops) is the exception: each peer rolls its own.
+The host's drops reach every peer as ordinary prop births; a client's -- a pinecone, a stick, a
+crystal -- go to the host as a drop intent, the host builds them and every peer sees them
+(`coop/props/prop_drop_intent`). The remaining randomness is closed shape by shape:
 a mirror where the host owns the roll and the state, an intent where a client's action makes
 the host roll (a shop delivery time, a signal catch, a device claim), and a shared seed where
 the game already uses a seeded stream. Cosmetic-local randomness (view bob, flicker, exhaust)

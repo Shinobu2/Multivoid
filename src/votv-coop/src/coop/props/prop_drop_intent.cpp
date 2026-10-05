@@ -108,6 +108,17 @@ void FillWireStr(uint8_t& len, char (&data)[N], const std::wstring& s) {
     for (size_t i = 0; i < s.size() && i < (N - 1); ++i) data[len++] = static_cast<char>(s[i]);
 }
 
+// The forage the pinecone spawner drops (a pinecone, a stick, a crystal). The spawner anchors at
+// this player's camera and runs on every peer, so what it drops here exists nowhere else; the
+// deferred-spawn observer meant to share it sees no such spawn in this game build, which the drain
+// below answers by sending each one to the host like a place.
+bool IsAmbientForage(void* actor) {
+    const std::wstring cls = R::ClassNameOf(actor);
+    for (const wchar_t* name : P::name::kAmbientPropSpawnMirrorClasses)
+        if (cls == name) return true;
+    return false;
+}
+
 std::wstring WireToWide(const uint8_t len, const char* data, size_t cap) {
     std::wstring w;
     const size_t n = (len < cap) ? len : cap;
@@ -433,7 +444,10 @@ void Tick(coop::net::Session* session) {
         // NOT a freshBirth: that kind means a device put an item in a hand and sleeps the host's
         // copy, while a menu prop is dropped in the world at the player's aim and must fall on the
         // host exactly as it falls here -- the transform block below sends its real physics state.
-        if (!parked && !freshBirth && !e.containerExtract && !e.playerSpawn) {
+        // The forage this peer's own spawner dropped: unparked, untracked and not a mirror, so the
+        // host has no copy; it goes as an ordinary drop intent and falls on the host as it falls here.
+        const bool ambientBirth = !parked && !freshBirth && IsAmbientForage(e.actor);
+        if (!parked && !freshBirth && !e.containerExtract && !e.playerSpawn && !ambientBirth) {
             probe::NoteDrainExit(e.actor, "not-a-place-nor-whitelisted-birth", e.tries, key);
             continue;
         }
@@ -498,11 +512,13 @@ void Tick(coop::net::Session* session) {
         probe::NoteDrainExit(e.actor,
                              freshBirth     ? "authored-fresh-birth"
                              : e.playerSpawn ? "authored-player-spawn"
+                             : ambientBirth  ? "authored-ambient-forage"
                                              : "authored-drop-intent",
                              e.tries, key);
         UE_LOGI("[PROP-DROP] CLIENT authored %s key='%ls' cls='%ls' name='%ls' loc=(%.1f,%.1f,%.1f)%s",
                 freshBirth     ? "FRESH-BIRTH intent"
                 : e.playerSpawn ? "PLAYER-SPAWN intent"
+                : ambientBirth  ? "AMBIENT-FORAGE intent"
                                 : "drop intent",
                 key.c_str(), cls.c_str(),
                 WireToWide(p.propName.len, p.propName.data, sizeof(p.propName.data)).c_str(),
