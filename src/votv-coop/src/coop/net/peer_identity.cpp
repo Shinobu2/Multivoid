@@ -497,7 +497,10 @@ bool Load() {
         } else {
             // Same shape as the retired player_guid's unreadable-ini path: the session still
             // works, the identity just does not survive a restart, and saying so is the
-            // difference between a puzzle and a known state.
+            // difference between a puzzle and a known state. MTA refuses to start when its
+            // server-id.keys cannot be read or created
+            // (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:758-762); a client of a
+            // single-player game still plays, on a temporary identity.
             UE_LOGW("peer_identity: minted identity %s but could NOT write %ls (error %lu) -- "
                     "this identity is TEMPORARY and your stored inventory will not be found "
                     "again next launch", g_guid.c_str(),

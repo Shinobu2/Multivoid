@@ -3,8 +3,10 @@
 // kill or a full disk leaves the target as the old file or the new one and never a cut one.
 //
 // MTA writes a `_new_` file and swaps through an `_old_` one with a recovery flag
-// (reference/mtasa-blue/Shared/XML/CXMLFileImpl.cpp:138-170); one replacing move needs no
-// journal -- the target is the old file or the new one -- and the flush is ours.
+// (reference/mtasa-blue/Shared/XML/CXMLFileImpl.cpp:138-180), because its CRT rename cannot
+// replace an existing file (reference/mtasa-blue/Shared/sdk/SharedUtil.File.hpp:1678);
+// MoveFileExW with MOVEFILE_REPLACE_EXISTING can, in one step, so no journal is needed -- the
+// target is the old file or the new one -- and the flush is ours.
 //
 // Engine-free (Win32 only) and silent: each caller keeps its own log line and its own failure
 // policy, since "the ban holds for this session only" and "the ini left unchanged" are the
@@ -69,8 +71,9 @@ bool VolumeKeepsAcls(const std::filesystem::path& path);
 // "move".
 std::string Describe(const Result& r);
 
-// The un-gated boot selftest: `atomic_file selftest: ALL PASS (N checks)`, or one
-// `atomic_file selftest FAIL: <case>` per failure and `atomic_file selftest: M/N checks passed`.
+// The un-gated boot selftest, once per process (a later call returns the first verdict, silently):
+// `atomic_file selftest: ALL PASS (N checks)`, or one `atomic_file selftest FAIL: <case>` per
+// failure and `atomic_file selftest: M/N checks passed`.
 bool RunSelftest();
 
 }  // namespace coop::atomic_file

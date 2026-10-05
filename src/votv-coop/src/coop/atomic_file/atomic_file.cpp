@@ -118,6 +118,9 @@ Result Write(const std::filesystem::path& target, std::string_view bytes, Mode m
         failed = Step::Close;
         error = ::GetLastError();
     }
+    // No fallback on a failed move, unlike MTA's FileRename
+    // (reference/mtasa-blue/Shared/sdk/SharedUtil.File.hpp:333): a copy or an in-place write
+    // would give up the atomicity.
     if (failed == Step::None && !::MoveFileExW(temp.c_str(), target.c_str(), MoveFlags(mode, sync))) {
         failed = Step::Move;
         error = ::GetLastError();

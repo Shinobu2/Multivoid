@@ -286,7 +286,8 @@ bool FollowWrittenSlot(const std::wstring& written) {
     };
     std::unordered_set<std::wstring> names;
     for (const fs::path& file : set) {
-        // Cached: the game thread, at a save to a new slot; the next cut writes the primary ToDisk.
+        // Cached: the old slot keeps the intact set, so a power cut just after the copy can cost
+        // the new slot's copy and never the old one.
         // A stream iterator stops at the first read error without setting badbit, so the bytes are
         // checked against the size the file system gave before the read.
         std::string bytes;
