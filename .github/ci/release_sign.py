@@ -9,12 +9,12 @@
 build it belongs to and an Ed25519 signature over `signed_message`. `verify` applies the same
 grammar and steps as the game, and prints which step refused. `keygen` makes a key in memory, hands
 its private half straight to the `release` environment's secret through `gh`, and prints only the
-table row; it refuses first unless that environment is protected as the runbook sets it. The game's check is the vendored
-ed25519-donna `ed25519_sign_open` (src/votv-coop/third_party/GameNetworkingSockets/src/external/
-ed25519-donna/ed25519.c); `verify` is the same cofactorless, byte-exact check (RFC 8032 section
-5.1.7 allows it): it recomputes R' = [S]B - [k]A, encodes it and accepts only when those 32 bytes
-equal the signature's R. It differs from the game in two ways, none of which an honest `sign` can
-reach:
+table row; it refuses first unless that environment is protected as the runbook sets it.
+The game's check is the vendored ed25519-donna `ed25519_sign_open`
+(src/votv-coop/third_party/GameNetworkingSockets/src/external/ed25519-donna/ed25519.c);
+`verify` is the same cofactorless, byte-exact check (RFC 8032 section 5.1.7 allows it): it
+recomputes R' = [S]B - [k]A, encodes it and accepts only when those 32 bytes equal the
+signature's R. It differs from the game in two ways, none of which an honest `sign` can reach:
   - S: the game tests only the top three bits of S; `verify` requires S < L, which is stricter.
   - Points: when the game unpacks the public key it reduces y mod p and applies no x = 0 sign-bit
     rule, so it accepts non-canonical encodings that `verify` refuses. Its key is the compiled table.
