@@ -3,8 +3,10 @@
 
 Standard library only. A fake runner answers canned `gh` output and records every call's argv and
 keyword arguments, so no process starts and the real `gh` is never run; each run happens inside a
-temporary working directory with stdout and stderr captured. Two mutants are always run and the
-same assertion helper as the green arms must flag each of them.
+temporary working directory with stdout and stderr captured. The fake answers only the three
+commands keygen may run, with the output a real `gh` prints (so an echo of it is seen), and acts
+on the keyword arguments the way `subprocess.run` does. Two mutants are always run and the same
+assertion helper as the green arms must flag each of them.
 
 Run: python -I -B .github/ci/release_sign_keygen_drill.py
 """
@@ -35,19 +37,33 @@ write_ascii = lib.write_ascii
 leaks = lib.leaks
 
 
-SECRET_ARGV = ["gh", "secret", "set", rs.SEED_ENV, "--env", "release", "--repo",
-               "VOTV-MP/Multivoid"]
+REPO = "VOTV-MP/Multivoid"
+ENV_ARGV = ["gh", "api", "repos/%s/environments/release" % REPO]
+POLICIES_ARGV = ["gh", "api", "repos/%s/environments/release/deployment-branch-policies" % REPO]
+SECRET_ARGV = ["gh", "secret", "set", rs.SEED_ENV, "--env", "release", "--repo", REPO]
+API_KWARGS = {"capture_output": True, "text": True, "encoding": "utf-8"}
+SECRET_KWARGS = dict(API_KWARGS, errors="replace")
 UNPROTECTED = "release_sign: the release environment is not protected as the runbook sets it (%s)"
+ID_RANGE = "release_sign: --id must be 1..254\n"
+GH_LINE = "Set Actions secret MULTIVOID_RELEASE_KEY for environment release in VOTV-MP/Multivoid\n"
+GH_WARNING = "warning: a newer release of gh is available\n"
+ABSENT = object()
 
 
-def canned_env(rule=None, **over):
-    """GitHub's REST answer for a protected environment; `rule` edits the reviewers rule."""
+def canned_env(rule=None, place="last", **over):
+    """GitHub's REST answer for a protected environment; `rule` edits the reviewers rule (a value of
+    ABSENT drops that key) and `place` puts that rule last, first, or last of three."""
     reviewers = {"id": 2, "node_id": "n2", "type": "required_reviewers",
                  "prevent_self_review": False,
                  "reviewers": [{"type": "Team", "reviewer": {"name": "maintainers", "id": 7}}]}
     reviewers.update(rule or {})
-    env = {"name": "release", "can_admins_bypass": False,
-           "protection_rules": [{"id": 1, "node_id": "n1", "type": "branch_policy"}, reviewers],
+    for key in [k for k, v in reviewers.items() if v is ABSENT]:
+        del reviewers[key]
+    other = {"id": 1, "node_id": "n1", "type": "branch_policy"}
+    rules = {"last": [other, reviewers], "first": [reviewers, other],
+             "last of three": [{"id": 0, "node_id": "n0", "type": "wait_timer"}, other,
+                               reviewers]}[place]
+    env = {"name": "release", "can_admins_bypass": False, "protection_rules": rules,
            "deployment_branch_policy": {"protected_branches": False,
                                         "custom_branch_policies": True}}
     env.update(over)
@@ -60,39 +76,57 @@ def canned_policies(*extra):
         {"id": 3 + i, "node_id": "n%d" % i, "name": n, "type": t} for i, (n, t) in enumerate(items)]}
 
 
+class Uncanned(Exception):
+    """The code under test ran a command the fake has no answer for."""
+
+
 class FakeGh:
     """A runner that answers from canned values and records every call; it starts no process."""
 
-    def __init__(self, environment=None, policies=None, secret=lambda text: (0, "", "")):
+    def __init__(self, environment=None, policies=None, secret=None):
         self.environment = canned_env() if environment is None else environment
         self.policies = canned_policies() if policies is None else policies
-        self.secret = secret
+        self.secret = secret or (lambda text: (0, GH_LINE, GH_WARNING))
         self.calls = []
 
     def __call__(self, argv, **kwargs):
         self.calls.append((list(argv), dict(kwargs)))
-        if argv[:3] == ["gh", "secret", "set"]:
+        if argv == SECRET_ARGV:
             answer = self.secret(kwargs.get("input"))
+        elif argv == ENV_ARGV:
+            answer = self.environment
+        elif argv == POLICIES_ARGV:
+            answer = self.policies
         else:
-            answer = self.policies if argv[2].endswith("/deployment-branch-policies") \
-                else self.environment
-            if isinstance(answer, (dict, list)):
-                answer = (0, json.dumps(answer), "")
+            raise Uncanned(" ".join(argv))
+        if isinstance(answer, (dict, list)):
+            answer = (0, json.dumps(answer), GH_WARNING)
         if isinstance(answer, Exception):
             raise answer
-        if kwargs.get("check") and answer[0] != 0:
-            raise subprocess.CalledProcessError(answer[0], argv, answer[1], answer[2])
-        return subprocess.CompletedProcess(argv, answer[0], answer[1], answer[2])
+        code, stdout, stderr = answer
+        if kwargs.get("check") and code != 0:
+            raise subprocess.CalledProcessError(code, argv, stdout, stderr)
+        if not kwargs.get("capture_output"):
+            # The child writes to the terminal, and the caller gets nothing back.
+            sys.stdout.write(stdout if isinstance(stdout, str) else "")
+            sys.stderr.write(stderr if isinstance(stderr, str) else "")
+            return subprocess.CompletedProcess(argv, code, None, None)
+        if kwargs.get("text") and kwargs.get("encoding"):
+            errors = kwargs.get("errors", "strict")
+            stdout, stderr = (v.decode(kwargs["encoding"], errors) if isinstance(v, bytes) else v
+                              for v in (stdout, stderr))
+        return subprocess.CompletedProcess(argv, code, stdout, stderr)
 
     def secret_calls(self):
         return [c for c in self.calls if c[0][:3] == ["gh", "secret", "set"]]
 
 
-def drive(keygen, fake, table, key_id=2, repo="VOTV-MP/Multivoid"):
+def drive(keygen, fake, table, key_id="2", repo=REPO):
     """Runs a keygen inside a temporary working directory with stdout and stderr captured."""
     out, cap_out, cap_err = io.StringIO(), io.StringIO(), io.StringIO()
     args = argparse.Namespace(id=key_id, repo=repo)
     here = os.getcwd()
+    raised = None
     with tempfile.TemporaryDirectory() as work:
         os.chdir(work)
         try:
@@ -103,11 +137,22 @@ def drive(keygen, fake, table, key_id=2, repo="VOTV-MP/Multivoid"):
                 except rs.SignError as e:
                     out.write(str(e) + "\n")
                     rc = e.code
+                except SystemExit as e:
+                    rc = e.code
+                except Exception as e:
+                    rc = None
+                    raised = type(e).__name__
         finally:
             os.chdir(here)
         left = os.listdir(work)
     return {"rc": rc, "out": out.getvalue() + cap_out.getvalue(), "stderr": cap_err.getvalue(),
-            "left": left}
+            "left": left, "raised": raised}
+
+
+def via_main(args, runner, out):
+    """The command line's own path: the subparser, then main's runner parameter."""
+    return rs.main(["keygen", "--id", args.id, "--repo", args.repo], environ={}, out=out,
+                   runner=runner)
 
 
 def keygen_flaws(keygen, fake, table):
@@ -121,18 +166,24 @@ def keygen_flaws(keygen, fake, table):
             flaws.append(name)
 
     calls, secrets = fake.calls, fake.secret_calls()
+    need("no exception (%s)" % r["raised"], r["raised"] is None)
     need("exit 0", r["rc"] == 0)
     need("stderr empty", r["stderr"] == "")
     need("three calls, the secret last",
-         len(calls) == 3 and len(secrets) == 1 and calls[2] is secrets[0]
-         and all(c[0][:2] == ["gh", "api"] for c in calls[:2]))
+         len(calls) == 3 and len(secrets) == 1 and calls[2] is secrets[0])
+    need("the two protection reads, exact argv and kwargs",
+         [c[0] for c in calls[:2]] == [ENV_ARGV, POLICIES_ARGV]
+         and all(c[1] == API_KWARGS for c in calls[:2]))
     need("the dictated gh secret set argv", bool(secrets) and secrets[0][0] == SECRET_ARGV)
+    need("the secret set kwargs, exactly, and the input",
+         bool(secrets) and "input" in secrets[0][1]
+         and {k: v for k, v in secrets[0][1].items() if k != "input"} == SECRET_KWARGS)
     seed_hex = secrets[0][1].get("input") if secrets else None
     need("the input is 64 lowercase hex",
          isinstance(seed_hex, str) and re.fullmatch(r"[0-9a-f]{64}", seed_hex) is not None)
-    if flaws and not isinstance(seed_hex, str):
+    if not isinstance(seed_hex, str):
         return flaws
-    seed = bytes.fromhex(seed_hex) if re.fullmatch(r"[0-9a-f]{64}", seed_hex or "") else b"\0" * 32
+    seed = bytes.fromhex(seed_hex) if re.fullmatch(r"[0-9a-f]{64}", seed_hex) else b"\0" * 32
     pub = rs.ed25519_public(seed)
     try:
         rows = rs.read_rows(r["out"])
@@ -145,7 +196,6 @@ def keygen_flaws(keygen, fake, table):
         pub, rs.signed_message("selftest-fixture", 0, bytes(32)), bytes.fromhex(rows[0][2])))
     elsewhere = repr([(argv, {k: v for k, v in kw.items() if k != "input"}) for argv, kw in calls])
     need("the seed only in the input", not leaks(seed, elsewhere + r["out"] + r["stderr"]))
-    need("check is never passed", all("check" not in kw for _, kw in calls))
     need("the table is unchanged", table.read_bytes() == table_before)
     need("the working directory is empty", r["left"] == [])
     return flaws
@@ -164,29 +214,51 @@ def leaking_keygen(args, runner, out):
 
 
 def unchecked_keygen(args, runner, out):
-    runner(SECRET_ARGV, input=os.urandom(32).hex(), capture_output=True, text=True,
-           encoding="utf-8")
+    runner(SECRET_ARGV, input=os.urandom(32).hex(), **SECRET_KWARGS)
     return rs.cmd_keygen(args, runner, out)
 
 
-def drill_keygen(tmp):
+def one_row_table(tmp):
     table = tmp / "kg.inc"
     write_ascii(table, "// one row\n" + rs.format_row(1, rs.ed25519_public(os.urandom(32)),
                                                        bytes(64)) + "\n")
+    return table
+
+
+def drill_keygen_green(tmp):
+    table = one_row_table(tmp)
     user = {"reviewers": [{"type": "User", "reviewer": {"login": "x", "id": 1}}]}
-    for name, fake in (("a Team reviewer", FakeGh()),
-                       ("a User reviewer", FakeGh(canned_env(user)))):
-        flaws = keygen_flaws(rs.cmd_keygen, fake, table)
+    undecoded = lambda text: (0, "Set Actions secret �\n", "! � warning\n")
+    raw_bytes = lambda text: (0, b"Set Actions secret \xff\n", b"! \xfe warning\n")
+    for name, keygen, fake in (
+            ("a Team reviewer", rs.cmd_keygen, FakeGh()),
+            ("a User reviewer", rs.cmd_keygen, FakeGh(canned_env(user))),
+            ("the reviewer rule first", rs.cmd_keygen, FakeGh(canned_env(place="first"))),
+            ("the reviewer rule last of three", rs.cmd_keygen,
+             FakeGh(canned_env(place="last of three"))),
+            ("a secret set whose output holds U+FFFD", rs.cmd_keygen, FakeGh(secret=undecoded)),
+            ("a secret set whose output is not UTF-8", rs.cmd_keygen, FakeGh(secret=raw_bytes)),
+            ("the command line through main", via_main, FakeGh())):
+        flaws = keygen_flaws(keygen, fake, table)
         check("keygen green with " + name + (": " + ", ".join(flaws) if flaws else ""), not flaws)
+
+
+def drill_keygen_mutants(tmp):
+    table = one_row_table(tmp)
     for name, mutant in (("a keygen that prints the seed", leaking_keygen),
                          ("a keygen that skips the protection check", unchecked_keygen)):
         check("mutant: %s caught" % name, bool(keygen_flaws(mutant, FakeGh(), table)))
 
+
+def drill_keygen_refuses(tmp):
+    table = one_row_table(tmp)
     refusals = {
         "no reviewer": (canned_env({"reviewers": []}), None, "no reviewer"),
         "no reviewers rule": (canned_env({"type": "wait_timer"}), None, "required reviewers"),
         "prevent_self_review true": (canned_env({"prevent_self_review": True}), None,
-                                              "self review"),
+                                     "self review"),
+        "prevent_self_review absent": (canned_env({"prevent_self_review": ABSENT}), None,
+                                       "self review"),
         "admins can bypass": (canned_env(can_admins_bypass=True), None, "admins can bypass"),
         "admin bypass absent": ({k: v for k, v in canned_env().items() if k != "can_admins_bypass"},
                                 None, "admins can bypass"),
@@ -196,7 +268,11 @@ def drill_keygen(tmp):
         "custom_branch_policies false": (canned_env(deployment_branch_policy={
             "protected_branches": False, "custom_branch_policies": False}), None,
             "deployment branch policy"),
+        "an extra deployment_branch_policy key": (canned_env(deployment_branch_policy={
+            "protected_branches": False, "custom_branch_policies": True, "extra": True}), None,
+            "deployment branch policy"),
         "a third policy": (None, canned_policies(("dev", "branch")), "branch policies"),
+        "a duplicated policy": (None, canned_policies(("main", "branch")), "branch policies"),
         "a missing policy": (None, {"total_count": 1, "branch_policies": [
             {"id": 3, "node_id": "n3", "name": "v*", "type": "tag"}]}, "branch policies"),
         "a policy of the wrong type": (None, {"total_count": 2, "branch_policies": [
@@ -221,6 +297,9 @@ def drill_keygen(tmp):
               r["rc"] == 3 and r["out"] == text + "\n" and r["stderr"] == ""
               and not fake.secret_calls() and r["left"] == [])
 
+
+def drill_keygen_secret(tmp):
+    table = one_row_table(tmp)
     fake = FakeGh(secret=lambda text: (1, text, "rejected " + text))
     r = drive(rs.cmd_keygen, fake, table)
     check("keygen secret fails: the message is dictated and holds nothing else",
@@ -231,26 +310,64 @@ def drill_keygen(tmp):
     check("keygen secret set cannot run: exit 3",
           r["rc"] == 3 and r["out"] == "release_sign: gh is not installed or cannot run\n")
 
+
+def drill_keygen_readback(tmp):
+    """The new row must read back BEFORE the secret is set; a row that does not stops the run."""
+    table = one_row_table(tmp)
+    original = rs.read_rows
+
+    def loses_the_new_row(text):
+        return [] if text.startswith("MV_RELEASE_KEY(") else original(text)
+
+    fake = FakeGh()
+    rs.read_rows = loses_the_new_row
+    try:
+        r = drive(rs.cmd_keygen, fake, table)
+    finally:
+        rs.read_rows = original
+    check("keygen row read back: a row that does not is exit 3 and no secret is set",
+          r["rc"] == 3 and r["out"] == "release_sign: the new row did not read back\n"
+          and r["stderr"] == "" and not fake.secret_calls() and len(fake.calls) == 2
+          and r["left"] == [])
+
+
+def drill_keygen_ids(tmp):
+    table = tmp / "kg_ids.inc"
     write_ascii(table, "// two rows\n" + "".join(
         rs.format_row(i, rs.ed25519_public(os.urandom(32)), bytes(64)) + "\n" for i in (3, 5)))
-    range_text, rank_text = "--id must be 1..254", "--id must be greater than 5"
-    absent = "release_keys.inc not found at the checkout"
-    for label, where, key_id, repo, text in (
-            ("--id 0", table, 0, "VOTV-MP/Multivoid", range_text),
-            ("--id 255", table, 255, "VOTV-MP/Multivoid", range_text),
-            ("--id 5, the highest row", table, 5, "VOTV-MP/Multivoid", rank_text),
-            ("--id 4, below it", table, 4, "VOTV-MP/Multivoid", rank_text),
-            ("a bad --repo", table, 6, "not a repo", "--repo must be owner/name"),
-            ("no table", tmp / "absent.inc", 6, "VOTV-MP/Multivoid", absent)):
+    rank_text = "release_sign: --id must be greater than 5\n"
+    repo_text = "release_sign: --repo must be owner/name\n"
+    absent = "release_sign: release_keys.inc not found at the checkout\n"
+    for label, keygen, where, key_id, repo, text in (
+            ("--id 0", rs.cmd_keygen, table, "0", REPO, ID_RANGE),
+            ("--id 255", rs.cmd_keygen, table, "255", REPO, ID_RANGE),
+            ("--id 5, the highest row", rs.cmd_keygen, table, "5", REPO, rank_text),
+            ("--id 4, below it", rs.cmd_keygen, table, "4", REPO, rank_text),
+            ("a bad --repo", rs.cmd_keygen, table, "6", "not a repo", repo_text),
+            ("a --repo with a trailing path", rs.cmd_keygen, table, "6", REPO + "/extra",
+             repo_text),
+            ("a --repo with a trailing newline", rs.cmd_keygen, table, "6", REPO + "\n",
+             repo_text),
+            ("no table", rs.cmd_keygen, tmp / "absent.inc", "6", REPO, absent),
+            ("--id 1_0 on the command line", via_main, table, "1_0", REPO, ID_RANGE),
+            ("--id +7 on the command line", via_main, table, "+7", REPO, ID_RANGE),
+            ("--id 007 on the command line", via_main, table, "007", REPO, ID_RANGE),
+            ("--id with a trailing Arabic-Indic digit", via_main, table, "1٥", REPO,
+             ID_RANGE),
+            ("--id with a leading space", via_main, table, " 7", REPO, ID_RANGE),
+            ("an empty --id", via_main, table, "", REPO, ID_RANGE)):
         fake = FakeGh()
-        r = drive(rs.cmd_keygen, fake, where, key_id=key_id, repo=repo)
+        r = drive(keygen, fake, where, key_id=key_id, repo=repo)
         check("keygen ids: %s is exit 2 with no runner call" % label,
-              r["rc"] == 2 and r["out"] == "release_sign: " + text + "\n" and not fake.calls)
+              r["rc"] == 2 and r["out"] == text and r["stderr"] == "" and not fake.calls)
 
 
 def main():
     with tempfile.TemporaryDirectory() as t:
-        guarded(drill_keygen, pathlib.Path(t))
+        tmp = pathlib.Path(t)
+        for group in (drill_keygen_green, drill_keygen_mutants, drill_keygen_refuses,
+                      drill_keygen_secret, drill_keygen_readback, drill_keygen_ids):
+            guarded(group, tmp)
     return lib.finish("release_sign keygen drill")
 
 

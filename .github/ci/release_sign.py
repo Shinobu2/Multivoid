@@ -423,16 +423,23 @@ def _check_protection(environment, policies):
         raise _unprotected("branch policies")
 
 
+def _key_id(text):
+    """The strict parse `sign --build` applies to its number: plain ASCII digits, no sign, no
+    underscore, no leading zero."""
+    if re.fullmatch(r"[1-9][0-9]{0,2}", text, re.ASCII) is None or int(text) > 254:
+        raise SignError("usage", 2, "release_sign: --id must be 1..254")
+    return int(text)
+
+
 def cmd_keygen(args, runner, out):
     """The order is the custody: refuse an unprotected environment, then make the key, check its
     row, hand the seed to gh's standard input, and print the row. No file is written."""
     if _REPO.fullmatch(args.repo) is None:
         raise SignError("usage", 2, "release_sign: --repo must be owner/name")
     rows = _table_rows()
-    if not 1 <= args.id <= 254:
-        raise SignError("usage", 2, "release_sign: --id must be 1..254")
+    key_id = _key_id(str(args.id))
     highest = max((row[0] for row in rows), default=0)
-    if args.id <= highest:
+    if key_id <= highest:
         raise SignError("usage", 2, "release_sign: --id must be greater than %d" % highest)
 
     base = "repos/%s/environments/release" % args.repo
@@ -443,14 +450,17 @@ def cmd_keygen(args, runner, out):
     seed = os.urandom(32)
     pub = ed25519_public(seed)
     fixture = ed25519_sign(seed, signed_message("selftest-fixture", 0, bytes(32)))
-    row = format_row(args.id, pub, fixture)
-    if read_rows(row) != [(args.id, pub.hex(), fixture.hex())]:
+    row = format_row(key_id, pub, fixture)
+    if read_rows(row) != [(key_id, pub.hex(), fixture.hex())]:
         raise SignError("row", 3, "release_sign: the new row did not read back")
 
-    # Never check=True: the exception it raises carries the input, which is the seed.
+    # Never check=True: the exception it raises carries the input, which is the seed. The output
+    # is read with errors="replace": a byte that does not decode must not raise after the secret
+    # is set and before the row is printed.
     try:
         p = runner(["gh", "secret", "set", SEED_ENV, "--env", "release", "--repo", args.repo],
-                   input=seed.hex(), capture_output=True, text=True, encoding="utf-8")
+                   input=seed.hex(), capture_output=True, text=True, encoding="utf-8",
+                   errors="replace")
     except OSError:
         raise SignError("gh", 3, _GH_MISSING) from None
     if p.returncode != 0:
@@ -473,12 +483,12 @@ def _parser():
     v.add_argument("--sig", required=True)
     v.add_argument("--trust-test-key", action="store_true")
     k = sub.add_parser("keygen", allow_abbrev=False)
-    k.add_argument("--id", required=True, type=int)
+    k.add_argument("--id", required=True)
     k.add_argument("--repo", required=True)
     return parser
 
 
-def main(argv, environ=None, out=None):
+def main(argv, environ=None, out=None, runner=subprocess.run):
     environ = os.environ if environ is None else environ
     out = sys.stdout if out is None else out
     args = _parser().parse_args(argv)
@@ -486,7 +496,7 @@ def main(argv, environ=None, out=None):
         if args.command == "sign":
             return cmd_sign(args, environ, out)
         if args.command == "keygen":
-            return cmd_keygen(args, subprocess.run, out)
+            return cmd_keygen(args, runner, out)
         return cmd_verify(args, out)
     except SignError as e:
         out.write(str(e) + "\n")
