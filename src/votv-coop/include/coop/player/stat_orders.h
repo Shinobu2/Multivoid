@@ -8,6 +8,8 @@
 // the host's stored profile follows the owner's own and the host checks it before saying so. The
 // host's own player (slot 0) is ordered and read in place by the same apply and the same read.
 
+#pragma once
+
 // MTA stamps a synced set with a sync-time context so a stale puresync cannot overwrite it
 // (reference/mtasa-blue/Server/mods/deathmatch/logic/CElement.cpp:1281); here the host never writes
 // its copy at send time, so nothing is stamped. For the query pair, MTA's resendPlayerModInfo
@@ -18,8 +20,6 @@
 // (reference/mtasa-blue/Server/mods/deathmatch/logic/CStaticFunctionDefinitions.cpp:3329-3349,
 // reference/mtasa-blue/Server/mods/deathmatch/logic/packets/CPlayerScreenShotPacket.cpp:16-60); ours
 // is stricter: the token, the slot and the generation must all match. Shapes only.
-
-#pragma once
 
 #include "coop/net/session.h"
 #include "coop/player/stat_orders_wire.h"
