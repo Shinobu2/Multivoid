@@ -14,6 +14,7 @@
 #define NOMINMAX
 #include <windows.h>
 
+#include <mutex>
 #include <string>
 #include <system_error>
 
@@ -57,7 +58,7 @@ void SweepDeadScratch(const std::wstring& exeDir) {
 
 }  // namespace
 
-bool RunSelftest() {
+static bool RunSelftestBody() {
     CheckSink sink;
     sink.breakFirst = coop::config::ResolveFlag(::coop::config_registry::rows::selftest_break_permissions);
     sink.onFail = &ReportFail;
@@ -91,6 +92,15 @@ bool RunSelftest() {
     }
     UE_LOGE("permissions selftest: %d/%d checks passed", sink.passed, sink.total);
     return false;
+}
+
+// Once per process: the disk case writes and sweeps a scratch folder, and a session Stop/Start
+// would redo it; a later call returns the first run's verdict without output.
+bool RunSelftest() {
+    static std::once_flag ran;
+    static bool verdict = false;
+    std::call_once(ran, [] { verdict = RunSelftestBody(); });
+    return verdict;
 }
 
 }  // namespace coop::permissions

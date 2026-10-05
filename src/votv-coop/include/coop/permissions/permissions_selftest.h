@@ -1,5 +1,5 @@
 // coop/permissions/permissions_selftest.h -- the permission model's selftest. RunSelftest is the
-// boot runner (it logs and reads the red-arm row); each Run<Name>Cases function holds one concern's
+// boot runner (it logs and reads the red-arm row, and runs once per process); each Run<Name>Cases function holds one concern's
 // checks and needs nothing but a CheckSink (the files cases take a scratch folder for their disk
 // case), so a process without the engine layer (the arbiter's own executable) compiles the cases
 // and brings its own runner.
@@ -38,7 +38,8 @@ void RunFilesCases(CheckSink& sink, const std::filesystem::path& scratch);
 void RunEditCases(CheckSink& sink);
 void RunGrantsCases(CheckSink& sink);
 
-// Runs every cases function and logs the result line. True when every check passed.
+// Runs every cases function and logs the result line, once per process; a later call returns the
+// first run's verdict without output. True when every check passed.
 bool RunSelftest();
 
 }  // namespace coop::permissions
