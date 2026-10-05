@@ -355,6 +355,12 @@ void NoChangeAndOwnerRows(Checker& check, const Registry& reg) {
               Replied(Run(reg, console, "mv user Cy permission set a.b"), "No change."),
           "mv: the same set twice is no change the second time");
 
+    ResetFake();
+    check(TextOf(true, "default") == nullptr &&
+              Replied(Run(reg, console, "mv group default permission unset x"), "No change.") &&
+              F().applyCalls == 1 && F().told.empty() && TextOf(true, "default") == nullptr,
+          "mv: unsetting what the default group lacks, with no file, is no change and tells no one");
+
     const Caller bob = Bob();
     const DispatchResult loses = Run(reg, bob, "mv group default permission set multivoid.mv.creategroup false");
     check(Replied(loses, "That would take multivoid.mv.creategroup away from the host.") && !F().callerIsOwner,
