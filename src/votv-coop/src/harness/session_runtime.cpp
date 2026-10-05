@@ -8,6 +8,7 @@
 #include "harness/pump.h"
 #include "harness/world_boot.h"
 
+#include "coop/atomic_file/atomic_file.h"
 #include "coop/bug_report/report_core.h"
 #include "coop/commands/commands_selftest.h"
 #include "coop/comms/chat_sync.h"
@@ -236,6 +237,8 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // And the ban file's codec, the address rule and the address index: a record read wrong is a
     // player let in or a file never rewritten, and neither shows until someone rejoins.
     coop::ban_list::RunSelftest();
+    // And the one file writer: a write that is not whole is a lost ini, ban or key.
+    coop::atomic_file::RunSelftest();
     // Reset net_pump's edge detectors, so a Stop/Start on one process carries no stale "was
     // connected" or "was holding" entries into the new session.
     coop::net_pump::OnSessionStart();
