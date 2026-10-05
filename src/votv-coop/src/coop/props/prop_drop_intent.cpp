@@ -15,7 +15,7 @@
 #include "coop/props/prop_wire_parity.h"    // PhysFlagsOf, the one builder of a live prop's flags
 #include "coop/props/prop_element_tracker.h"// GetPropElementIdForActor, ResolveLiveActorByKey
 #include "coop/props/container_contents_sync.h"  // TakeObjInFlight; a thrown container's birth slice
-#include "coop/creatures/npc_sync.h"             // GetNpcIdForActor: a birth a mirrored character made
+#include "coop/element/element.h"                // the source's element type and mirror flag
 #include "coop/session/world_load_episode.h"  // InEpisode (quiet during the join loadObjects churn)
 #include "ue_wrap/core/call.h"                   // ParamFrame + Call (setKey on the host re-spawn)
 #include "ue_wrap/engine/engine.h"                 // BeginDeferredSpawn/FinishDeferredSpawn/SetActorScale3D
@@ -84,6 +84,22 @@ struct PendingPlace {
     bool    npcMirrorEcho = false;
 };
 std::vector<PendingPlace> g_pending;         // GT-only
+
+// Is `src` this client's mirror of a character or event actor the host simulates? Asked of the one
+// registry every binding writes (fresh mirrors, save adoptions), not the host's NPC lifecycle map,
+// which never holds a client's mirrors. The element must be bound to this very live actor, be a
+// mirror, and be a kind the host runs: an unknown or not-yet-bound source is not proof of a mirror.
+bool IsHostCharacterMirror(void* src) {
+    namespace EL = coop::element;
+    auto& reg = EL::Registry::Get();
+    const EL::ElementId eid = reg.EidForActor(src);
+    if (eid == EL::kInvalidId) return false;
+    const EL::Element* el = reg.Get(eid);
+    if (!el || !el->IsMirror()) return false;
+    const EL::ElementType t = el->GetType();
+    if (t != EL::ElementType::Npc && t != EL::ElementType::WorldActor) return false;
+    return EL::LiveActorOfType(eid, t) == src;
+}
 constexpr size_t kMaxPending  = 32;          // runaway backstop (a settled client rarely has >1 in flight)
 constexpr int    kMaxKeyTries = 8;           // ~8 net-pump ticks (~64 ms) for the Key to restore, then give up
 
@@ -204,6 +220,7 @@ void OnClientFinishSpawn(void* /*context*/, void* srcObj, void* result) {
         std::wstring caller = srcObj ? R::ClassNameOf(srcObj) : std::wstring(L"<none>");
         caller += L" / ";
         caller += fn ? R::ToString(R::NameOf(const_cast<void*>(fn))) : std::wstring(L"<native>");
+        if (srcObj && R::IsLive(srcObj) && IsHostCharacterMirror(srcObj)) caller += L" [mirror]";
         coop::dev::prop_birth_key_probe::NoteEnqueue(
             actor, R::ClassNameOf(actor), ue_wrap::prop::GetInteractableKeyString(actor),
             fromContainerExtract, caller);
@@ -211,8 +228,7 @@ void OnClientFinishSpawn(void* /*context*/, void* srcObj, void* result) {
     PendingPlace entry{actor, R::InternalIndexOf(actor), 0, fromContainerExtract, playerAuthored};
     if (srcObj && R::IsLive(srcObj)) {
         entry.forageSpawner = R::ClassNameOf(srcObj) == L"pineconeSpawner_C";
-        entry.npcMirrorEcho = !playerAuthored &&
-                              coop::npc_sync::GetNpcIdForActor(srcObj) != coop::element::kInvalidId;
+        entry.npcMirrorEcho = !playerAuthored && IsHostCharacterMirror(srcObj);
     }
     g_pending.push_back(entry);
     if (fromContainerExtract)
