@@ -4,6 +4,10 @@
 
 #include <nlohmann/json.hpp>
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <fstream>
@@ -340,34 +344,124 @@ void ReportMissingGroups(const Model& m, std::string_view stem, bool group, Load
     }
 }
 
-LoadReport LoadStore(const fs::path& dir, Model& m) {
-    LoadReport report;
+bool ReadStoreTexts(const fs::path& dir, std::vector<HolderText>* texts, LoadReport* report) {
+    texts->clear();
     std::error_code ec;
     const bool exists = fs::exists(dir, ec);
     if (ec) {
-        if (!IsNotFound(ec)) report.problems.push_back("permissions: could not read the folder");
-        return report;
+        if (IsNotFound(ec)) return true;
+        report->problems.push_back("permissions: could not read the folder");
+        return false;
     }
-    if (!exists) return report;
+    if (!exists) return true;
 
-    std::vector<std::pair<std::string, bool>> loadedHolders;
     for (const bool groups : {true, false}) {
-        for (const auto& [stem, path] : ListHolders(dir / (groups ? "groups" : "users"), groups ? "groups" : "users", report)) {
+        for (const auto& [stem, path] : ListHolders(dir / (groups ? "groups" : "users"), groups ? "groups" : "users", *report)) {
             if (groups ? !IsValidGroupName(stem) : !IsPlayerIdStem(stem)) {
-                report.problems.push_back(stem + (groups ? ": not a valid group name, file skipped"
-                                                         : ": not a 32 hex player id, file skipped"));
+                report->problems.push_back(stem + (groups ? ": not a valid group name, file skipped"
+                                                          : ": not a 32 hex player id, file skipped"));
                 continue;
             }
             std::string text;
             if (!ReadFile(path, &text)) {
-                report.problems.push_back(stem + ": unreadable");
+                report->problems.push_back(stem + ": unreadable");
                 continue;
             }
-            if (LoadHolderText(text, stem, groups, m, report)) loadedHolders.emplace_back(stem, groups);
+            texts->push_back(HolderText{stem, groups, std::move(text)});
+        }
+    }
+    return true;
+}
+
+LoadReport LoadHolders(const std::vector<HolderText>& texts, Model& m) {
+    LoadReport report;
+    std::vector<std::pair<std::string, bool>> loadedHolders;
+    for (const bool groups : {true, false}) {
+        for (const HolderText& t : texts) {
+            if (t.group != groups) continue;
+            if (LoadHolderText(t.text, t.stem, t.group, m, report)) loadedHolders.emplace_back(t.stem, t.group);
         }
     }
     for (const auto& [stem, groups] : loadedHolders) ReportMissingGroups(m, stem, groups, report);
     return report;
+}
+
+LoadReport LoadStore(const fs::path& dir, Model& m) {
+    LoadReport report;
+    std::vector<HolderText> texts;
+    if (!ReadStoreTexts(dir, &texts, &report)) return report;
+    LoadReport loaded = LoadHolders(texts, m);
+    report.groups = loaded.groups;
+    report.users = loaded.users;
+    report.problems.insert(report.problems.end(), std::make_move_iterator(loaded.problems.begin()),
+                           std::make_move_iterator(loaded.problems.end()));
+    return report;
+}
+
+std::string SerializeHolder(const Holder& h, int64_t now, bool pruneExpired) {
+    using OJson = nlohmann::ordered_json;
+    OJson root = OJson::object();
+    if (h.kind == HolderKind::User) root["primaryGroup"] = h.primaryGroup;
+    OJson list = OJson::array();
+    for (const Node& n : h.nodes.Nodes()) {
+        if (pruneExpired && n.expiry != 0 && n.expiry < now) continue;
+        if (n.value && n.expiry == 0 && n.contexts.Empty()) {
+            list.push_back(n.key);
+            continue;
+        }
+        OJson entry = OJson::object();
+        entry["permission"] = n.key;
+        if (!n.value) entry["value"] = false;
+        if (n.expiry != 0) entry["expiry"] = n.expiry;
+        if (!n.contexts.Empty()) {
+            // The pairs are sorted by key then value, so one key's values are adjacent.
+            OJson ctx = OJson::object();
+            const auto& pairs = n.contexts.Pairs();
+            for (size_t i = 0; i < pairs.size();) {
+                size_t end = i + 1;
+                while (end < pairs.size() && pairs[end].first == pairs[i].first) ++end;
+                if (end - i == 1) {
+                    ctx[pairs[i].first] = pairs[i].second;
+                } else {
+                    OJson values = OJson::array();
+                    for (size_t j = i; j < end; ++j) values.push_back(pairs[j].second);
+                    ctx[pairs[i].first] = std::move(values);
+                }
+                i = end;
+            }
+            entry["context"] = std::move(ctx);
+        }
+        list.push_back(std::move(entry));
+    }
+    root["permissions"] = std::move(list);
+    return root.dump(2, ' ', false, OJson::error_handler_t::replace) + "\n";
+}
+
+bool IsDefaultUser(const Holder& user, int64_t now, bool ignoreExpired) {
+    if (user.primaryGroup != kDefaultGroup) return false;
+    const std::string defaultKey = std::string("group.") + std::string(kDefaultGroup);
+    size_t counted = 0;
+    for (const Node& n : user.nodes.Nodes()) {
+        if (ignoreExpired && n.expiry != 0 && n.expiry < now) continue;
+        if (n.key != defaultKey || !n.value || n.expiry != 0 || !n.contexts.Empty()) return false;
+        ++counted;
+    }
+    return counted == 1;
+}
+
+atomic_file::Result WriteHolderFile(const fs::path& dir, bool group, std::string_view stem, const std::string* text) {
+    const fs::path folder = dir / (group ? L"groups" : L"users");
+    const fs::path path = folder / (std::wstring(stem.begin(), stem.end()) + L".json");
+    if (text == nullptr) {
+        if (::DeleteFileW(path.c_str()) != 0) return atomic_file::Result{};
+        const DWORD error = ::GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) return atomic_file::Result{};
+        return atomic_file::Result{atomic_file::Step::Move, error};
+    }
+    std::error_code ec;
+    fs::create_directories(folder, ec);
+    if (ec) return atomic_file::Result{atomic_file::Step::Open, static_cast<unsigned long>(ec.value())};
+    return atomic_file::Write(path, *text, atomic_file::Mode::Replace, atomic_file::Sync::ToDisk);
 }
 
 bool ShouldLoad(const LoadReport& report) { return report.problems.empty(); }

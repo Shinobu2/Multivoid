@@ -10,6 +10,7 @@
 #include "coop/permissions/node_map.h"
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -41,6 +42,10 @@ public:
     bool DeleteGroup(std::string_view name);
     const Holder* FindGroup(std::string_view name) const;
     const Holder* FindUser(std::string_view playerId) const;
+
+    // Calls `fn` for every group in ascending name order (the map is unordered: the names are
+    // collected and sorted first). The model must not change inside `fn`.
+    void ForEachGroup(const std::function<void(const Holder&)>& fn) const;
 
     // Sets (replacing the node of its identity) or removes a node; the key is normalised first and a
     // refused key changes nothing. True when the store changed. SetNode on a missing group is false

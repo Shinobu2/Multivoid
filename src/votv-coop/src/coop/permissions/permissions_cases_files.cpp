@@ -1,12 +1,15 @@
 // coop/permissions/permissions_cases_files.cpp -- the checks of coop/permissions/permission_files.h
-// and the model's load half: the text of a holder file parsed in memory (no disk), then a Model
-// loaded from parsed holders and asked as the files say.
+// and the model's load half: the text of a holder file parsed in memory, then a Model loaded from
+// parsed holders and asked as the files say, the writer's text read back, and one disk case in the
+// runner's scratch folder.
 
 #include "coop/permissions/permission_files.h"
 #include "coop/permissions/permissions_selftest.h"
 #include "coop/permissions/resolution.h"
 
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -188,65 +191,50 @@ bool ReportMentions(const LoadReport& r, std::string_view needle) {
     return false;
 }
 
-// What LoadStore does after listing, over texts held in memory: each file through LoadHolderText,
-// then every loaded holder through ReportMissingGroups. As in LoadStore, every group is added
-// before any user, because LoadHolderText checks a user's primary group against the groups so far.
+// A store held in memory, loaded through LoadHolders as a store read from disk is.
 struct MemoryStore {
     Model model;
     LoadReport report;
-    std::vector<std::pair<std::string, bool>> loaded;
-
-    void Add(std::string_view stem, bool group, std::string_view text) {
-        if (LoadHolderText(text, stem, group, model, report)) loaded.emplace_back(std::string(stem), group);
-    }
-    void Finish() {
-        for (const auto& [stem, group] : loaded) ReportMissingGroups(model, stem, group, report);
-    }
 };
+
+MemoryStore LoadMemory(const std::vector<HolderText>& texts) {
+    MemoryStore s;
+    s.report = LoadHolders(texts, s.model);
+    return s;
+}
 
 void WholeStoreCases(CheckSink& sink) {
     // A report with a problem is a broken store (ShouldLoad false); a report without one, and the
     // report of a server with no store, are not.
-    MemoryStore clean;
-    clean.Add("a", true, R"({"parents":["b"],"permissions":["ok.node"]})");
-    clean.Add("b", true, R"({"permissions":["other.node"]})");
-    clean.Add(Id('a'), false, R"({"primaryGroup":"a","parents":["a"]})");
-    clean.Finish();
+    const MemoryStore clean = LoadMemory({{"a", true, R"({"parents":["b"],"permissions":["ok.node"]})"},
+                                          {"b", true, R"({"permissions":["other.node"]})"},
+                                          {Id('a'), false, R"({"primaryGroup":"a","parents":["a"]})"}});
     sink.Check(clean.report.problems.empty() && clean.report.groups == 2 && clean.report.users == 1 &&
                    ShouldLoad(clean.report),
                "whole: a clean store loads, a parent group that sorts later is no miss");
 
     const Parsed bad = Parse(R"({"permissions":[{"permission":"deny.me","value":"no"},"b"]})");
-    MemoryStore oneBad;
-    oneBad.Add("a", true, R"({"permissions":["ok.node"]})");
-    oneBad.Add("b", true, R"({"permissions":[{"permission":"deny.me","value":"no"},"b"]})");
-    oneBad.Add(Id('a'), false, R"({"permissions":["ok.node"]})");
-    oneBad.Finish();
+    const MemoryStore oneBad =
+        LoadMemory({{"a", true, R"({"permissions":["ok.node"]})"},
+                    {"b", true, R"({"permissions":[{"permission":"deny.me","value":"no"},"b"]})"},
+                    {Id('a'), false, R"({"permissions":["ok.node"]})"}});
     sink.Check(HasProblem(bad, "permission entry 0 refused (value)") && !oneBad.report.problems.empty() &&
                    !ShouldLoad(oneBad.report),
                "whole: one refused entry among good holders makes the store broken");
 
     sink.Check(ShouldLoad(LoadReport{}), "whole: no store is not a broken store");
 
-    MemoryStore key;
-    key.Add("g1", true, R"({"permissions":["has space"]})");
-    key.Finish();
+    const MemoryStore key = LoadMemory({{"g1", true, R"({"permissions":["has space"]})"}});
     sink.Check(ReportHas(key.report, "g1: key \"has space\" refused") && !ShouldLoad(key.report) &&
                    key.report.groups == 1,
                "whole: a refused key is a problem and the holder still loads");
 
-    MemoryStore holder;
-    holder.Add("g1", true, "{}");
-    holder.Add("g1", true, "{}");
-    holder.Add("zz", false, "{}");
-    holder.Finish();
+    const MemoryStore holder = LoadMemory({{"g1", true, "{}"}, {"g1", true, "{}"}, {"zz", false, "{}"}});
     sink.Check(ReportHas(holder.report, "g1: refused") && ReportHas(holder.report, "zz: refused") &&
                    holder.report.groups == 1 && holder.report.users == 0 && !ShouldLoad(holder.report),
                "whole: a refused holder (a duplicate group, an invalid user id) is a problem");
 
-    MemoryStore primary;
-    primary.Add(Id('a'), false, R"({"primaryGroup":"ghost"})");
-    primary.Finish();
+    const MemoryStore primary = LoadMemory({{Id('a'), false, R"({"primaryGroup":"ghost"})"}});
     sink.Check(ReportHas(primary.report, Id('a') + ": primary group \"ghost\" does not exist") &&
                    !ShouldLoad(primary.report),
                "whole: a user whose primary group is missing is a problem");
@@ -254,21 +242,170 @@ void WholeStoreCases(CheckSink& sink) {
     // The holder file has no primaryGroup field: its primary is `default`, which exists, so no
     // primary line; the default step then promotes the missing parent to the stored primary, which
     // must not raise one either.
-    MemoryStore parent;
-    parent.Add("g1", true, R"({"parents":["phantom"]})");
-    parent.Add(Id('b'), false, R"({"parents":["nowhere"]})");
-    parent.Finish();
+    const MemoryStore parent = LoadMemory({{"g1", true, R"({"parents":["phantom"]})"},
+                                           {Id('b'), false, R"({"parents":["nowhere"]})"}});
     sink.Check(ReportHas(parent.report, "g1: parent group \"phantom\" does not exist") &&
                    ReportHas(parent.report, Id('b') + ": parent group \"nowhere\" does not exist") &&
                    !ReportMentions(parent.report, ": primary group") && !ShouldLoad(parent.report),
                "whole: a group or user naming a missing parent group is a problem, and only that");
 
-    MemoryStore falseParent;
-    falseParent.Add(Id('c'), false, R"({"permissions":[{"permission":"group.ghost","value":false}]})");
-    falseParent.Finish();
+    const MemoryStore falseParent =
+        LoadMemory({{Id('c'), false, R"({"permissions":[{"permission":"group.ghost","value":false}]})"}});
     sink.Check(falseParent.report.problems.empty() && ShouldLoad(falseParent.report) &&
                    falseParent.report.users == 1,
                "whole: a false group node is no parent, so a missing group it names is no problem");
+}
+
+Node WithContext(Node n, const char* key, const char* value) {
+    n.contexts.Add(key, value);
+    return n;
+}
+
+bool Has(const std::string& text, std::string_view needle) { return text.find(needle) != std::string::npos; }
+
+// Every kind of node the writer has a form for, written and read back: each holder serialised
+// again is byte-equal to the first text.
+void RoundTripCases(CheckSink& sink) {
+    Model m;
+    m.CreateGroup("a");
+    m.CreateGroup("b");
+    Node temp = N("temp.node");
+    temp.expiry = kNow + 60;
+    Node two = N("two.ctx");
+    two.contexts.Add("world", "x");
+    two.contexts.Add("world", "y");
+    m.SetNode(HolderKind::Group, "a", N("plain.node"));
+    m.SetNode(HolderKind::Group, "a", N("denied.node", false));
+    m.SetNode(HolderKind::Group, "a", temp);
+    m.SetNode(HolderKind::Group, "a", WithContext(N("ctx.node"), "server", "a"));
+    m.SetNode(HolderKind::Group, "a", two);
+    m.SetNode(HolderKind::Group, "a", N("weight.10"));
+    m.SetNode(HolderKind::Group, "a", N("group.b"));
+    m.SetNode(HolderKind::User, Id('a'), N("group.b"));
+    m.SetPrimaryGroup(Id('a'), "b");
+    m.SetNode(HolderKind::User, Id('a'), N("group.default", false));
+
+    std::vector<HolderText> texts;
+    m.ForEachGroup([&](const Holder& g) { texts.push_back({g.name, true, SerializeHolder(g, kNow, true)}); });
+    texts.push_back({Id('a'), false, SerializeHolder(*m.FindUser(Id('a')), kNow, true)});
+    const MemoryStore back = LoadMemory(texts);
+    bool equal = back.report.problems.empty() && texts.size() == 4;
+    for (const HolderText& t : texts) {
+        const Holder* h = t.group ? back.model.FindGroup(t.stem) : back.model.FindUser(t.stem);
+        equal = equal && h != nullptr && SerializeHolder(*h, kNow, true) == t.text;
+    }
+    sink.Check(equal, "write: every node form of a group and a user reads back to the same text");
+    sink.Check(Has(texts[0].text, "\"group.b\"") && !Has(texts[0].text, "\"parents\"") &&
+                   Has(texts[3].text, "\"primaryGroup\": \"b\""),
+               "write: a parent is a permissions entry, never a parents entry, and a user's primary is written");
+}
+
+void ExpiredNodeCases(CheckSink& sink) {
+    Model m;
+    m.CreateGroup("a");
+    Node old = N("old.node");
+    old.expiry = kNow - 1;
+    Node edge = N("edge.node");
+    edge.expiry = kNow;
+    m.SetNode(HolderKind::Group, "a", old);
+    m.SetNode(HolderKind::Group, "a", edge);
+    m.SetNode(HolderKind::Group, "a", N("live.node"));
+    const Holder& g = *m.FindGroup("a");
+    const std::string kept = SerializeHolder(g, kNow, false);
+    const std::string pruned = SerializeHolder(g, kNow, true);
+    sink.Check(Has(kept, "old.node") && !Has(pruned, "old.node"),
+               "write: an expired node is in the text without pruning and left out with it");
+    sink.Check(Has(pruned, "edge.node") && Has(pruned, "live.node"),
+               "write: a node whose expiry second is now still applies and is kept");
+}
+
+void DefaultUserCases(CheckSink& sink) {
+    Model m;
+    m.CreateGroup("b");
+    m.SetNode(HolderKind::User, Id('a'), N("group.default"));
+    const Holder& plain = *m.FindUser(Id('a'));
+    sink.Check(IsDefaultUser(plain, kNow, true) && IsDefaultUser(plain, kNow, false),
+               "no-file state: group.default alone is the default state");
+
+    Node old = N("old.node");
+    old.expiry = kNow - 5;
+    m.SetNode(HolderKind::User, Id('b'), N("group.default"));
+    m.SetNode(HolderKind::User, Id('b'), old);
+    const Holder& expired = *m.FindUser(Id('b'));
+    sink.Check(IsDefaultUser(expired, kNow, true) && !IsDefaultUser(expired, kNow, false),
+               "no-file state: an expired node beside it counts only without ignoreExpired");
+
+    m.SetNode(HolderKind::User, Id('c'), N("other.node"));
+    m.SetNode(HolderKind::User, Id('d'), WithContext(N("group.default"), "server", "a"));
+    m.SetNode(HolderKind::User, Id('e'), N("group.default"));
+    m.SetPrimaryGroup(Id('e'), "b");
+    sink.Check(!IsDefaultUser(*m.FindUser(Id('c')), kNow, true) && !IsDefaultUser(*m.FindUser(Id('c')), kNow, false) &&
+                   !IsDefaultUser(*m.FindUser(Id('d')), kNow, true) &&
+                   !IsDefaultUser(*m.FindUser(Id('d')), kNow, false) &&
+                   !IsDefaultUser(*m.FindUser(Id('e')), kNow, true) && !IsDefaultUser(*m.FindUser(Id('e')), kNow, false),
+               "no-file state: another live node, a context on group.default, or another primary is not it");
+}
+
+bool WriteByHand(const std::filesystem::path& p, const std::string& text) {
+    std::error_code ec;
+    std::filesystem::create_directories(p.parent_path(), ec);
+    std::ofstream f(p, std::ios::binary | std::ios::trunc);
+    f << text;
+    return static_cast<bool>(f);
+}
+
+void DiskCases(CheckSink& sink, const std::filesystem::path& scratch) {
+    // The runner has already failed a check when it had no folder to give.
+    if (scratch.empty()) return;
+    namespace fs = std::filesystem;
+    const std::string text = R"({"permissions":["staff.use"]})";
+    const fs::path file = scratch / "groups" / "staff.json";
+    sink.Check(WriteHolderFile(scratch, true, "staff", &text).ok() && fs::is_regular_file(file),
+               "disk: a write creates the folder and the file");
+    std::vector<HolderText> texts;
+    LoadReport read;
+    sink.Check(ReadStoreTexts(scratch, &texts, &read) && read.problems.empty() && texts.size() == 1 &&
+                   texts[0].stem == "staff" && texts[0].group && texts[0].text == text,
+               "disk: ReadStoreTexts returns the file written");
+    Model m;
+    const LoadReport loaded = LoadStore(scratch, m);
+    sink.Check(loaded.groups == 1 && loaded.users == 0 && loaded.problems.empty() && m.FindGroup("staff") != nullptr,
+               "disk: LoadStore loads the one group with no problem");
+
+    const std::string second = R"({"permissions":["staff.use","staff.more"]})";
+    std::vector<HolderText> again;
+    LoadReport readAgain;
+    sink.Check(WriteHolderFile(scratch, true, "staff", &second).ok() && ReadStoreTexts(scratch, &again, &readAgain) &&
+                   again.size() == 1 && again[0].text == second,
+               "disk: a second write replaces the file whole");
+
+    sink.Check(WriteHolderFile(scratch, true, "staff", nullptr).ok() && !fs::exists(file) &&
+                   WriteHolderFile(scratch, true, "staff", nullptr).ok() &&
+                   WriteHolderFile(scratch, false, Id('a'), nullptr).ok(),
+               "disk: a delete removes the file, and a delete of a missing file or folder is ok");
+
+    std::vector<HolderText> none;
+    LoadReport missing;
+    sink.Check(ReadStoreTexts(scratch / "nowhere", &none, &missing) && none.empty() && missing.problems.empty(),
+               "disk: a missing folder is read as an empty store");
+
+    sink.Check(WriteByHand(scratch / "groups" / "Bad Name.json", "{}") && WriteByHand(scratch / "users" / "abc.json", "{}"),
+               "disk: the hand-written fixtures are written");
+    std::vector<HolderText> skipped;
+    LoadReport skipReport;
+    sink.Check(ReadStoreTexts(scratch, &skipped, &skipReport) && skipped.empty() &&
+                   ReportHas(skipReport, "bad name: not a valid group name, file skipped") &&
+                   ReportHas(skipReport, "abc: not a 32 hex player id, file skipped"),
+               "disk: a bad group name and a bad player id are skipped with their problems");
+}
+
+void ForEachGroupCases(CheckSink& sink) {
+    Model m;
+    m.CreateGroup("b");
+    m.CreateGroup("a");
+    std::string order;
+    m.ForEachGroup([&](const Holder& g) { order += g.name + ";"; });
+    sink.Check(order == "a;b;default;", "groups: ForEachGroup visits in ascending name order");
 }
 
 void NameCases(CheckSink& sink) {
@@ -281,13 +418,18 @@ void NameCases(CheckSink& sink) {
 
 }  // namespace
 
-void RunFilesCases(CheckSink& sink) {
+void RunFilesCases(CheckSink& sink, const std::filesystem::path& scratch) {
     PermissionFormCases(sink);
     ParentFormCases(sink);
     RefusalCases(sink);
     ExplicitCases(sink);
     LoadCases(sink);
     WholeStoreCases(sink);
+    RoundTripCases(sink);
+    ExpiredNodeCases(sink);
+    DefaultUserCases(sink);
+    DiskCases(sink, scratch);
+    ForEachGroupCases(sink);
     NameCases(sink);
 }
 

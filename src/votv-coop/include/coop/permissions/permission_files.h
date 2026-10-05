@@ -1,14 +1,16 @@
-// coop/permissions/permission_files.h -- the hosted server's permission store, read-only: LuckPerms'
+// coop/permissions/permission_files.h -- the hosted server's permission store: LuckPerms'
 // JSON layout under `<server folder>\permissions\` (groups\<name>.json, users\<32 hex>.json). A
-// holder is named by its FILE stem, as LuckPerms names one. Engine-free: nlohmann and
-// <filesystem> only, no ue_wrap include, no logging; the caller logs the report.
+// holder is named by its FILE stem, as LuckPerms names one. Engine-free: nlohmann, <filesystem> and
+// coop/atomic_file (Win32 only), no ue_wrap include, no logging; the caller logs the report.
 //
 // Ported from LuckPerms common/src/main/java/me/lucko/luckperms/common/storage/implementation/file/
 // AbstractConfigurateStorage.java:411-504 (MIT, THIRD-PARTY-NOTICES.md): the three permission
-// forms, the three parent forms, the attributes. The store is edited by hand and read at each host
-// start; nothing is written back.
+// forms, the three parent forms, the attributes. The store is edited by hand or by the in-game
+// edit, read at each host start and at each edit, and written one holder at a time
+// (`WriteHolderFile`).
 #pragma once
 
+#include "coop/atomic_file/atomic_file.h"
 #include "coop/permissions/model.h"
 
 #include <filesystem>
@@ -45,7 +47,7 @@ bool ParseHolderText(std::string_view text, std::string_view stem, std::string* 
 // the primary group AS WRITTEN (`default` when the field is absent) must name a group `m` has, else
 // one problem `<stem>: primary group "<g>" does not exist`; LoadUser's default step rewrites the
 // stored one, so only the parsed value can be checked. That needs every group already in `m`:
-// LoadStore loads every group file before any user file, and a caller must do the same. True when
+// LoadHolders loads every group text before any user text, and a caller must do the same. True when
 // the holder loaded (and is counted in `report`). A parent group a holder names is checked by
 // ReportMissingGroups once every file is in. Engine-free.
 bool LoadHolderText(std::string_view text, std::string_view stem, bool group, Model& m, LoadReport& report);
@@ -56,13 +58,52 @@ bool LoadHolderText(std::string_view text, std::string_view stem, bool group, Mo
 // every holder after the last file is loaded: a group may name a parent that sorts after it.
 void ReportMissingGroups(const Model& m, std::string_view stem, bool group, LoadReport& report);
 
-// Reads `dir` (`<server folder>\permissions`) into `m`: every groups\*.json first, sorted by name so
-// a user's parents exist, then every users\*.json. A missing `dir` gives an empty report. A group
-// stem (lower-cased) must pass IsValidGroupName and a user stem be 32 hex; a file that fails is
-// skipped with a problem. Each file goes through LoadHolderText, then every loaded holder through
-// ReportMissingGroups. Expired nodes load as written (Applies filters them). `m` holds what loaded,
-// even beside problems; whether to USE it is ShouldLoad's answer, never the caller's guess.
+// One holder file as read: its lower-cased stem, whether it is a group's, and its text.
+struct HolderText {
+    std::string stem;
+    bool group;
+    std::string text;
+};
+
+// Reads `dir` (`<server folder>\permissions`) into `*texts`, replacing it: every groups\*.json
+// sorted by lower-cased stem, then every users\*.json sorted the same, so a user's parents come
+// first. A missing `dir` is true with no texts. A group stem (lower-cased) must pass
+// IsValidGroupName and a user stem be 32 hex; a file that fails, or cannot be read, is skipped
+// with a problem appended to `*report`, as is a folder that cannot be listed. False only when
+// `dir` itself could not be read (the problem `permissions: could not read the folder`).
+bool ReadStoreTexts(const std::filesystem::path& dir, std::vector<HolderText>* texts, LoadReport* report);
+
+// Loads `texts` into `m`: every group text, in order, through LoadHolderText, then every user text,
+// then every holder that loaded through ReportMissingGroups. Expired nodes load as written
+// (Applies filters them) and are left out when that holder is next written. `m` holds what loaded,
+// even beside problems; whether to USE it is ShouldLoad's answer, never the caller's guess. The
+// one load path: a store read from disk and a store held in memory both go through it.
+LoadReport LoadHolders(const std::vector<HolderText>& texts, Model& m);
+
+// ReadStoreTexts, then LoadHolders; the read problems come first in the returned report.
 LoadReport LoadStore(const std::filesystem::path& dir, Model& m);
+
+// The text of one holder's file, in the keys the loader reads and no other: for a user its
+// `primaryGroup`, then `permissions`, one entry per node in the holder's store order (a `group.<g>`
+// parent is an entry like any node). An entry is the plain string when the node is true, permanent
+// and global, else an object with `permission` and only the `value` (false), `expiry` (non-zero)
+// and `context` (not empty; a string for one value of a key, a list for more) the node needs. With
+// `pruneExpired` a node whose expiry has passed (non-zero and below `now`) is left out. A key the
+// loader does not read, and any formatting, in a hand-written file are not kept. PURE.
+std::string SerializeHolder(const Holder& h, int64_t now, bool pruneExpired);
+
+// True when the user holds nothing but the permanent, global, true `group.default` and has the
+// primary `default`: LuckPerms keeps no file for such a user. With `ignoreExpired` a node whose
+// expiry has passed is not counted; without it an expired node counts, as LuckPerms counts it. PURE.
+bool IsDefaultUser(const Holder& user, int64_t now, bool ignoreExpired);
+
+// Writes `*text` as `dir\groups\<stem>.json` (a group) or `dir\users\<stem>.json`, creating the
+// folder when absent, through atomic_file::Write (Replace, ToDisk); with a null `text` deletes the
+// file, a missing file or folder being success. `dir` is `<server folder>\permissions`. A folder
+// that cannot be created is `Step::Open` with its error, a delete that fails `Step::Move` with its
+// code. The stem is the caller's to validate. Any thread; no state.
+atomic_file::Result WriteHolderFile(const std::filesystem::path& dir, bool group, std::string_view stem,
+                                    const std::string* text);
 
 // The store loads whole or not at all: true only for a report with no problem. A store with a
 // problem is BROKEN, not empty: a dropped deny, or a refused group whose members inherited its

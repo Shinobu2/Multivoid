@@ -2,6 +2,7 @@
 
 #include "coop/permissions/model.h"
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -84,6 +85,14 @@ const Holder* Model::FindGroup(std::string_view name) const {
 const Holder* Model::FindUser(std::string_view playerId) const {
     auto it = users_.find(Lowered(playerId));
     return it == users_.end() ? nullptr : &it->second;
+}
+
+void Model::ForEachGroup(const std::function<void(const Holder&)>& fn) const {
+    std::vector<const Holder*> ordered;
+    ordered.reserve(groups_.size());
+    for (const auto& entry : groups_) ordered.push_back(&entry.second);
+    std::sort(ordered.begin(), ordered.end(), [](const Holder* a, const Holder* b) { return a->name < b->name; });
+    for (const Holder* g : ordered) fn(*g);
 }
 
 bool Model::SetNode(HolderKind kind, std::string_view name, Node n) {
