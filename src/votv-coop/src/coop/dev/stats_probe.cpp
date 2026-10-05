@@ -49,16 +49,18 @@ void NotFound(const char* what) {
 }
 
 // A writable row: read, write, read back, restore, read again. A refused or unreadable step is a
-// NOT FOUND, and a write that went through is always restored.
+// NOT FOUND. Every attempted write is followed by a restore, since a write can store its value and
+// still report failure (Strength and Agility, when updateStrAgl's call fails).
 void ProbeWritable(V::Field f, bool red) {
     const V::Row& row = V::RowOf(f);
     float orig = 0.f, back = 0.f, restored = 0.f;
     if (!V::Read(f, &orig)) return NotFound(row.name);
     const float test = row.type == V::Type::Bool ? 1.f - orig : orig + kTestStep;
     const float expected = (red && f == V::Field::Health) ? orig + kTestStep + 1.f : test;
-    if (!V::Write(f, test)) return NotFound(row.name);
-    const bool readBack = V::Read(f, &back);
+    const bool wrote = V::Write(f, test);
+    const bool readBack = wrote && V::Read(f, &back);
     V::Write(f, orig);
+    if (!wrote) return NotFound(row.name);
     const bool readRestored = V::Read(f, &restored);
     if (!readBack || !readRestored) return NotFound(row.name);
     const bool ok = Near(back, expected) && Near(restored, orig);
@@ -89,7 +91,7 @@ void ProbeSnapshot() {
     V::Snapshot s;
     const bool haveSnapshot = V::ReadSnapshot(s);
     for (size_t i = 0; i < kRows; ++i)
-        if (written[i]) V::Write(static_cast<V::Field>(i), orig[i]);
+        V::Write(static_cast<V::Field>(i), orig[i]);  // a refused write stored nothing; a failed one may have
     bool allWritten = true;
     for (size_t i = 0; i < kRows; ++i) allWritten = allWritten && written[i];
     if (!haveSnapshot || !allWritten) return NotFound("snapshot");

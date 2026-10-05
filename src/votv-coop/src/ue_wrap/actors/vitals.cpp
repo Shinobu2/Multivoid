@@ -161,6 +161,8 @@ void* PawnObject() {
         g_pawnCls = cls;
         ResolveRows(Owner::Pawn, cls);
         g_updateStrAglFn = R::FindFunction(cls, L"updateStrAgl");
+        if (!g_updateStrAglFn)
+            UE_LOGE("vitals: %ls.updateStrAgl did not resolve", R::ToString(R::NameOf(cls)).c_str());
     }
     return pawn;
 }
