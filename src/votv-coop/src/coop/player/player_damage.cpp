@@ -86,7 +86,9 @@ bool OnImpactEntryPre(void* self, void* /*params*/) {
 // machine's player: its camera shook once a second (measured with src/coop/dev/damage_probe.cpp: [DMG]
 // PUPPET lines at 1 Hz for seven minutes). The puppet's owner sees no such fire and takes nothing,
 // which is the victim-authoritative answer the impact cancel already gives. Watched at the
-// script-body gate because the verb is Blueprint-internal on every route.
+// script-body gate because the verb is Blueprint-internal on every route. The mod's own calls get no
+// pass: the origin flag spans every Blueprint call nested inside one of ours, so it proves nothing
+// about which body a nested damage or ignite was aimed at. A puppet is refused whoever asks.
 constexpr const wchar_t* kDamageVerbName = L"Add Player Damage";
 constexpr int kDamageVerbTag = 0x504C4447;  // 'PLDG'
 bool g_damageWatchDone = false;
@@ -95,7 +97,6 @@ uint32_t g_verbCanceled = 0;
 ue_wrap::script_gate::Verdict OnDamageVerbPre(const ue_wrap::script_gate::Call& c) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected() || !c.object) return ue_wrap::script_gate::Verdict::Run;
-    if (c.fromOurCode) return ue_wrap::script_gate::Verdict::Run;   // the mod's own call: a drill hits a puppet on purpose
     void* localPawn = g_localPawn.load(std::memory_order_acquire);
     if (!localPawn || c.object == localPawn) return ue_wrap::script_gate::Verdict::Run;
     if (!coop::players::Registry::Get().IsPuppet(c.object)) return ue_wrap::script_gate::Verdict::Run;
@@ -121,7 +122,7 @@ uint32_t g_igniteCanceled = 0;
 
 ue_wrap::script_gate::Verdict OnIgnitePre(const ue_wrap::script_gate::Call& c) {
     auto* s = g_session.load(std::memory_order_acquire);
-    if (!s || !s->connected() || !c.object || c.fromOurCode) return ue_wrap::script_gate::Verdict::Run;
+    if (!s || !s->connected() || !c.object) return ue_wrap::script_gate::Verdict::Run;
     void* localPawn = g_localPawn.load(std::memory_order_acquire);
     if (!localPawn || c.object == localPawn) return ue_wrap::script_gate::Verdict::Run;
     if (!coop::players::Registry::Get().IsPuppet(c.object)) return ue_wrap::script_gate::Verdict::Run;
