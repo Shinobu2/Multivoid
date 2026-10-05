@@ -30,7 +30,7 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 214;
+inline constexpr uint16_t kProtocolVersion = 215;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -402,8 +402,7 @@ enum class ReliableKind : uint8_t {
     WispTear = 68,
 
     // Client to host: the peer's serialized inventory, on change; the host persists it under the
-    // peer's guid. Host to client on join with the stored inventory. BlobChunkPayload on the Bulk
-    // lane; never relayed.
+    // peer's guid. Host to client on join with the stored inventory. BlobChunkPayload; never relayed.
     PlayerInventoryBlob = 69,
 
     // Client to host: a kerfur radial-menu verb for this kerfur. The host runs it; Follow follows
@@ -950,6 +949,27 @@ enum class ReliableKind : uint8_t {
     // host -> one client, not relayed, the host trusted: this machine's local dev grants
     // (coop/session/grants_sync); a late joiner gets them at its proof
     PermissionGrants = 168,
+
+    // Host to one client: set one row of that player's stat table, add a status effect or remove one. The owner
+    // applies it and answers with StatOrderReply, after its own fresh profile. Never relayed. Late join: none (the
+    // host sends only to a world-ready slot). Trust: a client takes it only from the host (slot 0); an order it
+    // cannot apply is answered, never dropped. StatOrderPayload.
+    StatOrder = 169,
+
+    // Client to host: what became of a StatOrder (its token, a result, the value now in force). Never relayed.
+    // Late join: none. Trust: the host takes it only from the slot its token went to, and checks every byte before
+    // using it. StatOrderReplyPayload.
+    StatOrderReply = 170,
+
+    // Host to one client: read the whole stat table and the effect list of that player. Never relayed. Late join:
+    // none (the host sends only to a world-ready slot). Trust: a client takes it only from the host (slot 0), one
+    // query outstanding per slot. StatQueryPayload.
+    StatQuery = 171,
+
+    // Client to host: the answer to a StatQuery under its token: every row's value with a mask of the rows that
+    // read, the first five effect entries and the effect total. Never relayed. Late join: none. Trust: as
+    // StatOrderReply. StatQueryReplyPayload.
+    StatQueryReply = 172,
 };
 
 #pragma pack(push, 1)
@@ -3296,9 +3316,10 @@ struct JoinPhaseNotePayload {
 };
 static_assert(sizeof(JoinPhaseNotePayload) == 12, "JoinPhaseNotePayload must be 12 bytes");
 
-// The admin's order and query of one player's stats and effects (coop/player/stat_orders_wire; the
-// kinds that carry them come with their handlers). The packing, every check of a peer's bytes and
-// the table of the tokens awaiting an answer live in that module.
+// The admin's order and query of one player's stats and effects (StatOrder, StatOrderReply, StatQuery
+// and StatQueryReply). The packing, every check of a client's answer and the table of the tokens
+// awaiting an answer live in coop/player/stat_orders_wire; an order is judged by the client that
+// takes it, which answers Refused and never drops it.
 constexpr int kStatRows = 22;        // the stat table's rows (ue_wrap::vitals::Field::Count), carried by a query reply
 constexpr int kStatEffectName = 12;  // an effect name: up to 11 ASCII characters and a NUL
 
