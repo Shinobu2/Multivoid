@@ -212,10 +212,4 @@ std::string SelfShaHex() {
     return ToHex(id.sha256, kShaBytes);
 }
 
-std::string SelfSigHex() {
-    const BuildIdentity& id = Self();
-    if (id.step != SelfStep::SigPresent) return std::string();
-    return ToHex(id.sig.sig, kSigBytes);
-}
-
 }  // namespace coop::build_trust
