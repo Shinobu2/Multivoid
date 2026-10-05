@@ -117,7 +117,9 @@ S3 = re.compile(r"(?:flag (?:it )?for|file (?:it )?(?:as|under)|belongs in|shoul
 # declarations and Apply's definition line -- doc quoting code.
 # 100 -> 105 (2026-10-05), CONTENT, the five lines read: PSA-1a's sheet (PLAYER_STATE_ADMIN_ARC.md 5b) dictated
 # vitals.h's Field enum (three lines), WriteRule and Row declarations -- doc quoting code.
-OVERLAP_BASELINE = 105
+# 105 -> 106 (2026-10-05), CONTENT, the line read: PSA-1b's sheet (PLAYER_STATE_ADMIN_ARC.md 5c) dictated
+# effects.h's Add declaration verbatim -- doc quoting code.
+OVERLAP_BASELINE = 106
 # EXCLUDED because it is a deliberate practice, not a leak: copying memory topics into the public
 # piles archive. It alone contributes ~1,263 of the raw 1,300 overlaps.
 OVERLAP_SKIP = ("docs/piles/_archive/session-log/",)
