@@ -17,6 +17,7 @@
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/object_index.h"
 #include "ue_wrap/core/reflection.h"
+#include "ue_wrap/core/script_gate.h"
 #include "ue_wrap/actors/vitals.h"
 
 #include <atomic>
@@ -78,6 +79,32 @@ bool OnImpactEntryPre(void* self, void* /*params*/) {
     return true;  // cancel: the singleton saveSlot write must not run for a foreign body
 }
 
+// The same rule for the damage verb itself. Fire, burning and the other status effects do not come
+// through an impact entry: the body's own ubergraph calls Add Player Damage on itself once a second
+// for as long as it burns. A peer's puppet that walked through fire only this machine shows caught
+// it here and burned for the rest of the session, and every tick ran the damage body against this
+// machine's player: its camera shook once a second (measured with coop/dev/damage_probe: [DMG]
+// PUPPET lines at 1 Hz for seven minutes). The puppet's owner sees no such fire and takes nothing,
+// which is the victim-authoritative answer the impact cancel already gives. Watched at the
+// script-body gate because the verb is Blueprint-internal on every route.
+constexpr const wchar_t* kDamageVerbName = L"Add Player Damage";
+constexpr int kDamageVerbTag = 0x504C4447;  // 'PLDG'
+bool g_damageWatchDone = false;
+uint32_t g_verbCanceled = 0;
+
+ue_wrap::script_gate::Verdict OnDamageVerbPre(const ue_wrap::script_gate::Call& c) {
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->connected() || !c.object) return ue_wrap::script_gate::Verdict::Run;
+    void* localPawn = g_localPawn.load(std::memory_order_acquire);
+    if (!localPawn || c.object == localPawn) return ue_wrap::script_gate::Verdict::Run;
+    if (!coop::players::Registry::Get().IsPuppet(c.object)) return ue_wrap::script_gate::Verdict::Run;
+    const uint32_t n = ++g_verbCanceled;
+    if (n <= 5 || (n % 100) == 0)
+        UE_LOGI("player_damage: canceled the damage verb on a peer's puppet %p (#%u) -- its owner "
+                "computes its own damage", c.object, n);
+    return ue_wrap::script_gate::Verdict::Cancel;
+}
+
 }  // namespace
 
 void Install(coop::net::Session* session) {
@@ -88,6 +115,12 @@ void Tick() {
     // Publish the local pawn for the interceptor's any-thread compare (GT here;
     // Registry::Local() is GT-only and cached).
     g_localPawn.store(coop::players::Registry::Get().Local(), std::memory_order_release);
+    if (!g_damageWatchDone) {
+        g_damageWatchDone = true;
+        if (!ue_wrap::script_gate::WatchName(kDamageVerbName, kDamageVerbTag, &OnDamageVerbPre, nullptr))
+            UE_LOGE("player_damage: the damage verb watch did not register -- a burning puppet damages "
+                    "this machine's player");
+    }
     if (g_impactInterceptorsDone) return;
     void* cls = ue_wrap::object_index::ClassByName(L"mainPlayer_C");
     if (!cls) return;
