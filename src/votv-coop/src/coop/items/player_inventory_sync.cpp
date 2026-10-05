@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <cwchar>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace coop::player_inventory_sync {
@@ -115,21 +116,11 @@ void SampleStandingPose() {
     g_standingPose = {at.X, at.Y, at.Z, rot.Yaw, true};
 }
 
-// Client: poll the carried, worn and held items at 1 Hz and stream the profile to the host. A
-// change of the items goes at once; the vitals and the pose alone go at kVitalsCadence, and are
-// not even read on a poll that will not send.
-void ClientStreamTick(coop::net::Session* s) {
-    const Clock::time_point now = Clock::now();
-    if (now - g_lastPoll < kClientPoll) return;
-    g_lastPoll = now;
-    if (!g_profileApplied) return;  // this world holds no profile of ours to report
-    ue_wrap::inventory::PlayerInventory items;
-    if (!ue_wrap::inventory::ReadAll(items)) return;  // world not up yet
-    SampleStandingPose();
-    std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(items);
-    const uint64_t itemsHash = coop::blob_chunks::Fnv64(blob);
-    if (itemsHash == g_lastItemsHash && now - g_lastSend < kVitalsCadence) return;
-
+// Client: send one built profile -- the items blob plus the vitals and the pose -- to the host.
+// True when the transport took it. The caller owns the poll and the dedup; this owns the vitals
+// read, the size ceiling, the send and the dedup state a send leaves behind.
+static bool SendProfile(coop::net::Session* s, std::vector<uint8_t> blob, uint64_t itemsHash,
+                        size_t carried, Clock::time_point now) {
     // The vitals not reading (a field the game renamed) must not stop the ITEMS from being stored:
     // the profile then goes without them and is applied with the game's defaults.
     ue_wrap::vitals::Snapshot vitals;
@@ -150,18 +141,37 @@ void ClientStreamTick(coop::net::Session* s) {
             g_oversizeHash = itemsHash;
             UE_LOGE("player_inventory[client]: the profile is %zu bytes (%zu carried), past the "
                     "%zu-byte transport ceiling -- NOT sent; the host keeps the last one that fitted",
-                    blob.size(), items.inventory.size(), coop::blob_chunks::MaxBlobBytes());
+                    blob.size(), carried, coop::blob_chunks::MaxBlobBytes());
         }
-        return;
+        return false;
     }
     if (coop::blob_chunks::SendBlob(s, coop::net::ReliableKind::PlayerInventoryBlob, ++g_sendSeq, blob)) {
         // Logged for a change of the items only: the vitals cadence is steady state, not an event.
         if (itemsHash != g_lastItemsHash)
             UE_LOGI("player_inventory[client]: streamed profile (%zu bytes, %zu carried) to host",
-                    blob.size(), items.inventory.size());
+                    blob.size(), carried);
         g_lastItemsHash = itemsHash;
         g_lastSend = now;
-    }  // else: refused -> retry next poll under a fresh seq
+        return true;
+    }
+    return false;  // refused -> retry next poll under a fresh seq
+}
+
+// Client: poll the carried, worn and held items at 1 Hz and stream the profile to the host. A
+// change of the items goes at once; the vitals and the pose alone go at kVitalsCadence, and are
+// not even read on a poll that will not send.
+void ClientStreamTick(coop::net::Session* s) {
+    const Clock::time_point now = Clock::now();
+    if (now - g_lastPoll < kClientPoll) return;
+    g_lastPoll = now;
+    if (!g_profileApplied) return;  // this world holds no profile of ours to report
+    ue_wrap::inventory::PlayerInventory items;
+    if (!ue_wrap::inventory::ReadAll(items)) return;  // world not up yet
+    SampleStandingPose();
+    std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(items);
+    const uint64_t itemsHash = coop::blob_chunks::Fnv64(blob);
+    if (itemsHash == g_lastItemsHash && now - g_lastSend < kVitalsCadence) return;
+    SendProfile(s, std::move(blob), itemsHash, items.inventory.size(), now);
 }
 
 // Host: sweep stale half-assemblies and push each newly connected joiner its per-player apply
