@@ -15,6 +15,7 @@
 #include "coop/props/prop_wire_parity.h"    // PhysFlagsOf, the one builder of a live prop's flags
 #include "coop/props/prop_element_tracker.h"// GetPropElementIdForActor, ResolveLiveActorByKey
 #include "coop/props/container_contents_sync.h"  // TakeObjInFlight; a thrown container's birth slice
+#include "coop/creatures/npc_sync.h"             // GetNpcIdForActor: a birth a mirrored character made
 #include "coop/session/world_load_episode.h"  // InEpisode (quiet during the join loadObjects churn)
 #include "ue_wrap/core/call.h"                   // ParamFrame + Call (setKey on the host re-spawn)
 #include "ue_wrap/engine/engine.h"                 // BeginDeferredSpawn/FinishDeferredSpawn/SetActorScale3D
@@ -75,6 +76,12 @@ struct PendingPlace {
     // unmarked birth here is. Read at the seam because that is the only moment the VM still holds
     // the calling frame.
     bool    playerSpawn = false;
+    // The forage spawner at this player's camera made it (its source object, read at the seam):
+    // shared like the forage classes, whatever row it spawned -- the spawner also makes base prop_C.
+    bool    forageSpawner = false;
+    // A character this client only mirrors made it: the host's own character makes the real one and
+    // it arrives as the host's birth, so this copy is an echo, dropped and destroyed at the drain.
+    bool    npcMirrorEcho = false;
 };
 std::vector<PendingPlace> g_pending;         // GT-only
 constexpr size_t kMaxPending  = 32;          // runaway backstop (a settled client rarely has >1 in flight)
@@ -201,8 +208,13 @@ void OnClientFinishSpawn(void* /*context*/, void* srcObj, void* result) {
             actor, R::ClassNameOf(actor), ue_wrap::prop::GetInteractableKeyString(actor),
             fromContainerExtract, caller);
     }
-    g_pending.push_back(PendingPlace{actor, R::InternalIndexOf(actor), 0, fromContainerExtract,
-                                     playerAuthored});
+    PendingPlace entry{actor, R::InternalIndexOf(actor), 0, fromContainerExtract, playerAuthored};
+    if (srcObj && R::IsLive(srcObj)) {
+        entry.forageSpawner = R::ClassNameOf(srcObj) == L"pineconeSpawner_C";
+        entry.npcMirrorEcho = !playerAuthored &&
+                              coop::npc_sync::GetNpcIdForActor(srcObj) != coop::element::kInvalidId;
+    }
+    g_pending.push_back(entry);
     if (fromContainerExtract)
         UE_LOGI("[PROP-DROP] CLIENT enqueued container-EXTRACT birth actor=%p (admitted at drain)", actor);
     if (playerAuthored) {
@@ -402,6 +414,18 @@ void Tick(coop::net::Session* session) {
             probe::NoteDrainExit(e.actor, "hand-axis-drop", e.tries, std::wstring());
             continue;
         }
+        // An echo of a mirrored character's own Blueprint -- a kerfur-o handing back a disc, a creature
+        // dropping a totem -- exists only here; the host's character makes the one that counts.
+        if (e.npcMirrorEcho) {
+            static uint32_t sEchoes = 0;
+            if (++sEchoes <= 10 || (sEchoes % 50) == 0)
+                UE_LOGI("[PROP-DROP] CLIENT dropped an echo birth cls='%ls' made by a mirrored character "
+                        "(#%u) -- the host's own character makes the real one", R::ClassNameOf(e.actor).c_str(),
+                        sEchoes);
+            probe::NoteDrainExit(e.actor, "npc-mirror-echo", e.tries, std::wstring());
+            ue_wrap::engine::DestroyActor(e.actor);
+            continue;
+        }
         std::wstring key = ue_wrap::prop::GetInteractableKeyString(e.actor);
         if (key.empty() || key == L"None") {
             // The key is not restored yet (the load runs after the finish). Re-defer a few ticks.
@@ -453,7 +477,7 @@ void Tick(coop::net::Session* session) {
         // host exactly as it falls here -- the transform block below sends its real physics state.
         // The forage this peer's own spawner dropped: unparked, untracked and not a mirror, so the
         // host has no copy; it goes as an ordinary drop intent and falls on the host as it falls here.
-        const bool ambientBirth = !parked && !freshBirth && IsAmbientForage(e.actor);
+        const bool ambientBirth = !parked && !freshBirth && (e.forageSpawner || IsAmbientForage(e.actor));
         if (!parked && !freshBirth && !e.containerExtract && !e.playerSpawn && !ambientBirth) {
             probe::NoteDrainExit(e.actor, "not-a-place-nor-whitelisted-birth", e.tries, key);
             continue;
