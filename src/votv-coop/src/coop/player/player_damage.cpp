@@ -106,6 +106,32 @@ ue_wrap::script_gate::Verdict OnDamageVerbPre(const ue_wrap::script_gate::Call& 
     return ue_wrap::script_gate::Verdict::Cancel;
 }
 
+// The body never catches fire either. mainPlayer_C burns on its own: ignite(fuel) sets burningTime and
+// starts a once-a-second loop that runs the damage verb, plays a 2D pain sound and turns
+// GetPlayerController(0) -- this machine's camera -- by a random ten degrees; burningTime only runs out
+// on the burning body's own tick, which a puppet does not run, so a puppet set alight burned for the
+// rest of the session and shook this machine's view every second. The damage cancel above stops the
+// health write and nothing else, so a peer's puppet is refused the three ways in: the owner computes
+// its own fire as it computes its own damage. Read from mainPlayer_C's own bytecode, decompiled with
+// UAssetGUI: the ignite, attemptIgnite and startBurning functions and the burningTime loop.
+const wchar_t* const kIgniteNames[3] = {L"ignite", L"attemptIgnite", L"startBurning"};
+constexpr int kIgniteTag = 0x49474E54;  // 'IGNT'
+bool g_igniteWatchDone = false;
+uint32_t g_igniteCanceled = 0;
+
+ue_wrap::script_gate::Verdict OnIgnitePre(const ue_wrap::script_gate::Call& c) {
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->connected() || !c.object || c.fromOurCode) return ue_wrap::script_gate::Verdict::Run;
+    void* localPawn = g_localPawn.load(std::memory_order_acquire);
+    if (!localPawn || c.object == localPawn) return ue_wrap::script_gate::Verdict::Run;
+    if (!coop::players::Registry::Get().IsPuppet(c.object)) return ue_wrap::script_gate::Verdict::Run;
+    const uint32_t n = ++g_igniteCanceled;
+    if (n <= 5 || (n % 100) == 0)
+        UE_LOGI("player_damage: refused setting a peer's puppet %p alight (#%u) -- its fire is its owner's",
+                c.object, n);
+    return ue_wrap::script_gate::Verdict::Cancel;
+}
+
 }  // namespace
 
 void Install(coop::net::Session* session) {
@@ -121,6 +147,12 @@ void Tick() {
         if (!ue_wrap::script_gate::WatchName(kDamageVerbName, kDamageVerbTag, &OnDamageVerbPre, nullptr))
             UE_LOGE("player_damage: the damage verb watch did not register -- a burning puppet damages "
                     "this machine's player");
+    }
+    if (!g_igniteWatchDone) {
+        g_igniteWatchDone = true;
+        for (const wchar_t* name : kIgniteNames)
+            if (!ue_wrap::script_gate::WatchClassName(L"mainPlayer_C", name, kIgniteTag, &OnIgnitePre, nullptr))
+                UE_LOGE("player_damage: the %ls watch did not register -- a peer's puppet can burn here", name);
     }
     if (g_impactInterceptorsDone) return;
     void* cls = ue_wrap::object_index::ClassByName(L"mainPlayer_C");
