@@ -8,6 +8,9 @@
 #include "coop/commands/command_targets.h"
 #include "coop/commands/commands_selftest.h"
 #include "coop/commands/moderation_commands.h"
+#include "coop/config/config.h"
+#include "coop/config/config_registry.h"
+#include "coop/permissions/action_log.h"
 
 #include <cstdint>
 #include <string>
@@ -45,6 +48,7 @@ struct Rec {
     bool known = false;  // what the policy's known answers (Fakes<1> only)
     std::vector<Told> told;
     std::vector<uint32_t> toldGeneration;
+    std::vector<coop::permissions::Action> logged;  // what the log port received
 };
 
 // Two sets of ports with separate records: `Id` is only a name for the statics.
@@ -85,6 +89,7 @@ struct Fakes {
         R().told.emplace_back(to.slot, std::string(line));
         R().toldGeneration.push_back(to.generation);
     }
+    static void Log(const coop::permissions::Action& a) { R().logged.push_back(a); }
     static Ports MakePorts() {
         Ports p;
         p.kick = &Kick;
@@ -96,6 +101,7 @@ struct Fakes {
         p.idsWithPrefix = &IdsWithPrefix;
         p.recordNick = &RecordNick;
         p.notify = &Notify;
+        p.log = &Log;
         return p;
     }
 };
@@ -346,9 +352,134 @@ void TeleportCases(Checker& check, const Registry& reg, const Caller& console, c
           "moderation: /tphere of the host is refused");
 }
 
+// One record, every field: who acted, the target, the command line.
+bool OneRecord(const std::vector<coop::permissions::Action>& logged, const std::string& sourceId,
+               const char* sourceName, const std::string& targetId, const char* targetName,
+               const std::string& description) {
+    if (logged.size() != 1) return false;
+    const coop::permissions::Action& a = logged[0];
+    return a.sourceId == sourceId && a.sourceName == sourceName && a.targetType == "user" &&
+           a.targetId == targetId && a.targetName == targetName && a.description == description;
+}
+
+// The records each verb leaves: one per acting outcome, none for any other. `breakIt` is the red
+// arm: the first acting case then expects no record, so its check must fail.
+void LogCases(Checker& check, const Registry& reg, const Caller& console, const Caller& bob, bool breakIt) {
+    using F = Fakes<1>;
+    const std::string b = Repeat("b", 32), c = Repeat("c", 32), d = Repeat("d", 32), e = Repeat("e", 32);
+    const std::string full = Repeat("1", 8) + Repeat("a", 24);
+
+    // /kick
+    Run<1>(reg, bob, "kick Cy lol");
+    check(breakIt ? F::R().logged.empty() : OneRecord(F::R().logged, b, "Bob", c, "Cy", "/kick " + c + " lol"),
+          "moderation action log: /kick records the caller, the target and the typed reason");
+    Run<1>(reg, console, "kick Cy");
+    check(OneRecord(F::R().logged, "", "Host", c, "Cy", "/kick " + c + " kicked by host"),
+          "moderation action log: /kick without a reason records the default, the console as Host");
+    {
+        Caller stranger;
+        stranger.slot = 9;
+        Run<1>(reg, stranger, "kick Cy");
+        check(OneRecord(F::R().logged, "", "Someone", c, "Cy", "/kick " + c + " kicked by host"),
+              "moderation action log: a caller absent from the players is recorded as Someone");
+    }
+    {
+        std::vector<PlayerView> players = Seated();
+        players[2].playerId.clear();
+        F::R() = Rec{};
+        Dispatch(reg, console, "kick Cy lol", players, MakePolicy());
+        check(OneRecord(F::R().logged, "", "Host", "", "Cy", "/kick unproved lol"),
+              "moderation action log: /kick of a player with no proved id records unproved, an empty id");
+    }
+    for (const ModResult r : {ModResult::Gone, ModResult::NoSession, ModResult::NoId, ModResult::Failed}) {
+        RunAs<1>(reg, console, "kick Cy", r);
+        check(F::R().logged.empty(), "moderation action log: /kick records nothing for a result that did not act");
+    }
+    Run<1>(reg, console, "kick Host");
+    check(F::R().logged.empty(), "moderation action log: a /kick the dispatcher refused records nothing");
+
+    // /ban and /banid, online
+    Run<1>(reg, bob, "ban Cy griefing");
+    check(OneRecord(F::R().logged, b, "Bob", c, "Cy", "/ban " + c + " griefing"),
+          "moderation action log: /ban records the target by id and the typed reason");
+    Run<1>(reg, console, "banid Cy");
+    check(OneRecord(F::R().logged, "", "Host", c, "Cy", "/banid " + c + " banned by host"),
+          "moderation action log: /banid without a reason records the default");
+    for (const ModResult r : {ModResult::NoId, ModResult::Gone, ModResult::NoSession, ModResult::NotBanned}) {
+        RunAs<1>(reg, console, "ban Cy", r);
+        check(F::R().logged.empty(), "moderation action log: /ban records nothing for a result that did not act");
+    }
+
+    // /ban and /banid, offline: the console's
+    {
+        F::R() = Rec{};
+        F::R().nick = "Eve";
+        Dispatch(reg, console, ("ban " + e + " spam").c_str(), Seated(), MakePolicy());
+        check(OneRecord(F::R().logged, "", "Host", e, "Eve", "/ban " + e + " spam"),
+              "moderation action log: an offline /ban records the id and the record's nick");
+    }
+    Run<1>(reg, console, ("banid " + e).c_str());
+    check(OneRecord(F::R().logged, "", "Host", e, "", "/banid " + e + " banned by host"),
+          "moderation action log: an offline /banid with no record records an empty name and the default");
+    for (const ModResult r : {ModResult::NoSession, ModResult::NoId}) {
+        RunAs<1>(reg, console, ("ban " + e).c_str(), r);
+        check(F::R().logged.empty(),
+              "moderation action log: an offline /ban records nothing for a result that did not act");
+    }
+
+    // /unban
+    {
+        F::R() = Rec{};
+        F::R().prefixIds = {full};
+        Dispatch(reg, console, "unban 11111111AA", Seated(), MakePolicy());
+        check(OneRecord(F::R().logged, "", "Host", full, "", "/unban " + full),
+              "moderation action log: /unban records the resolved full id, not the typed prefix");
+        for (const ModResult r : {ModResult::NotBanned, ModResult::NoSession, ModResult::Gone}) {
+            F::R() = Rec{};
+            F::R().prefixIds = {full};
+            F::R().result = r;
+            Dispatch(reg, console, "unban 11111111", Seated(), MakePolicy());
+            check(F::R().logged.empty(),
+                  "moderation action log: /unban records nothing for a result that did not act");
+        }
+        Run<1>(reg, console, "unban 12345678");
+        check(F::R().logged.empty(), "moderation action log: /unban with no match records nothing");
+    }
+
+    // /tphere
+    Run<1>(reg, console, "tphere Dee");
+    check(OneRecord(F::R().logged, "", "Host", d, "Dee", "/tphere " + d),
+          "moderation action log: /tphere records the target by id");
+    {
+        std::vector<PlayerView> players = Seated();
+        players[3].playerId.clear();
+        F::R() = Rec{};
+        Dispatch(reg, console, "tphere Dee", players, MakePolicy());
+        check(OneRecord(F::R().logged, "", "Host", "", "Dee", "/tphere unproved"),
+              "moderation action log: /tphere of a player with no proved id records unproved");
+    }
+    Run<1>(reg, console, "tphere Cy");
+    check(F::R().logged.empty(), "moderation action log: /tphere of a player still joining records nothing");
+    for (const ModResult r : {ModResult::Gone, ModResult::Failed, ModResult::NoSession, ModResult::NoId}) {
+        RunAs<1>(reg, console, "tphere Dee", r);
+        check(F::R().logged.empty(),
+              "moderation action log: /tphere records nothing for a result that did not act");
+    }
+
+    // Outside a hosted session no verb runs, so none records.
+    for (const char* line : {"kick Cy", "ban Cy", "banid Cy", "unban 12345678", "tphere Dee"}) {
+        F::R() = Rec{};
+        F::R().hosted = false;
+        Dispatch(reg, console, line, Seated(), MakePolicy());
+        check(F::R().logged.empty(), "moderation action log: no verb records outside a hosted session");
+    }
+}
+
 }  // namespace
 
 void ModerationCases(Checker& check) {
+    const bool breakActionLog =
+        coop::config::ResolveFlag(coop::config_registry::rows::selftest_break_action_log);
     const Caller console{0, 0, true};
     Caller bob;
     bob.slot = 1;
@@ -377,6 +508,7 @@ void ModerationCases(Checker& check) {
     BanCases(check, reg, console, bob);
     UnbanCases(check, reg, console);
     TeleportCases(check, reg, console, bob);
+    LogCases(check, reg, console, bob, breakActionLog);
 
     for (const char* line : {"kick Cy", "ban Cy", "banid Cy", "unban 12345678", "tphere Dee"}) {
         Fakes<1>::R() = Rec{};

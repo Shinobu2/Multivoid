@@ -741,3 +741,6 @@ CFG_FLAG(init_seam_probe, "init_seam_probe", "dev", false, "VOTVCOOP_INIT_SEAM_P
     "is still unset; logged every 30 s and at each world change. Holds the gate; read-only.")
 CFG_FLAG(selftest_break_permissions, "selftest_break_permissions", "dev", false, "VOTVCOOP_SELFTEST_BREAK_PERMISSIONS",
     "Red arm of the permissions selftest: its first case expects the opposite answer, so it must fail.")
+CFG_FLAG(selftest_break_action_log, "selftest_break_action_log", "dev", false, "VOTVCOOP_SELFTEST_BREAK_ACTION_LOG",
+    "Red arm of the commands selftest's action-log cases: the first acting case of each cases file expects "
+    "no record, so it must fail.")
