@@ -46,7 +46,9 @@ bool FieldFromId(uint8_t id, Field* out);
 
 // Read `f` into *out (a Bool reads 0 or 1). False, *out untouched, for f >= Count, or when the
 // row's owner or its property does not resolve (still booting, no world, no pawn). Game thread
-// only; O(1) after the owner class's one-time resolution.
+// only. O(1) only while the owner (the gamemode, the pawn or the save object) resolves: while it
+// is absent every call repeats the owner lookup, so a caller on a repeating path gates on its own
+// readiness first.
 bool Read(Field f, float* out);
 
 // Write `v` by the row's rule (a Bool row stores v != 0). False, having written nothing, for
@@ -59,9 +61,11 @@ bool Write(Field f, float v);
 // ---- The whole per-player vital state, as one value ------------------------------------------
 //
 // Gameplay reads and writes these IN PLACE on the save object (the hunger drain is a
-// VictoryFloatMinusEquals on saveSlot.food), so the save object is their live store and there is
-// no copy on the pawn. A joiner's world is built from a capture of the HOST's save object, so
-// unless they are replaced there the joiner starts at the host's numbers.
+// VictoryFloatMinusEquals on saveSlot.food), so the save object is their live store. The pawn
+// keeps its own copy of strength and agility only (mainPlayer `str` and `agil`, each the save
+// value / 100, which updateStrAgl refreshes from the save object). A joiner's world is built
+// from a capture of the HOST's save object, so unless they are replaced there the joiner starts
+// at the host's numbers.
 struct Snapshot {
     float health = 0, maxHealth = 0, food = 0, sleep = 0;
     float battery = 0;                     // flashlight charge
