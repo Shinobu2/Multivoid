@@ -6,13 +6,16 @@ keyword arguments, so no process starts and the real `gh` is never run; each run
 temporary working directory with stdout and stderr captured. The fake answers only the three
 commands keygen may run, with the output a real `gh` prints (so an echo of it is seen), and acts
 on the keyword arguments the way `subprocess.run` does. Two mutants are always run and the same
-assertion helper as the green arms must flag each of them.
+assertion helper as the green arms must flag each of them. The drill names a repository that does
+not exist, and for its whole run `release_sign`'s own reference to `subprocess` answers `run` with
+an AssertionError, so a bypass of the injected runner is a FAIL line and starts nothing.
 
 Run: python -I -B .github/ci/release_sign_keygen_drill.py
 """
 import argparse
 import contextlib
 import importlib.util
+import inspect
 import io
 import json
 import os
@@ -21,6 +24,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import types
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -37,7 +41,8 @@ write_ascii = lib.write_ascii
 leaks = lib.leaks
 
 
-REPO = "VOTV-MP/Multivoid"
+REAL_RUN = subprocess.run
+REPO = "drill-owner/drill-repo"
 ENV_ARGV = ["gh", "api", "repos/%s/environments/release" % REPO]
 POLICIES_ARGV = ["gh", "api", "repos/%s/environments/release/deployment-branch-policies" % REPO]
 SECRET_ARGV = ["gh", "secret", "set", rs.SEED_ENV, "--env", "release", "--repo", REPO]
@@ -45,7 +50,7 @@ API_KWARGS = {"capture_output": True, "text": True, "encoding": "utf-8"}
 SECRET_KWARGS = dict(API_KWARGS, errors="replace")
 UNPROTECTED = "release_sign: the release environment is not protected as the runbook sets it (%s)"
 ID_RANGE = "release_sign: --id must be 1..254\n"
-GH_LINE = "Set Actions secret MULTIVOID_RELEASE_KEY for environment release in VOTV-MP/Multivoid\n"
+GH_LINE = "Set Actions secret %s for environment release in %s\n" % (rs.SEED_ENV, REPO)
 GH_WARNING = "warning: a newer release of gh is available\n"
 ABSENT = object()
 
@@ -155,10 +160,28 @@ def via_main(args, runner, out):
                    runner=runner)
 
 
-def keygen_flaws(keygen, fake, table):
-    """Every custody rule a green keygen run must keep; an empty list is a clean run."""
+@contextlib.contextmanager
+def no_process():
+    """`release_sign`'s own `subprocess` is replaced by a copy whose `run` raises: the copy is local
+    to that module's namespace, so the shared standard library module is never touched."""
+    def refuse(*args, **kwargs):
+        raise AssertionError("the drill must never start a process")
+
+    real = rs.subprocess
+    stub = types.SimpleNamespace(**vars(real))
+    stub.run = refuse
+    rs.subprocess = stub
+    try:
+        yield
+    finally:
+        rs.subprocess = real
+
+
+def keygen_flaws(keygen, fake, table, key_id=2, seeds=None):
+    """Every custody rule a green keygen run must keep; an empty list is a clean run. `key_id` is
+    the id the run asks for; the seed each run hands to gh is appended to `seeds`."""
     table_before = table.read_bytes()
-    r = drive(keygen, fake, table)
+    r = drive(keygen, fake, table, key_id=str(key_id))
     flaws = []
 
     def need(name, ok):
@@ -183,15 +206,17 @@ def keygen_flaws(keygen, fake, table):
          isinstance(seed_hex, str) and re.fullmatch(r"[0-9a-f]{64}", seed_hex) is not None)
     if not isinstance(seed_hex, str):
         return flaws
+    if seeds is not None:
+        seeds.append(seed_hex)
     seed = bytes.fromhex(seed_hex) if re.fullmatch(r"[0-9a-f]{64}", seed_hex) else b"\0" * 32
     pub = rs.ed25519_public(seed)
     try:
         rows = rs.read_rows(r["out"])
     except rs.SignError:
         rows = []
-    need("exactly the row and a newline", len(rows) == 1 and rows[0][0] == 2
+    need("exactly the row and a newline", len(rows) == 1 and rows[0][0] == key_id
          and rows[0][1] == pub.hex() and r["out"] == rs.format_row(
-             2, pub, bytes.fromhex(rows[0][2])) + "\n")
+             key_id, pub, bytes.fromhex(rows[0][2])) + "\n")
     need("the fixture verifies under the row's key", len(rows) == 1 and rs.ed25519_verify(
         pub, rs.signed_message("selftest-fixture", 0, bytes(32)), bytes.fromhex(rows[0][2])))
     elsewhere = repr([(argv, {k: v for k, v in kw.items() if k != "input"}) for argv, kw in calls])
@@ -230,17 +255,24 @@ def drill_keygen_green(tmp):
     user = {"reviewers": [{"type": "User", "reviewer": {"login": "x", "id": 1}}]}
     undecoded = lambda text: (0, "Set Actions secret �\n", "! � warning\n")
     raw_bytes = lambda text: (0, b"Set Actions secret \xff\n", b"! \xfe warning\n")
-    for name, keygen, fake in (
-            ("a Team reviewer", rs.cmd_keygen, FakeGh()),
-            ("a User reviewer", rs.cmd_keygen, FakeGh(canned_env(user))),
-            ("the reviewer rule first", rs.cmd_keygen, FakeGh(canned_env(place="first"))),
+    seeds = []
+    for name, keygen, fake, key_id in (
+            ("a Team reviewer", rs.cmd_keygen, FakeGh(), 2),
+            ("a User reviewer", rs.cmd_keygen, FakeGh(canned_env(user)), 2),
+            ("the reviewer rule first", rs.cmd_keygen, FakeGh(canned_env(place="first")), 2),
             ("the reviewer rule last of three", rs.cmd_keygen,
-             FakeGh(canned_env(place="last of three"))),
-            ("a secret set whose output holds U+FFFD", rs.cmd_keygen, FakeGh(secret=undecoded)),
-            ("a secret set whose output is not UTF-8", rs.cmd_keygen, FakeGh(secret=raw_bytes)),
-            ("the command line through main", via_main, FakeGh())):
-        flaws = keygen_flaws(keygen, fake, table)
+             FakeGh(canned_env(place="last of three")), 2),
+            ("a secret set whose output holds U+FFFD", rs.cmd_keygen, FakeGh(secret=undecoded), 2),
+            ("a secret set whose output is not UTF-8", rs.cmd_keygen, FakeGh(secret=raw_bytes),
+             2),
+            ("the command line through main", via_main, FakeGh(), 2),
+            ("--id 254, the top of the range", rs.cmd_keygen, FakeGh(), 254),
+            ("--id 100, the first three-digit id", rs.cmd_keygen, FakeGh(), 100),
+            ("--id 254 through main", via_main, FakeGh(), 254)):
+        flaws = keygen_flaws(keygen, fake, table, key_id, seeds)
         check("keygen green with " + name + (": " + ", ".join(flaws) if flaws else ""), not flaws)
+    check("keygen green: every run's seed is its own and none is the public selftest seed",
+          len(seeds) == 10 and len(set(seeds)) == len(seeds) and rs.TEST_SEED_HEX not in seeds)
 
 
 def drill_keygen_mutants(tmp):
@@ -349,6 +381,13 @@ def drill_keygen_ids(tmp):
             ("a --repo with a trailing newline", rs.cmd_keygen, table, "6", REPO + "\n",
              repo_text),
             ("no table", rs.cmd_keygen, tmp / "absent.inc", "6", REPO, absent),
+            ("--id 0 with no table: the table is read before --id", rs.cmd_keygen,
+             tmp / "absent.inc", "0", REPO, absent),
+            ("a bad --repo with no table: the repo is read before the table", rs.cmd_keygen,
+             tmp / "absent.inc", "6", "not a repo", repo_text),
+            ("--id with a trailing newline on the command line", via_main, table, "7\n", REPO,
+             ID_RANGE),
+            ("a negative --id on the command line", via_main, table, "-5", REPO, ID_RANGE),
             ("--id 1_0 on the command line", via_main, table, "1_0", REPO, ID_RANGE),
             ("--id +7 on the command line", via_main, table, "+7", REPO, ID_RANGE),
             ("--id 007 on the command line", via_main, table, "007", REPO, ID_RANGE),
@@ -362,9 +401,24 @@ def drill_keygen_ids(tmp):
               r["rc"] == 2 and r["out"] == text and r["stderr"] == "" and not fake.calls)
 
 
+def drill_keygen_wiring():
+    check("the drill's repository fullmatches release_sign's repo pattern",
+          rs._REPO.fullmatch(REPO) is not None)
+    check("main's default runner is subprocess.run",
+          inspect.signature(rs.main).parameters["runner"].default is REAL_RUN)
+    try:
+        rs.subprocess.run(["gh"])
+        armed = False
+    except AssertionError:
+        armed = True
+    check("the process guard is armed and subprocess.run itself is untouched",
+          armed and subprocess.run is REAL_RUN)
+
+
 def main():
-    with tempfile.TemporaryDirectory() as t:
+    with tempfile.TemporaryDirectory() as t, no_process():
         tmp = pathlib.Path(t)
+        guarded(drill_keygen_wiring)
         for group in (drill_keygen_green, drill_keygen_mutants, drill_keygen_refuses,
                       drill_keygen_secret, drill_keygen_readback, drill_keygen_ids):
             guarded(group, tmp)
