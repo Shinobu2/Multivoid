@@ -34,12 +34,12 @@ constexpr int kSlot = 1;  // the pair's client
 // The step the row names, parsed once at the first Tick.
 enum class Token {
     Off, Nameplate, NickColor, Flags, Scale, Font, VoiceMode, VoiceVolume, Server, ServerJoin,
-    ServerRed, ServerCmd, ServerCmdRed, Red
+    ServerRed, ServerCmd, ServerCmdRed, ServerCmdSpellRed, Red
 };
 
 // 0 idle; 1 SET done, waiting (the probe posted, or for a counter token the counter to move;
 // serverjoin: until the joiner's world is up; a command token: for the command's reply, which
-// posts the probe); 2 RESET done, waiting likewise; 3 DONE.
+// posts the probe); 2 RESET done, waiting likewise; 3 DONE; 4 RESPELL done, waiting for its reply.
 int      g_phase = 0;
 Token    g_token = Token::Off;
 // The steps this process has completed, counted in Done() and never reset: a rejoin re-arms the
@@ -62,6 +62,7 @@ Token ParseToken(const std::string& mode) {
     if (mode == "serverred") return Token::ServerRed;
     if (mode == "servercmd") return Token::ServerCmd;
     if (mode == "servercmdred") return Token::ServerCmdRed;
+    if (mode == "servercmdspellred") return Token::ServerCmdSpellRed;
     if (mode == "red")       return Token::Red;
     return Token::Off;
 }
@@ -72,9 +73,12 @@ bool IsServerToken() {
     return g_token == Token::Server || g_token == Token::ServerJoin || g_token == Token::ServerRed;
 }
 
-// The two command tokens run the server step through /set and /reset, submitted as command lines;
+// The three command tokens run the server step through /set and /reset, submitted as command lines;
 // their probes judge the voice range like the server step's, and each reads the command's reply.
-bool IsCommandToken() { return g_token == Token::ServerCmd || g_token == Token::ServerCmdRed; }
+bool IsCommandToken() {
+    return g_token == Token::ServerCmd || g_token == Token::ServerCmdRed ||
+           g_token == Token::ServerCmdSpellRed;
+}
 
 constexpr const char* kSetLine = "set voice.distance_cm 6000";
 constexpr const char* kResetLine = "reset voice.distance_cm";
@@ -82,6 +86,13 @@ constexpr const char* kResetLine = "reset voice.distance_cm";
 constexpr const char* kRedLine = "set net.nick x";
 constexpr const char* kSetReply = "voice.distance_cm is now 6000.";
 constexpr const char* kResetReply = "voice.distance_cm is back to 4800.";
+// The respell between the set and the reset: the same value in another spelling, which the
+// command's reply echoes as typed and which announces nothing. The red arm respells to a value
+// that really changes, so the client announces it.
+constexpr const char* kRespellLine = "set voice.distance_cm 6000.0";
+constexpr const char* kRespellReply = "voice.distance_cm is now 6000.0.";
+constexpr const char* kRespellRedLine = "set voice.distance_cm 6001";
+constexpr const char* kRespellRedReply = "voice.distance_cm is now 6001.";
 
 // The render thread applies a scale or a font row at a later drawn frame, and the voice tick
 // reopens the devices for a mode row at a later game tick, so these three tokens wait on the
@@ -223,6 +234,12 @@ void Reset() {
     g_phase = 2;
 }
 
+// A command token's respell: its reply is read in phase 4, and the reset follows it.
+void Respell() {
+    g_phase = 4;
+    CS::Submit(g_token == Token::ServerCmdSpellRed ? kRespellRedLine : kRespellLine);
+}
+
 // Game thread, after the subscriber of the set (FIFO). A failed probe ends the step.
 void ProbeAfterSet() {
     bool followed = false;
@@ -258,6 +275,10 @@ void ProbeAfterSet() {
     }
     // The serverjoin step waits for the joiner's world before it resets: Tick calls Reset then.
     if (followed && g_token == Token::ServerJoin) return;
+    if (followed && (g_token == Token::ServerCmd || g_token == Token::ServerCmdSpellRed)) {
+        Respell();
+        return;
+    }
     if (followed) Reset();
     else Done();
 }
@@ -317,11 +338,30 @@ void PollCounter() {
     }
 }
 
+// Game thread, posted by the respell's reply. The reset waits for the respell's own delta to be
+// sent (FIFO behind its subscribers), so its mark cannot merge into the respell's. A disconnect
+// may have ended the step meanwhile.
+void AfterRespell() {
+    if (g_phase != 4) return;
+    Reset();
+}
+
 // Game thread, for every reply line the host's own command is answered with. The reply is
 // delivered inside the dispatch, after the setter queued its subscribers, so the probe posted here
 // runs after them (FIFO). A reply other than the one the step expects ends it.
 void OnCommandReply(std::string_view line) {
     UE_LOGI("[SETTINGS-DRILL] host: servercmd reply '%s'", std::string(line).c_str());
+    if (g_phase == 4) {
+        const bool red = (g_token == Token::ServerCmdSpellRed);
+        if (line != (red ? kRespellRedReply : kRespellReply)) {
+            UE_LOGW("[SETTINGS-DRILL] FAIL: servercmd reply '%s'", std::string(line).c_str());
+            Done();
+            return;
+        }
+        UE_LOGI("[SETTINGS-DRILL] host: respell sent '%s'", red ? kRespellRedLine : kRespellLine);
+        ue_wrap::game_thread::Post(&AfterRespell);
+        return;
+    }
     const bool setStep = (g_phase == 1);
     if (line != (setStep ? kSetReply : kResetReply)) {
         UE_LOGW("[SETTINGS-DRILL] FAIL: servercmd reply '%s'", std::string(line).c_str());
@@ -347,8 +387,8 @@ void SetByCommand() {
     CS::Submit(line);
 }
 
-// The red arms are the nameplate step and the server step with their one call skipped, and the
-// command step with a command the dispatcher refuses.
+// The red arms are the nameplate step and the server step with their one call skipped, the
+// command step with a command the dispatcher refuses, and the respell with a real change.
 void Set() {
     if (IsCounterToken()) {
         SetCounterRow();

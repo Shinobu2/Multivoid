@@ -235,7 +235,8 @@ permission file.
 
 The host's server settings -- today the voice range, `voice.distance_cm`, in centimetres -- change with
 `/set <setting> <value>` and go back to their default with `/reset <setting>`; every peer follows
-at once. F1's `Administration > Server settings` draws each of them and runs those same lines. A
+at once. When a server setting such as the voice range changes, every player's chat says so. F1's
+`Administration > Server settings` draws each of them and runs those same lines. A
 friend given `multivoid.set` in the permission files can change them too: their line runs on the
 host. A setting that holds a password is never set or shown by command.
 

@@ -201,9 +201,9 @@ CFG_FLAG(ban_drill, "ban_drill", "dev", false, "VOTVCOOP_BAN_DRILL",
 CFG_FLAG(ban_drill_stale_token, "ban_drill_stale_token", "dev", false, "VOTVCOOP_BAN_DRILL_STALE_TOKEN",
     "Ban drill's red arm: aim the ban with a generation one past the slot's, so the token check "
     "refuses it and the drill reports FAIL.")
-CFG_ENUM(settings_drill, "settings_drill", "dev", "off", "off|nameplate|nickcolor|flags|scale|font|voicemode|voicevolume|server|serverjoin|serverred|servercmd|servercmdred|red", "VOTVCOOP_SETTINGS_DRILL",
+CFG_ENUM(settings_drill, "settings_drill", "dev", "off", "off|nameplate|nickcolor|flags|scale|font|voicemode|voicevolume|server|serverjoin|serverred|servercmd|servercmdred|servercmdspellred|red", "VOTVCOOP_SETTINGS_DRILL",
     "Developer: a settings step after the session starts, one token per step; the server steps (server, "
-    "serverjoin, serverred, servercmd, servercmdred) exercise the host's voice range, each red by a designed failure. "
+    "serverjoin, serverred, servercmd, servercmdred, servercmdspellred) exercise the host's voice range, each red by a designed failure. "
     "nameplate: the "
     "nameplate row to hidden (the client logs both announces). nickcolor: the nick colour to the "
     "per-surface default. flags: the chat peer-actions flag off and the netstats flag on. "
@@ -213,7 +213,10 @@ CFG_ENUM(settings_drill, "settings_drill", "dev", "off", "off|nameplate|nickcolo
     "the client's log shows each value arrive. serverjoin: the host sets it before any client "
     "connects, so the joiner's snapshot carries it, and resets after the joiner's world is up. "
     "serverred: server with the set skipped, so the host's probe prints its FAIL line. "
-    "servercmd: the server step through /set and /reset; servercmdred: a /set the command refuses (a local row named). "
+    "servercmd: the server step through /set and /reset, with a respell of the set value between them; "
+    "servercmdred: a /set the command refuses (a local row named). "
+    "servercmdspellred: as servercmd, its respell step a real change (6001), so the client announces it "
+    "where servercmd forbids it. "
     "red: the nameplate step with its set skipped, so the probe's FAIL line prints.")
 CFG_ENUM(mannequin_drill, "mannequin_drill", "dev", "off", "off|spawn|red", "VOTVCOOP_MANNEQUIN_DRILL",
     "Drill (BOTH peers), the walking mannequin's baseline. spawn: once the client's join is over the host spawns one native walker (it opens doors, is saved with the world and returns angry after a load; it crosses to a client as a prop mirror with a brain of its own) and both peers log what they see of it once a second, the host for 20 samples. red: the same without the spawn call, so the sampler must report that no walker appeared: the drill's control.")
