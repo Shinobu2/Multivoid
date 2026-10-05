@@ -161,8 +161,7 @@ void JudgeFirstQuery(SO::Result r, const SO::TableView& v) {
             Row(v, V::Field::Food), Row(v, V::Field::Sleep), static_cast<unsigned>(v.effectTotal));
     std::string names;
     for (const SO::EffectView& e : v.effects) names += (names.empty() ? "" : ", ") + e.name;
-    UE_LOGI("[STAT-ORDER] joiner effects: %s -- the host's %s inherited: %s", names.empty() ? "none" : names.c_str(),
-            kHostEffect, Find(v, kHostEffect) ? "YES" : "NO");
+    UE_LOGI("[STAT-ORDER] joiner effects: %s", names.empty() ? "none" : names.c_str());
     if (v.validMask != kAllRows) return Mismatch(what, r, 0.f, false, "not every row read");
     if (Find(v, kJoinerEffect)) return Unmeasurable("sleepy already active");
     g_food = Row(v, V::Field::Food);
