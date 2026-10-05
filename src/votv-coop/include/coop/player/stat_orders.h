@@ -1,22 +1,19 @@
 // coop/player/stat_orders.h -- an admin's order to, and query of, one player's stats and effects
-// (StatOrder, StatOrderReply, StatQuery, StatQueryReply). The engine half of coop/player/
-// stat_orders_wire: the host sends, and the owner applies, because a player's stats exist only in
-// its own process.
+// (StatOrder, StatOrderReply, StatQuery, StatQueryReply): the engine half of coop/player/
+// stat_orders_wire. The host sends and the owner applies, because a player's stats exist only in
+// its own process. Game thread throughout.
 //
-// An order is set one row of the stat table, add a status effect, or remove one. The owner applies
-// it through ue_wrap::vitals / ue_wrap::effects, and on a row the host stores it sends its fresh
-// profile BEFORE its answer, on the lane the profile rides: the host's stored profile therefore
-// follows the owner's own, and the host checks it before it says so. The host's own player (slot
-// 0) is ordered and read in place, through the same apply and the same read.
-//
+// An order sets one row of the stat table, adds a status effect or removes one. On a row the host
+// stores, the owner sends its fresh profile BEFORE its answer, on the lane the profile rides, so
+// the host's stored profile follows the owner's own and the host checks it before saying so. The
+// host's own player (slot 0) is ordered and read in place by the same apply and the same read.
+
 // MTA stamps a synced set with a sync-time context so a stale puresync cannot overwrite it
-// (reference/mtasa-blue/Server/mods/deathmatch/logic/CStaticFunctionDefinitions.cpp:1771,
-// CElement.cpp:1281); here the host never writes its copy at send time, so nothing is stamped.
-// For the query pair, MTA's resendPlayerModInfo (luadefs/CLuaPlayerDefs.cpp:49) asks a client for
-// data it alone holds, and the Source SDK's convar query answers under a cookie
+// (reference/mtasa-blue/Server/mods/deathmatch/logic/CElement.cpp:1281); here the host never writes
+// its copy at send time, so nothing is stamped. For the query pair, MTA's resendPlayerModInfo
+// (reference/mtasa-blue/Server/mods/deathmatch/logic/luadefs/CLuaPlayerDefs.cpp:49) asks a client
+// for data it alone holds, and the Source SDK's convar query answers under a cookie
 // (reference/source-sdk-2013/src/game/server/gameinterface.h:115). Shapes only.
-//
-// Game thread throughout.
 
 #pragma once
 
