@@ -6,7 +6,17 @@
 
 `sign` writes the six-line `.sig` file the game parses (`coop/build_trust`): the DLL's SHA-256, the
 build it belongs to and an Ed25519 signature over `signed_message`. `verify` applies the same
-grammar and steps as the game, with the RFC's stricter range for S, and prints which step refused.
+grammar and steps as the game, and prints which step refused. The game's check is the vendored
+ed25519-donna `ed25519_sign_open` (src/votv-coop/third_party/GameNetworkingSockets/src/external/
+ed25519-donna/ed25519.c); `verify` is the RFC 8032 section 5.1.7 check and differs from it in three
+ways, none of which an honest `sign` can reach:
+  - S: the game tests only the top three bits of S; `verify` requires S < L, which is stricter.
+  - Equation: the game recomputes R' = [S]B - [k]A and compares its 32 bytes with R (cofactorless,
+    byte-exact). `verify` decodes R and checks [8][S]B == [8](R + [k]A) (cofactored). In this one
+    direction `verify` is LAXER than the game: it accepts an R with a small-order component that
+    the game refuses. `sign` never produces such an R.
+  - Points: when the game unpacks the public key it reduces y mod p and applies no x = 0 sign-bit
+    rule, so it accepts non-canonical encodings that `verify` refuses. Its key is the compiled table.
 
 The job that holds the release key installs nothing, so the signature scheme is written here from
 the algorithm of RFC 8032 section 5.1 (field arithmetic, point encoding and decoding, extended
