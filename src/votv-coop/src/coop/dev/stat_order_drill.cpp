@@ -166,7 +166,7 @@ void JudgeFirstQuery(SO::Result r, const SO::TableView& v) {
     if (v.validMask != kAllRows) return Mismatch(what, r, 0.f, false, "not every row read");
     if (Find(v, kJoinerEffect)) return Unmeasurable("sleepy already active");
     // The joiner's world is built without the host's effects: its save object has them reset out
-    // (PSA-2c). `redjoin` expects the opposite, so on a fixed build it prints the failing line.
+    // at the join (OnSaveObjectReady). `redjoin` expects the opposite, so on a fixed build it prints the failing line.
     const bool inherited = Find(v, kHostEffect) != nullptr;
     const bool redJoin = ArmNow() == Arm::RedJoin;
     if (inherited && !redJoin)

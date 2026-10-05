@@ -4,7 +4,8 @@
 //
 // A joiner's world is built from a capture of the HOST's save object, and the carried items
 // live in that object (saveSlot.GObjStack[0]), so without a substitution every joiner carries
-// the host's items under the host's keys. In session order: the host sends a joining peer its
+// the host's items under the host's keys, and the host's status effects ride along as records
+// of its world, which the join hook resets out of the joiner's copy. In session order: the host sends a joining peer its
 // profile while that peer is still pre-world (a first join gets a starter kit under fresh
 // keys), and the client writes it into the save object before the world materialises; the
 // client streams its profile back as it changes (and at once after an admin's order, SendProfileNow),
@@ -53,7 +54,8 @@ bool SendInventoryToSlot(int peerSlot);
 bool HasPendingApply();
 
 // CLIENT: the next save object to come ready belongs to a join, so the hook may substitute the
-// profile into it (or empty the host's items out of it when none arrived). One-shot, consumed by
+// profile into it (or empty the host's items out of it when none arrived), and the hook resets the
+// host's status effects out of it before either. One-shot, consumed by
 // the hook and cleared on disconnect; the join boot calls it right before each world load. Every
 // other load in the process -- a later Host-with-save above all -- is left alone. Any thread.
 void BeginJoinApply();

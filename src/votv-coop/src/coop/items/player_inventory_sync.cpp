@@ -198,8 +198,9 @@ void HostPersistTick(coop::net::Session* s) {
 
 // Client: the engine's pre-materialise hook, registered in Install. Fires on the game thread
 // with the freshly loaded save object, before the native load builds the world from it, the
-// one window to substitute this client's inventory. Fires for every load in the process, so it
-// acts only on the one the join boot armed (BeginJoinApply), once. The join boot waits for the
+// one window to substitute this client's inventory, and to reset the host's status effects out
+// of it. Fires for every load in the process, so it acts only on the one the join boot armed
+// (BeginJoinApply), once. The join boot waits for the
 // blob; if it still is not here, the host's items are emptied out of the save
 // object all the same -- they are the host's, not data of this player's that could be lost -- and
 // the stream stays shut for the session, so the profile on the host survives for the next join.
@@ -208,6 +209,14 @@ void OnSaveObjectReady(void* saveSlotObject) {
     // The host's status effects are records among its world's in this save object, and a player
     // joins without them: the game's own reset takes them out before the world is built, ahead of
     // both branches below (the profile branch returns early).
+    // Divergence from MTA, which resets a joiner's own state at the join (Event_OnIngame ->
+    // ResetStats, reference/mtasa-blue/Client/mods/deathmatch/logic/CClientGame.cpp:3452-3515) and
+    // composes what a joiner receives per recipient on its server
+    // (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:1436-1483). Here the records
+    // are removed at the receiver: the join streams the canonical on-disk slot when the live
+    // capture fails (src/votv-coop/src/coop/save/save_transfer.cpp:370,423) and the capture
+    // serialises the host's own live save object
+    // (src/votv-coop/src/ue_wrap/engine/save_capture.cpp:178-181), which the host must keep.
     bool gamemodeSet = false;
     const int effectsReset = ue_wrap::effects::ResetOnSaveObject(saveSlotObject, &gamemodeSet);
     if (effectsReset > 0)
