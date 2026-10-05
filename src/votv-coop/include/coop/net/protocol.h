@@ -927,6 +927,16 @@ enum class ReliableKind : uint8_t {
     // host runs the box's fix when it is broken and within the player's reach, and a refusal is answered to the
     // presser alone with the state row (ServerState). Never relayed. ServerRepairPayload.
     ServerRepair = 164,
+
+    // Client to host: my player opened this point sack; the host pays the sack's own points from its copy
+    // and destroys it, within the player's reach. Never relayed. PointSackRedeemPayload.
+    PointSackRedeem = 165,
+
+    // A fire on the sender's machine reached another peer's puppet there: that peer's own body is told, and runs
+    // the same ignite verb on itself under the game's rules (chance, firesuit, water, its own damage loop). A
+    // client's goes to the host, which applies it to its own player or forwards it to the named slot.
+    // PlayerIgnitePayload.
+    PlayerIgnite = 166,
 };
 
 #pragma pack(push, 1)
@@ -1020,6 +1030,7 @@ namespace match_form { constexpr uint8_t kNone = 0; constexpr uint8_t kPile = 1;
 // PoseSnapshot.stateBits flags. Single-byte field; flags assigned bit-by-bit.
 inline constexpr uint8_t kStateBitInAir   = 0x01;
 inline constexpr uint8_t kStateBitRagdoll = 0x02;  // the source is ragdolled (faint, manual, knock-out), not dead
+inline constexpr uint8_t kStateBitBurning = 0x04;  // the source's body is on fire (its burningTime runs), display only
 
 // The game's vital scalars (food, sleep, the default max health) top out at 100. health is
 // normalised by the peer's own max health before quantisation; food and sleep by this.
@@ -1777,6 +1788,24 @@ struct ServerRepairPayload {
     uint16_t timeDs;  // 2 -- the solve time in tenths of a second, saturated; 0 = none
 };
 static_assert(sizeof(ServerRepairPayload) == 4, "ServerRepairPayload must be 4 bytes");
+
+// A client's opened point sack (PointSackRedeem): the sack by key, the eid as the keyless fallback. Nothing
+// else is trusted: the host reads the amount from its own copy.
+struct PointSackRedeemPayload {
+    WireKey  key;        // 32 -- the sack's save Key; len=0 -> keyless, resolve by eid
+    uint32_t elementId;  // 4  -- the sack's Element id, 0 = none
+    uint32_t _pad;       // 4  -- zeroed
+};
+static_assert(sizeof(PointSackRedeemPayload) == 40, "PointSackRedeemPayload must be 40 bytes");
+
+// A fire's touch on a peer's body (PlayerIgnite). verb: 0 ignite(fuel), 1 attemptIgnite(), 2 startBurning().
+struct PlayerIgnitePayload {
+    uint8_t targetSlot;  // 1 -- the body's peer slot
+    uint8_t verb;        // 1 -- which of mainPlayer_C's three ways in
+    uint8_t _pad[2];     // 2 -- zeroed
+    float   fuel;        // 4 -- ignite's fuel; 0 for the others
+};
+static_assert(sizeof(PlayerIgnitePayload) == 8, "PlayerIgnitePayload must be 8 bytes");
 
 // The server upgrades lane (ServerUpgradeState). Ops 0 (install) and 1 (take-out) name a box by its
 // servers[] index; op 2, the canonical, carries every box's level in servers[] order (a farm past 64

@@ -12,6 +12,7 @@
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"
+#include "ue_wrap/core/call.h"   // ParamFrame + Call: a touch's verb run on this body
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
@@ -22,7 +23,10 @@
 
 #include <atomic>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
+#include <cstring>
+#include <string>
 
 namespace coop::player_damage {
 namespace {
@@ -120,6 +124,28 @@ constexpr int kIgniteTag = 0x49474E54;  // 'IGNT'
 bool g_igniteWatchDone = false;
 uint32_t g_igniteCanceled = 0;
 
+// The verb a touch names, by the function the gate saw.
+int IgniteVerbOf(void* fn) {
+    if (!fn) return -1;
+    const std::wstring name = R::ToString(R::NameOf(fn));
+    for (int i = 0; i < 3; ++i)
+        if (name == kIgniteNames[i]) return i;
+    return -1;
+}
+
+// One touch per body and verb a half second: a fire's spread timer runs about once a second per burning
+// object, several fires may reach one body, and the owner's own verb keeps the larger fuel anyway.
+uint64_t g_lastTouchMs[coop::players::kMaxPeers][3] = {};
+
+void SendTouch(coop::net::Session& s, uint8_t target, int verb, float fuel) {
+    coop::net::PlayerIgnitePayload p{};
+    p.targetSlot = target;
+    p.verb = static_cast<uint8_t>(verb);
+    p.fuel = fuel;
+    const bool host = s.role() == coop::net::Role::Host;
+    s.SendReliableToSlot(host ? target : 0, coop::net::ReliableKind::PlayerIgnite, &p, sizeof(p));
+}
+
 ue_wrap::script_gate::Verdict OnIgnitePre(const ue_wrap::script_gate::Call& c) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected() || !c.object) return ue_wrap::script_gate::Verdict::Run;
@@ -127,9 +153,30 @@ ue_wrap::script_gate::Verdict OnIgnitePre(const ue_wrap::script_gate::Call& c) {
     if (!localPawn || c.object == localPawn) return ue_wrap::script_gate::Verdict::Run;
     if (!coop::players::Registry::Get().IsPuppet(c.object)) return ue_wrap::script_gate::Verdict::Run;
     const uint32_t n = ++g_igniteCanceled;
+    // The puppet never burns here, and its owner is told the fire reached it: the owner's own body runs the
+    // verb under the game's rules, and its burning comes back on the pose stream.
+    const uint8_t target = coop::players::Registry::Get().PeerIdOfActor(c.object);
+    const int verb = IgniteVerbOf(c.function);
+    bool sent = false;
+    if (target < coop::players::kMaxPeers && verb >= 0) {
+        const uint64_t now = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+        if (now - g_lastTouchMs[target][verb] >= 500) {
+            g_lastTouchMs[target][verb] = now;
+            float fuel = 0.f;
+            if (verb == 0 && c.locals) {
+                static void* sFn = nullptr;
+                static int32_t sOff = -1;
+                if (c.function != sFn) { sFn = c.function; sOff = R::FindParamOffset(c.function, L"fuel"); }
+                if (sOff >= 0) std::memcpy(&fuel, c.locals + sOff, sizeof(fuel));
+            }
+            SendTouch(*s, target, verb, fuel);
+            sent = true;
+        }
+    }
     if (n <= 5 || (n % 100) == 0)
-        UE_LOGI("player_damage: refused setting a peer's puppet %p alight (#%u) -- its fire is its owner's",
-                c.object, n);
+        UE_LOGI("player_damage: refused setting a peer's puppet %p alight (#%u) -- %s", c.object, n,
+                sent ? "its owner is told the fire reached it" : "its fire is its owner's");
     return ue_wrap::script_gate::Verdict::Cancel;
 }
 
@@ -137,6 +184,33 @@ ue_wrap::script_gate::Verdict OnIgnitePre(const ue_wrap::script_gate::Call& c) {
 
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
+}
+
+void OnWireIgnite(const coop::net::PlayerIgnitePayload& p, int senderSlot) {
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->connected() || p.verb > 2) return;
+    const bool host = s->role() == coop::net::Role::Host;
+    const uint8_t mine = coop::players::Registry::Get().LocalPeerId();
+    if (!host && senderSlot != 0) return;   // a client hears touches from the host only
+    if (p.targetSlot != mine) {
+        // The host forwards one client's touch on another; nothing else is forwarded.
+        if (host && senderSlot >= 1 && p.targetSlot >= 1 && p.targetSlot < coop::players::kMaxPeers &&
+            p.targetSlot != senderSlot)
+            s->SendReliableToSlot(p.targetSlot, coop::net::ReliableKind::PlayerIgnite, &p, sizeof(p));
+        return;
+    }
+    void* local = coop::players::Registry::Get().Local();
+    if (!local) return;
+    void* fn = R::FindFunction(R::ClassOf(local), kIgniteNames[p.verb]);
+    if (!fn) return;
+    ue_wrap::ParamFrame f(fn);
+    if (!f.valid()) return;
+    if (p.verb == 0) f.Set<float>(L"fuel", std::isfinite(p.fuel) ? std::fmin(std::fmax(p.fuel, 0.f), 60.f) : 0.f);
+    const bool ran = ue_wrap::Call(local, f);
+    static uint32_t sSaid = 0;
+    if (++sSaid <= 10 || sSaid % 50 == 0)
+        UE_LOGI("player_damage: a fire on slot %d's machine reached this body -- ran %ls(%.1f) here: %s", senderSlot,
+                kIgniteNames[p.verb], p.fuel, ran ? "ok" : "FAILED");
 }
 
 void Tick() {

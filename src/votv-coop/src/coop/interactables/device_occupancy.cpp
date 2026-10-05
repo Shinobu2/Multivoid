@@ -340,16 +340,20 @@ void Tick() {
     }
 
     void* w = DS::ReadActiveInterface(local);
-    // Does a claim outlive the player's control of the screen? Said once per episode: a body that
-    // died or went ragdoll while its interface is still set holds the device for every peer. The
-    // measurement the release rule waits for, not a release: what the game does to the interface
-    // on death or ragdoll is not read yet.
+    // Does a claim outlive the player's control of the screen? A body that died or went ragdoll while
+    // its interface is still set would hold the device for every peer, so it leaves the interface,
+    // once per episode, and is said.
     if (!g_localKey.empty()) {
         bool ragdoll = false, dead = false;
         const bool lost = ue_wrap::engine::ReadMainPlayerRagdollState(local, ragdoll, dead) && (ragdoll || dead);
         if (lost && !g_claimLostSaid) {
-            UE_LOGW("device_occupancy: claim '%ls' still held while the local body is %s (interface %p)",
+            UE_LOGW("device_occupancy: claim '%ls' still held while the local body is %s (interface %p) -- "
+                    "leaving the interface, so the falling edge releases it",
                     g_localKey.c_str(), dead ? "dead" : "ragdolled", w);
+            // A body that cannot use the screen does not hold it: the game's own exit, once per episode; the
+            // widget's falling edge below then sends the release as any exit does.
+            if (w) DS::ForceExitInterface(local);
+            w = DS::ReadActiveInterface(local);
         }
         g_claimLostSaid = lost;
     } else {

@@ -10,7 +10,8 @@
 
 #pragma once
 
-namespace coop::net { class Session; struct PlayerDamagePayload; }
+namespace coop::net { class Session; struct PlayerDamagePayload;
+struct PlayerIgnitePayload; }
 
 namespace coop::player_damage {
 
@@ -27,6 +28,10 @@ void Tick();
 // mainPlayer_C, so our armour and inventory BP mitigate the hit. The host-only trust gate is
 // event_feed's, before this.
 void OnWireDamage(const coop::net::PlayerDamagePayload& p);
+
+// A fire's touch on a body (PlayerIgnite): on the target, the verb runs on the local player; on the host, a
+// client's touch on another client is forwarded to it. senderSlot is the connection's. Game thread.
+void OnWireIgnite(const coop::net::PlayerIgnitePayload& p, int senderSlot);
 
 // Host side: send a PlayerDamage event to peer `ownerSlot`, targetElementId stamped from that
 // slot's Player Element. No-op (logged) if the session is unset, the slot invalid or without a

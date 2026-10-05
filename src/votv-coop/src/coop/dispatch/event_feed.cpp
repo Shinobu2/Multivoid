@@ -201,6 +201,15 @@ void Update(net::Session& session, void* localPlayer) {
             ue_wrap::game_thread::Post([] { ::coop::dev::restore_vitals::ApplyLocally(); });
             break;
         }
+        case net::ReliableKind::PlayerIgnite: {
+            // A fire on the sender's machine reached a body; the target runs the verb on itself, the host forwards
+            // one client's touch on another (player_damage::OnWireIgnite holds the role rules).
+            if (msg.payloadLen < sizeof(net::PlayerIgnitePayload)) break;
+            net::PlayerIgnitePayload p{};
+            std::memcpy(&p, msg.payload, sizeof(p));
+            coop::player_damage::OnWireIgnite(p, msg.senderPeerSlot);
+            break;
+        }
         case net::ReliableKind::PlayerDamage: {
             // The host detected an enemy hitting this peer's puppet and relays the damage for the
             // owner to apply. Host-only origin (only the host runs enemies); not in the relay
