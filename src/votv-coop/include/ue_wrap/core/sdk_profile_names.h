@@ -119,6 +119,24 @@ inline constexpr const wchar_t* kNpcAllowlist[] = {
 };
 inline constexpr size_t kNpcAllowlistSize = sizeof(kNpcAllowlist) / sizeof(kNpcAllowlist[0]);
 
+// The late NPC allowlist: event-scene creatures whose classes may load only when their event
+// approaches, so they can never join the install's all-resolved gate (an event that never
+// fires would stall the whole NPC lane). Nothing resolves these at Install; the allowlist
+// test resolves each lazily, the first time a live class name-matches an entry
+// (npc_sync.cpp), the leaf-name rule the world-actor lane uses for the same reason. The
+// cached pointer then carries subclasses through the same descendant walk as the main list.
+// grayboar_C stays out deliberately: its SuperStruct is prop_C, not Character -- the boar-war
+// prop belongs to the prop lane; only the grayboarPawn_C helper it mints is a Character.
+inline constexpr const wchar_t* NpcClass_GrayTest     = L"grayTest_C";      // graysforest pack
+inline constexpr const wchar_t* NpcClass_Eg           = L"eg_C";            // eggvasion eggs
+inline constexpr const wchar_t* NpcClass_TentacleBall = L"tentacleBall_C";  // tentacleBalls pack
+inline constexpr const wchar_t* kNpcLateAllowlist[] = {
+    NpcClass_GrayTest,
+    NpcClass_Eg,
+    NpcClass_TentacleBall,
+};
+inline constexpr size_t kNpcLateAllowlistSize = sizeof(kNpcLateAllowlist) / sizeof(kNpcLateAllowlist[0]);
+
 // The non-Character event actors the Character-only NPC mirror cannot replicate: npc_pose_drive
 // drives position, yaw and the CMC, so these AActor/APawn ships and saucers get a transform-only
 // full-rotation mirror (coop::element::WorldActor, coop/world_actor_sync). A second BeginDeferred

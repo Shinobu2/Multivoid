@@ -161,7 +161,9 @@ void Install(coop::net::Session* session) {
     // Resolve the NPC classes. A partial resolution is fine here, since a missing class is simply
     // not suppressed yet; most of the game's NPC classes are loaded on gameplay-level entry.
     // Already-resolved entries skip the lookup, and the unresolved walks are bounded by the
-    // throttle gate at the top.
+    // throttle gate at the top. Only kNpcAllowlist gates: kNpcLateAllowlist's event creatures
+    // resolve lazily inside the allowlist test (npc_sync.cpp), so an event that never fires
+    // cannot stall the lane.
     size_t resolved = 0;
     for (size_t i = 0; i < P::name::kNpcAllowlistSize; ++i) {
         if (!g_npcAllowlist[i]) {

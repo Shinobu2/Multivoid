@@ -96,7 +96,9 @@ coop::element::ElementId RegisterHostNpcSilent(void* actor, const std::wstring& 
 void ReleaseNpcElementSilent(coop::element::ElementId eid);
 
 // The trust-boundary check both sides use: true iff `cls` derives from one of the allowlisted
-// NPC bases, by a SuperStruct walk. False while the allowlist is not fully resolved.
+// NPC bases, by a SuperStruct walk. False while the allowlist is not fully resolved -- except
+// the late allowlist's event creatures, which match by leaf name and resolve on first sight,
+// so they answer true the moment their class exists (kNpcLateAllowlist).
 bool IsAllowlistedClass(void* cls);
 
 // Clear the per-session state: the tracked-NPC map, the counter, the bypass slot. The
