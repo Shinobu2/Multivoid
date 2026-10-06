@@ -48,6 +48,8 @@ param(
     # file's header and NEITHER was enforced, so the two lanes produced the same
     # artifact and only the header knew they were supposed to differ. `publish.ps1`
     # passes this; the CI package step deliberately does not. (2026-09-01.)
+    # -Release also requires MULTIVOID_RELEASE_KEY, signs the staged main.dll, and
+    # verifies that signature in the written zip.
     [switch]$Release
 )
 
