@@ -61,6 +61,11 @@ std::map<uint32_t, Kept> g_held;      // CLIENT: the host's last row, or this pl
 struct Parked { std::vector<uint8_t> blob; uint8_t senderSlot = 0xFF; Clock::time_point since{}; };
 std::map<uint32_t, Parked> g_parked;
 
+// A row whose write into the live drive failed (the struct write can stop part way) is retried a bounded number of
+// times through the park, with the author's permission kept; the count is per eid and cleared on success.
+constexpr uint32_t kWriteRetries = 30;
+std::map<uint32_t, uint32_t> g_writeFails;
+
 struct Noted { ue_wrap::CachedObjRef ref; Clock::time_point until; };
 std::vector<Noted> g_noted;  // CLIENT: drives this player brought into the world, until their eid binds
 
@@ -281,17 +286,19 @@ void SayRefusal(uint8_t slot, uint32_t eid, const char* why) {
 
 // HOST: a client's row, taken once from the client that brought the drive while the host's copy is still at the class
 // default. Any other is answered with the host's own row, to that client alone. True when taken.
-bool HostTakeClientRow(coop::net::Session* s, uint32_t eid, void* actor, const SD::Row& row, uint8_t senderSlot) {
+enum class Take { Taken, Refused, WriteFailed };
+
+Take HostTakeClientRow(coop::net::Session* s, uint32_t eid, void* actor, const SD::Row& row, uint8_t senderSlot) {
     // A denied rack take's ghost names itself by its row: the one the winning take removed.
     if (coop::drive_rack_sync::TryConsumeDenyReap(senderSlot, Hash(row))) {
         coop::prop_lifecycle::DestroyLocalProp(actor, /*deferred*/true);
         UE_LOGW("drive_payload_sync: reaped the denied rack-take ghost eid=%u from slot %u", eid, senderSlot);
-        return false;
+        return Take::Refused;
     }
     const char* why = nullptr;
     auto author = g_brought.find(eid);
     SD::Row mine;
-    if (!DC::ReadDriveRow(actor, mine)) return false;
+    if (!DC::ReadDriveRow(actor, mine)) return Take::WriteFailed;
     if (author == g_brought.end() || author->second.slot != senderSlot || author->second.ref.Get() != actor)
         why = "not a drive that client brought";
     else if (!IsClassDefault(actor, Hash(mine))) why = "the host already holds a row for it";
@@ -300,22 +307,41 @@ bool HostTakeClientRow(coop::net::Session* s, uint32_t eid, void* actor, const S
         SendBytes(s, eid, Bytes(mine), senderSlot);
         ++g_counts.refused;
         SayRefusal(senderSlot, eid, why);
-        return false;
+        return Take::Refused;
     }
-    if (author != g_brought.end()) g_brought.erase(author);
+    // The author's permission is spent only by a write that landed: a failed write (the struct write can stop part
+    // way) puts the host's previous row back, keeps the permission, and the row is retried.
     {
         ApplyScope scope;
         coop::desk_snd_fx::ScopedWireApply guard;
-        if (!DC::WriteDriveRow(actor, row)) return false;
+        SD::Row landed;
+        if (!DC::WriteDriveRow(actor, row) || !DC::ReadDriveRow(actor, landed) || Hash(landed) != Hash(row)) {
+            DC::WriteDriveRow(actor, mine);
+            return Take::WriteFailed;
+        }
         DC::CallDriveUpd(actor);
     }
+    g_brought.erase(eid);
     // Every other client gets it; its author holds it already (MTA sends an accepted change to all but its source,
     // CGame.cpp:2761-2768).
     HostSendIfChanged(s, eid, actor, /*exceptSlot*/ senderSlot);
     ++g_counts.accepted;
     UE_LOGI("drive_payload_sync: HOST took slot %u's row for the drive it brought, eid=%u ('%ls', size %.0f)", senderSlot,
             eid, row.name.c_str(), row.size);
-    return true;
+    return Take::Taken;
+}
+
+// A write that did not land goes back to the park for another try, a bounded number of times.
+void RetryWrite(uint32_t eid, const std::vector<uint8_t>& blob, uint8_t senderSlot) {
+    const uint32_t n = ++g_writeFails[eid];
+    if (n <= kWriteRetries) {
+        if (n == 1) UE_LOGW("drive_payload_sync: the row for eid=%u did not land -- retrying", eid);
+        Park(eid, blob, senderSlot);
+        return;
+    }
+    g_writeFails.erase(eid);
+    UE_LOGW("drive_payload_sync: the row for eid=%u did not land after %u tries -- given up, the previous row stands",
+            eid, kWriteRetries);
 }
 
 void ApplyBlob(const std::vector<uint8_t>& blob, uint8_t senderSlot, bool fromParked) {
@@ -339,16 +365,28 @@ void ApplyBlob(const std::vector<uint8_t>& blob, uint8_t senderSlot, bool fromPa
         return;
     }
     if (host) {
-        HostTakeClientRow(s, eid, actor, row, senderSlot);
+        const Take t = HostTakeClientRow(s, eid, actor, row, senderSlot);
+        if (t == Take::WriteFailed) RetryWrite(eid, blob, senderSlot);
+        else g_writeFails.erase(eid);
         return;
     }
+    // Only a row that landed is the host's row here; a partial write is retried, never recorded as applied.
+    bool landed = false;
     {
         ApplyScope scope;
         coop::desk_snd_fx::ScopedWireApply guard;
-        if (DC::WriteDriveRow(actor, row)) DC::CallDriveUpd(actor);
+        SD::Row check;
+        landed = DC::WriteDriveRow(actor, row) && DC::ReadDriveRow(actor, check) && Hash(check) == Hash(row);
+        if (landed) DC::CallDriveUpd(actor);
+    }
+    if (!landed) {
+        RetryWrite(eid, blob, senderSlot);
+        return;
     }
     SD::Row applied;
-    if (DC::ReadDriveRow(actor, applied)) Keep(g_held, eid, actor, Hash(applied), &applied);
+    if (!DC::ReadDriveRow(actor, applied)) applied = row;
+    g_writeFails.erase(eid);
+    Keep(g_held, eid, actor, Hash(applied), &applied);
     ++g_counts.applied;
     UE_LOGI("drive_payload_sync: row applied eid=%u ('%ls', size %.0f) from the host", eid, row.name.c_str(), row.size);
 }
@@ -564,6 +602,7 @@ void OnDisconnect() {
     g_lastSent.clear();
     g_held.clear();
     g_parked.clear();
+    g_writeFails.clear();
     g_noted.clear();
     g_brought.clear();
     g_broughtPending.clear();
