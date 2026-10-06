@@ -1,14 +1,15 @@
 // coop/world/event_fire_sync.cpp -- see coop/world/event_fire_sync.h. The bytecode facts this
 // module stands on: the save slot's settime iterates allEvents, skips rows in passEvents, and
 // on a clock-cross fire calls the eventer's runEvent for the row and appends it to passEvents,
-// so a runEvent whose caller is settime is exactly a scheduler fire (the host observation seam),
-// and an empty allEvents kills the walk (the client suppression seam); runEvent is the only
-// function of that name, called from settime, from the eventer itself and from the game's own
-// event menu, which appends nothing; the gamemode's boot marks the rows before a new game's start
-// day passed without firing them, and rebuilds allEvents from the events table on every world
-// load, so the zeroed count self-heals and a client-written save cannot be poisoned; and the only
-// special trigger the table uses is the prank roll, host-local RNG, so the wire carries no
-// special field.
+// so a runEvent whose caller is settime is exactly a scheduler fire, and an empty allEvents
+// kills the walk (the client suppression seam); runEvent is the only function of that name,
+// called from settime, from the game's own event menu and through our reflected dispatch; the
+// gamemode's boot marks the rows before a new game's start day passed without firing them, and
+// rebuilds allEvents from the events table on every world load, so the zeroed count self-heals
+// and a client-written save cannot be poisoned; and the only special the table uses is the
+// prank roll, which summonArirPrank resolves through an internal runSpecialEvent call -- so the
+// watch sits on BOTH eventer verbs and the wire carries the name each call itself took (the
+// rolled case, not the prank verb).
 
 #include "coop/world/event_fire_sync.h"
 
@@ -27,6 +28,7 @@
 #include "ue_wrap/world/daynightcycle.h"
 
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <deque>
 #include <string>
@@ -50,16 +52,25 @@ int32_t g_offPassEvents = -1;         // saveSlot.passEvents (TArray<FName>)
 int32_t g_offAllEvents = -1;          // saveSlot.allEvents  (TArray<FName>)
 void* g_runEventFn = nullptr;         // runEvent(FName event, FName special)
 void* g_runSpecialEventFn = nullptr;  // runSpecialEvent(FName eventName1) -> bool
+void* g_summonArirPrankFn = nullptr;  // summonArirPrank(), runSpecialEvent's prank-roll caller
 void* g_settimeFn = nullptr;          // saveSlot.settime, the scheduler's walk
 int32_t g_offEventParam = -1;         // runEvent's `event` in its parameter frame
+int32_t g_offSpecialParam = -1;       // runSpecialEvent's `eventName1` in its parameter frame
 bool g_resolved = false;
 bool g_resolveFailed = false;
 
-// The host's watch on runEvent, registered once per process.
+// The host's watches on both eventer verbs, registered once per process. One emit per
+// committed call: the watches are the ONLY broadcast source (a dev HostFire's reflected call
+// reaches them like any other), and the sequence number makes repeats of a replayable name
+// (a special is repeatable) tellable apart -- the dedupe key is the occurrence, never the name.
 constexpr int kTagEventFire = 0x45564652;  // 'EVFR'
 constexpr const wchar_t* kRunEvent = L"runEvent";  // one pointer: the gate matches a name watch by it
+constexpr const wchar_t* kRunSpecialEvent = L"runSpecialEvent";
 bool g_watchInstalled = false;
 bool g_watchLive = false;
+bool g_specialWatchInstalled = false;
+bool g_specialWatchLive = false;
+unsigned g_hostFireSeq = 0;  // committed host fires across both verbs (game thread)
 
 // Client suppression and replay state, game thread.
 int g_zeroedAllEventsNum = 0;         // what we zeroed (restore on disconnect); 0 = nothing zeroed
@@ -72,12 +83,21 @@ struct PendingFire {
     // passEvents dedupe (a mid-event joiner's blob carries the row as completed history while
     // the event is still running).
     bool activeOverride = false;
+    bool attempted = false;    // one replay try ran (paces the next)
+    int failedDispatches = 0;  // the eventer was up but refused the native call
+    bool failLogged = false;   // the once-per-row retry line
+    std::chrono::steady_clock::time_point lastAttempt{};
 };
 std::deque<PendingFire> g_pending;    // replays waiting for the eventer (join window)
 // EventFire is pre-world-sendable, so a joiner can queue fires for its whole load window. The
 // cap is the table plus specials plus margin; duplicates are skipped at queue time, so it is
 // effectively unreachable.
 constexpr size_t kMaxPending = 128;
+// A refused dispatch retries on a real-time cadence (the per-tick install pump drives the
+// drain, so a stalled row never waits for the next fire) and is bounded, so a permanently
+// refused row cannot wedge the FIFO behind it.
+constexpr auto kReplayRetrySpacing = std::chrono::seconds(1);
+constexpr int kMaxReplayDispatches = 10;
 std::unordered_set<std::string> g_replayed;  // rows replayed this session (dedupe)
 std::atomic<unsigned> g_replays{0};          // fires replayed natively (ReplayCount)
 
@@ -97,7 +117,6 @@ const char* const kReplayRows[] = {
     // Story and save flips (level-placed triggers; no lane):
     "treehouse_0", "treehouse_1", "treehouse_2", "treehouse_3", "treehouse_4", "treehouse_5",
     "break_RomeoSierra", "break_Victor", "break_Victor2",
-    "obelisk",
     // Force-object appends (a save array the client's own dish scan reads; no lane):
     "looker_0-1", "looker_1-1", "looker_2-1", "looker_3-1", "looker_4-1",
     "arirSignal", "arirSpk", "picSignal", "peace",
@@ -131,15 +150,26 @@ const NoReplayRow kNoReplayRows[] = {
     // NPC leaves); replaying the arm would spawn them client-local. Host-only until the ship gets
     // a lane:
     { "arirShip", "actor spawn on armed overlap (no lane)" },
-    { "earthTp", "SELF (pose stream)" },
+    // The obelisk's graph is not a bare flag flip: obelisk_C spawns prop_C/prop_obelisk_C actors
+    // and punches getMainPlayer -- a replay would double-spawn the props client-local and hit the
+    // client's own player. Host-only until the scene gets a lane:
+    { "obelisk", "obelisk_C prop spawns + getMainPlayer punch (no lane)" },
+    // earthTp fires newsky_C.tp: the black hole, sky and ambience flip plus a 2D sound and
+    // emails -- no player teleport at all, and no lane carries those yet:
+    { "earthTp", "newsky_C.tp sky/blackhole flip + 2D cue + emails (no lane yet)" },
     { "vehtp", "atv lane" },
-    { "bedEvent", "sleep lane" },
+    // bedEvent runs trigger_bedEvent -> bedEvent_C, which moves the bed and teleports
+    // getMainPlayer on wake; the sleep lane only gates client dreams, it does not carry this:
+    { "bedEvent", "bedEvent_C bed/player transform + wake teleport (no lane)" },
     { "picnic", "prop lane" }, { "destroyPicnic", "prop lane" },
     { "enasus", "prop lane" }, { "enacros", "prop lane" },
     { "cookier", "prop lane (armed prop)" }, { "paperGray", "prop lane (armed prop)" },
     { "arirEgg", "prop lane (armed prop)" },
     { "console", "device lanes" }, { "lightswitch", "device lanes" },
-    { "keypadGuess", "device lanes" }, { "atvExplode", "atv lane (trap flag)" },
+    { "keypadGuess", "device lanes" },
+    // atvExplode writes car.trap -- a host-owned flag no lane carries (atv_condition_sync
+    // transfers neither trap nor zapped):
+    { "atvExplode", "car.trap is host-owned (no lane carries trap/zapped)" },
     // Host-local by design:
     { "agrav", "physics divergence (by-design host-local)" },
     { "treehouseSleep", "per-player teleport" },
@@ -185,7 +215,8 @@ int ReplayVerdict(const std::string& name, const char** laneOut) {
 
 bool MembersMissing() {
     return g_offSaveSlot < 0 || g_offEventer < 0 || g_offPassEvents < 0 || g_offAllEvents < 0 ||
-           !g_runEventFn || !g_runSpecialEventFn || !g_settimeFn || g_offEventParam < 0;
+           !g_runEventFn || !g_runSpecialEventFn || !g_settimeFn || g_offEventParam < 0 ||
+           g_offSpecialParam < 0;
 }
 
 bool ResolvePass() {
@@ -202,21 +233,28 @@ bool ResolvePass() {
     if (g_offAllEvents < 0) g_offAllEvents = R::FindPropertyOffset(ssCls, L"allEvents");
     g_runEventFn = R::FindFunction(evCls, L"runEvent");
     g_runSpecialEventFn = R::FindFunction(evCls, L"runSpecialEvent");
+    // The prank roll's frame is an origin label, not a requirement: its absence costs only
+    // the "prank-roll" tag in the fire log, so it stays out of the latching check.
+    g_summonArirPrankFn = R::FindFunction(evCls, L"summonArirPrank");
     g_settimeFn = R::FindFunction(ssCls, L"settime");
     g_offEventParam = g_runEventFn ? R::FindParamOffset(g_runEventFn, L"event") : -1;
+    g_offSpecialParam = g_runSpecialEventFn ? R::FindParamOffset(g_runSpecialEventFn, L"eventName1") : -1;
     if (MembersMissing()) {
         g_resolveFailed = true;
         UE_LOGW("event_fire: resolution INCOMPLETE on loaded classes (saveSlot=0x%X eventer=0x%X "
-                "passEvents=0x%X allEvents=0x%X runEvent=%s(event=0x%X) runSpecialEvent=%s settime=%s) -- "
+                "passEvents=0x%X allEvents=0x%X runEvent=%s(event=0x%X) "
+                "runSpecialEvent=%s(eventName1=0x%X) settime=%s) -- "
                 "latched OFF; game version mismatch?",
                 g_offSaveSlot, g_offEventer, g_offPassEvents, g_offAllEvents, g_runEventFn ? "yes" : "NO",
-                g_offEventParam, g_runSpecialEventFn ? "yes" : "NO", g_settimeFn ? "yes" : "NO");
+                g_offEventParam, g_runSpecialEventFn ? "yes" : "NO", g_offSpecialParam,
+                g_settimeFn ? "yes" : "NO");
         return false;
     }
     g_resolved = true;
     UE_LOGI("event_fire: resolved (saveSlot=0x%X passEvents=0x%X allEvents=0x%X eventer=0x%X "
-            "runEvent=yes runSpecialEvent=yes settime=yes)",
-            g_offSaveSlot, g_offPassEvents, g_offAllEvents, g_offEventer);
+            "runEvent=yes runSpecialEvent=yes summonArirPrank=%s settime=yes)",
+            g_offSaveSlot, g_offPassEvents, g_offAllEvents, g_offEventer,
+            g_summonArirPrankFn ? "yes" : "NO");
     return true;
 }
 
@@ -248,8 +286,10 @@ std::string NarrowName(const R::FName& n) {
 // The native fire, game thread. True iff the verb actually dispatched; callers gate the
 // broadcast and the replayed set on it, since a failed host fire must not make clients replay
 // an event the authority never executed, and a failed replay must not permanently consume
-// the row.
-bool NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring& specialName) {
+// the row. quietFail silences the per-call refusal warn for a queue's spaced retries -- the
+// first refusal is loud and the row's retry line is said once, in NoteAttempt.
+bool NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring& specialName,
+                bool quietFail = false) {
     void* eventer = EventerOf(ue_wrap::world_singleton::Gamemode());
     if (!eventer) {
         UE_LOGW("event_fire: no live trigger_eventer -- native fire dropped ('%ls')", eventName.c_str());
@@ -264,7 +304,8 @@ bool NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring
             UE_LOGI("event_fire: runSpecialEvent('%ls') dispatched", eventName.c_str());
             return true;
         }
-        UE_LOGW("event_fire: runSpecialEvent('%ls') dispatch FAILED", eventName.c_str());
+        if (!quietFail)
+            UE_LOGW("event_fire: runSpecialEvent('%ls') dispatch FAILED", eventName.c_str());
         return false;
     }
     if (!g_runEventFn) { UE_LOGW("event_fire: runEvent unresolved"); return false; }
@@ -277,7 +318,8 @@ bool NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring
                 eventName.c_str(), specialName.c_str());
         return true;
     }
-    UE_LOGW("event_fire: runEvent('%ls') dispatch FAILED", eventName.c_str());
+    if (!quietFail)
+        UE_LOGW("event_fire: runEvent('%ls') dispatch FAILED", eventName.c_str());
     return false;
 }
 
@@ -293,19 +335,43 @@ void Broadcast(FireKind kind, const std::string& name) {
             kind == FireKind::SpecialEvent ? "runSpecialEvent" : "runEvent", name.c_str());
 }
 
-// HOST: a scheduler fire, seen as it happens -- runEvent entered from settime, the one call that
-// fires a scheduled row. A dev fire reaches runEvent through our own ProcessEvent with no Blueprint
-// caller and broadcasts at its own dispatch; the game's event menu calls runEvent with no settime
-// either, and appends no row, as before.
-sg::Verdict OnRunEventPre(const sg::Call& call) {
+// The one emit point for host fires, at the body commit: runEvent entered from settime is a
+// scheduler fire, a call with no Blueprint caller and fromOurCode is our own HostFire dispatch,
+// and any other caller is the game's own menus -- every one reached clients before only if the
+// host broadcast it, which is now this watch's job alone. POST so a cancelled body can never
+// announce a fire that did not run; a client replay's own call early-outs on the role gate.
+void OnRunEventPost(const sg::Call& call) {
     auto* s = g_session.load(std::memory_order_acquire);
-    if (!s || !s->connected() || s->role() != coop::net::Role::Host) return sg::Verdict::Run;
-    if (!ResolvePass() || call.function != g_runEventFn || call.callerFunction != g_settimeFn)
-        return sg::Verdict::Run;
+    if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
+    if (!ResolvePass() || call.function != g_runEventFn) return;
     const std::string name = NarrowName(*reinterpret_cast<const R::FName*>(call.locals + g_offEventParam));
-    UE_LOGI("event_fire: host OBSERVED scheduler fire '%s' (settime -> runEvent)", name.c_str());
+    const char* origin = call.callerFunction == g_settimeFn ? "scheduler" :
+                         call.fromOurCode ? "dev-call" : "native";
+    ++g_hostFireSeq;
+    UE_LOGI("event_fire: host fire #%u runEvent('%s') origin=%s -- broadcasting",
+            g_hostFireSeq, name.c_str(), origin);
     Broadcast(FireKind::RunEvent, name);
-    return sg::Verdict::Run;
+}
+
+// HOST: a runSpecialEvent body just completed. The natural entry is a scheduled ariralPrank
+// row: runEvent -> summonArirPrank (a rep-tier Array_Random pick, removed from the pool on the
+// way out) -> runSpecialEvent, so THIS call is where the rolled outcome becomes known -- the
+// row's own broadcast carries only the arirInteraction name. Dev fires (reflected, no caller)
+// and the game's cheat menu reach it the same way and emit through here exactly once.
+void OnRunSpecialEventPost(const sg::Call& call) {
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
+    if (!ResolvePass() || call.function != g_runSpecialEventFn) return;
+    const std::string name =
+        NarrowName(*reinterpret_cast<const R::FName*>(call.locals + g_offSpecialParam));
+    const char* origin =
+        (g_summonArirPrankFn && call.callerFunction == g_summonArirPrankFn) ? "prank-roll" :
+        call.fromOurCode ? "dev-call" : "native";
+    const bool returned = call.result ? *static_cast<const bool*>(call.result) : true;
+    ++g_hostFireSeq;
+    UE_LOGI("event_fire: host fire #%u runSpecialEvent('%s') origin=%s returned=%d -- broadcasting",
+            g_hostFireSeq, name.c_str(), origin, returned ? 1 : 0);
+    Broadcast(FireKind::SpecialEvent, name);
 }
 
 // True iff the client's own passEvents already contains the row (the transferred save
@@ -322,15 +388,20 @@ bool InClientPassEvents(const std::string& name) {
     return false;
 }
 
-// The client replay executor, game thread. False if the eventer is not up yet (re-queue).
-bool TryReplay(const PendingFire& pf) {
-    if (!ResolvePass() || !EventerOf(ue_wrap::world_singleton::Gamemode())) return false;
+// The replay step's result, game thread: Done pops the row (dispatched or deliberately
+// skipped), NotReady waits it uncounted (the eventer is simply not up yet), Failed counts a
+// real dispatch refusal against the row's retry bound.
+enum class ReplayStep { Done, NotReady, Failed };
+
+// The client replay executor, game thread.
+ReplayStep TryReplay(const PendingFire& pf) {
+    if (!ResolvePass() || !EventerOf(ue_wrap::world_singleton::Gamemode())) return ReplayStep::NotReady;
     // Dedupe applies to one-shot scheduled rows only (the game's own passEvents semantics);
     // specials (graffiti, pranks the menu re-fires) are repeatable by design.
     if (pf.kind == FireKind::RunEvent) {
         if (g_replayed.count(pf.name)) {
             UE_LOGI("event_fire: '%s' already replayed this session -- skipping", pf.name.c_str());
-            return true;
+            return ReplayStep::Done;
         }
         // A passEvents hit marks nothing: the skip must stay re-decidable, since marking here would
         // let a history-skipped fire permanently block a later in-flight override for the same row
@@ -339,30 +410,60 @@ bool TryReplay(const PendingFire& pf) {
         if (!pf.activeOverride && InClientPassEvents(pf.name)) {
             UE_LOGI("event_fire: '%s' already in local passEvents (save carried it) -- skipping",
                     pf.name.c_str());
-            return true;
+            return ReplayStep::Done;
         }
     }
     const std::wstring w(pf.name.begin(), pf.name.end());
     UE_LOGI("event_fire: client REPLAY %s '%s'%s",
             pf.kind == FireKind::SpecialEvent ? "runSpecialEvent" : "runEvent", pf.name.c_str(),
             pf.activeOverride ? " (in-flight active-override)" : "");
-    // The special is always None: the only native special is the prank roll, host-local RNG, and
-    // replaying it would roll a different prank here. Marked consumed only on a successful
-    // dispatch (a frame or call failure is loud and must not eat the row).
-    if (NativeFire(pf.kind, w, L"None")) {
+    // The special is always None: the only native special is the prank roll, whose chosen case
+    // the host's runSpecialEvent watch sends on its own. A refused dispatch is NOT a consume:
+    // the row stays queued and retries on a bound (NoteAttempt); the repeated refusals stay
+    // quiet so the once-per-row line stands out.
+    if (NativeFire(pf.kind, w, L"None", /*quietFail=*/pf.failedDispatches > 0)) {
         g_replays.fetch_add(1, std::memory_order_relaxed);
         if (pf.kind == FireKind::RunEvent) g_replayed.insert(pf.name);
+        return ReplayStep::Done;
     }
-    return true;
+    return ReplayStep::Failed;
+}
+
+// One attempt's outcome on a queued row: stamp the pacing, and on a real refusal count it
+// against the bound and say so once -- a NotReady row just waits for its eventer.
+void NoteAttempt(PendingFire& pf, ReplayStep step) {
+    pf.attempted = true;
+    pf.lastAttempt = std::chrono::steady_clock::now();
+    if (step != ReplayStep::Failed) return;
+    ++pf.failedDispatches;
+    if (pf.failLogged) return;
+    pf.failLogged = true;
+    UE_LOGW("event_fire: replay of '%s' refused by the native dispatch -- stays queued, "
+            "retrying every %ds (dropped after %d refusals)",
+            pf.name.c_str(), static_cast<int>(kReplayRetrySpacing.count()), kMaxReplayDispatches);
 }
 
 // CLIENT: replay the queued fires in arrival order, stopping at the first the eventer cannot take
-// yet. Run before a new fire is handled, and at the client's world-ready announce, by which time the
-// gamemode's boot has set its eventer.
+// yet; a front row that already tried waits out its spacing first. Run before a new fire is
+// handled, at the client's world-ready announce, and every install tick (the lasting retry).
 void DrainPending() {
+    const auto now = std::chrono::steady_clock::now();
     while (!g_pending.empty()) {
-        if (!TryReplay(g_pending.front())) return;
-        g_pending.pop_front();
+        PendingFire& front = g_pending.front();
+        if (front.attempted && now - front.lastAttempt < kReplayRetrySpacing) return;
+        const ReplayStep step = TryReplay(front);
+        if (step == ReplayStep::Done) {
+            g_pending.pop_front();
+            continue;
+        }
+        NoteAttempt(front, step);
+        if (front.failedDispatches >= kMaxReplayDispatches) {
+            UE_LOGE("event_fire: replay of '%s' DROPPED after %d refused dispatches -- "
+                    "the row's outputs are lost this session", front.name.c_str(),
+                    front.failedDispatches);
+            g_pending.pop_front();
+        }
+        return;
     }
 }
 
@@ -408,14 +509,23 @@ void Install(coop::net::Session* session) {
     // Called every pump tick by the install fanout, which is also the retry until the cycle class
     // loads and until the gate has resolved the watch's name.
     if (!g_watchInstalled)
-        g_watchInstalled = sg::WatchName(kRunEvent, kTagEventFire, &OnRunEventPre, nullptr);
-    if (g_watchInstalled && !g_watchLive) {
+        g_watchInstalled = sg::WatchName(kRunEvent, kTagEventFire, nullptr, &OnRunEventPost);
+    if (!g_specialWatchInstalled)
+        g_specialWatchInstalled =
+            sg::WatchName(kRunSpecialEvent, kTagEventFire, nullptr, &OnRunSpecialEventPost);
+    if ((g_watchInstalled && !g_watchLive) || (g_specialWatchInstalled && !g_specialWatchLive))
         sg::ResolvePendingNames();
-        if (sg::NameWatchLive(kRunEvent, kTagEventFire)) {
-            g_watchLive = true;
-            UE_LOGI("event_fire: the host's scheduler fires are seen at runEvent (a script-gate watch)");
-        }
+    if (!g_watchLive && sg::NameWatchLive(kRunEvent, kTagEventFire)) {
+        g_watchLive = true;
+        UE_LOGI("event_fire: the host's fires are seen at runEvent (a script-gate watch)");
     }
+    if (!g_specialWatchLive && sg::NameWatchLive(kRunSpecialEvent, kTagEventFire)) {
+        g_specialWatchLive = true;
+        UE_LOGI("event_fire: the host's special picks are seen at runSpecialEvent (a script-gate watch)");
+    }
+    // The client replay queue's lasting retry: a fire whose eventer was not up, or whose dispatch
+    // was refused, no longer waits for the next fire to arrive -- this pump paces it instead.
+    if (!g_pending.empty()) DrainPending();
     namespace DNC = ue_wrap::daynightcycle;
     if (g_tickObserved || !DNC::EnsureResolved()) return;
     void* fn = DNC::TickFunction();
@@ -449,13 +559,10 @@ bool HostFire(FireKind kind, const std::wstring& eventName, const std::wstring& 
             UE_LOGW("event_fire: HostFire('%ls') -- the event classes are not loaded", ev.c_str());
             return;
         }
-        if (!NativeFire(kind, ev, sp)) return;  // authority did not fire -> nothing to mirror
-        // The dev seam: a direct runEvent has no settime caller, so the watch leaves it to this
-        // broadcast. The wire carries the name only, never the special.
-        std::string narrow;
-        narrow.reserve(ev.size());
-        for (wchar_t c : ev) narrow.push_back((c > 0 && c < 128) ? static_cast<char>(c) : '?');
-        Broadcast(kind, narrow);
+        // No send of its own: the runEvent/runSpecialEvent watches see this reflected call like
+        // any other host fire and emit it once (a dev fire is the 'dev-call' origin). A refused
+        // dispatch commits nothing, so nothing reaches the wire.
+        NativeFire(kind, ev, sp);
     });
     return true;
 }
@@ -486,7 +593,12 @@ void OnReliable(const coop::net::EventFirePayload& payload) {
     }
     DrainPending();
     PendingFire pf{ kind, name };
-    if (g_pending.empty() && TryReplay(pf)) return;
+    ReplayStep step = ReplayStep::NotReady;  // a non-empty queue tries it in FIFO order later
+    if (g_pending.empty()) {
+        step = TryReplay(pf);
+        if (step == ReplayStep::Done) return;
+        NoteAttempt(pf, step);  // the queue must remember the try: it paces the retry
+    }
     // One-shot rows dedupe at queue time too (a scheduler re-fire of a dev-fired row during the
     // same load window would otherwise queue twice; the replay would catch it later, but a
     // duplicate-free queue keeps the cap honest).
@@ -499,8 +611,8 @@ void OnReliable(const coop::net::EventFirePayload& payload) {
                 g_pending.size(), name.c_str());
         return;
     }
-    UE_LOGI("event_fire: eventer not up yet -- queued '%s' (%zu pending)",
-            name.c_str(), g_pending.size() + 1);
+    UE_LOGI("event_fire: queued '%s' (%zu pending; %s)", name.c_str(), g_pending.size() + 1,
+            step == ReplayStep::Failed ? "first dispatch refused" : "eventer not up yet");
     g_pending.push_back(std::move(pf));
 }
 
@@ -521,7 +633,11 @@ void ReplayInFlightRow(const std::string& rowName) {
     }
     DrainPending();
     PendingFire pf{ FireKind::RunEvent, rowName, /*activeOverride=*/true };
-    if (g_pending.empty() && TryReplay(pf)) return;
+    if (g_pending.empty()) {
+        const ReplayStep step = TryReplay(pf);
+        if (step == ReplayStep::Done) return;
+        NoteAttempt(pf, step);  // the queue must remember the try: it paces the retry
+    }
     // The eventer is not up yet. If the row is already queued (a fire copy landed in the pre-world
     // window), upgrade it in place: two entries would double-dispatch, and the plain copy alone
     // could history-skip the in-flight replay.
@@ -538,7 +654,7 @@ void ReplayInFlightRow(const std::string& rowName) {
                 g_pending.size(), rowName.c_str());
         return;
     }
-    UE_LOGI("event_fire: eventer not up yet -- queued in-flight '%s' (%zu pending)",
+    UE_LOGI("event_fire: queued in-flight '%s' (%zu pending)",
             rowName.c_str(), g_pending.size() + 1);
     g_pending.push_back(std::move(pf));
 }
@@ -550,8 +666,8 @@ void OnClientWorldReady() {
     if (g_pending.empty())
         UE_LOGI("event_fire: world ready -- replayed the %zu queued fire(s)", before);
     else
-        UE_LOGW("event_fire: world ready but the eventer is not up -- %zu of %zu queued fire(s) wait for "
-                "the next fire", g_pending.size(), before);
+        UE_LOGW("event_fire: world ready with %zu of %zu queued fire(s) still pending -- "
+                "the install pump retries them", g_pending.size(), before);
 }
 
 void OnDisconnect() {
