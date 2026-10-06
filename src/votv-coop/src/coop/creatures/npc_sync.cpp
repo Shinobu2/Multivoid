@@ -80,11 +80,37 @@ struct PendingNpcSpawn {
 };
 thread_local PendingNpcSpawn t_pendingNpc{coop::element::kInvalidId, nullptr};
 
+// The late allowlist's lazily-cached class pointers (kNpcLateAllowlist, sdk_profile_names.h):
+// event-scene creatures whose classes may load only when their event approaches, so the
+// install never waits on them. A live class name-matches an entry and its pointer is cached
+// here; from then on it rides the same descendant walk as the main list. Written from any
+// thread the allowlist test runs on; a word-aligned store and a same-value re-resolve keep
+// races benign. The count is a fast-path hint only: a lost increment just re-runs the name
+// loop, which finds every slot already filled.
+void* g_npcLateAllowlist[P::name::kNpcLateAllowlistSize] = {};
+int   g_npcLateResolvedCount = 0;
+
 // A subclass-aware allowlist match (kerfurOmega alone has 20 subclasses), through
 // ue_wrap::reflection::IsDescendantOfAny so the SuperStruct offset stays in the wrapper; one
-// chain walk checking every base per hop.
+// chain walk checking every base per hop. The late list resolves lazily inside: the first live
+// class that name-matches an unresolved entry caches its pointer (leaf names, the same rule
+// the world-actor lane uses for event classes), so an event creature is allowlisted the moment
+// it exists and the all-resolved install gate is never held by an event that has not fired.
 bool IsClassOrDerivedFromAnyAllowlisted(void* cls) {
-    return R::IsDescendantOfAny(cls, g_npcAllowlist, P::name::kNpcAllowlistSize);
+    if (!cls) return false;
+    if (R::IsDescendantOfAny(cls, g_npcAllowlist, P::name::kNpcAllowlistSize)) return true;
+    if (g_npcLateResolvedCount < static_cast<int>(P::name::kNpcLateAllowlistSize)) {
+        const R::FName& nm = R::NameOf(cls);
+        for (size_t i = 0; i < P::name::kNpcLateAllowlistSize; ++i) {
+            if (!g_npcLateAllowlist[i] && R::NameEquals(nm, P::name::kNpcLateAllowlist[i])) {
+                g_npcLateAllowlist[i] = cls;
+                ++g_npcLateResolvedCount;
+                UE_LOGI("npc-suppress: late allowlist[%zu] '%ls' resolved on first sight = %p",
+                        i, P::name::kNpcLateAllowlist[i], cls);
+            }
+        }
+    }
+    return R::IsDescendantOfAny(cls, g_npcLateAllowlist, P::name::kNpcLateAllowlistSize);
 }
 
 }  // namespace; the callbacks below are named, registered by npc_sync_install.cpp
