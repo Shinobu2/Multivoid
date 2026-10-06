@@ -145,16 +145,16 @@ const NoReplayRow kNoReplayRows[] = {
     { "treehouseSleep", "per-player teleport" },
     // Creature and save-actor spawns, host-only until allowlisted. The vent crawler is
     // npc-allowlisted, so its no-replay reason is the mirrors:
-    { "ventCrawler", "npc lane (allowlisted)" }, { "ventKnocker", "creature spawn (no lane yet)" },
-    { "tentacleBalls", "creature spawn (no lane yet)" }, { "morningGay", "creature spawn (no lane yet)" },
-    { "borgRozital", "creature spawn (no lane yet)" }, { "graysforest", "creature spawn (no lane yet)" },
+    { "ventCrawler", "npc lane (allowlisted)" }, { "ventKnocker", "world-actor lane (eventer EX-catch)" },
+    { "tentacleBalls", "npc lane (late allowlist; follower EX-catch)" }, { "morningGay", "world-actor lane (eventer EX-catch)" },
+    { "borgRozital", "world-actor lane (eventer EX-catch)" }, { "graysforest", "npc lane (late allowlist; controller EX-catch)" },
     { "graystank", "creature spawn (no lane yet)" }, { "arirBuster", "creature spawn (no lane yet)" },
-    { "eggvasion", "creature spawn (no lane yet)" }, { "boarwar", "creature spawn (no lane yet)" },
-    { "soltoClean", "creature spawn (no lane yet)" },
+    { "eggvasion", "npc lane (late allowlist; egger EX-catch)" }, { "boarwar", "creature spawn (no lane yet)" },
+    { "soltoClean", "world-actor lane (eventer EX-catch)" },
     { "salt", "save-actor spawn (no lane)" }, { "rozitalHole", "save-actor spawn (no lane)" },
     { "dreambase", "save-actor spawn (no lane)" },
-    { "fallbody_0", "dropper spawn (no lane)" }, { "fallbody_1", "dropper spawn (no lane)" },
-    { "fallcar_0", "dropper spawn (no lane)" },
+    { "fallbody_0", "dropper spawn (world-actor lane, eventer EX-catch)" }, { "fallbody_1", "dropper spawn (world-actor lane, eventer EX-catch)" },
+    { "fallcar_0", "dropper spawn (world-actor lane, eventer EX-catch)" },
     // The prank layer (host-local RNG; thrown-prop outputs ride the prop lane):
     { "food", "prank special (prop lane)" }, { "drive", "prank special (prop lane)" },
     { "atvFuel", "prank special (prop lane)" }, { "atvFix", "prank special (prop lane)" },
