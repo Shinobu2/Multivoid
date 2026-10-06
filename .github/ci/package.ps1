@@ -13,7 +13,10 @@
 # THE ZIP IS VERIFIED AFTER IT IS WRITTEN, not merely assembled (7.4b: "it must FAIL
 # CLOSED if the zip does not contain the expected tree -- an empty or mis-rooted zip
 # is a silently broken release"). Test-PackageZip lives in ledger_lib.ps1 so publish
-# can re-run the identical predicate on the artifact it downloaded back.
+# can re-run the identical predicate on the artifact it downloaded back. A -Release zip
+# also carries mod/dlls/main.dll.sig, signed here from the release key in the environment,
+# and Test-PackageSignature verifies the WRITTEN zip's main.dll against it: a release
+# without a valid signature fails. A package that is not a release carries none.
 #
 # THE PAK SHIPS. The base skins go INSIDE the mod package, which is why the zip is
 # assembled by hand rather than taken from a build output: the release carries the four
@@ -151,6 +154,21 @@ foreach ($legal in 'LICENSE', 'THIRD-PARTY-NOTICES.md') {
     Copy-Item $legalPath (Join-Path $stage $legal)
 }
 Copy-Item $PayloadDll (Join-Path $stage 'mod/dlls/main.dll')
+# THE RELEASE SIGNATURE. The key reaches this process only through the release
+# environment's secret; the signer reads it from the environment, never from an argument,
+# and it is dropped from this process's environment as soon as the signer has run.
+if ($Release) {
+    if ([string]::IsNullOrWhiteSpace($env:MULTIVOID_RELEASE_KEY)) {
+        throw 'RELEASE package needs MULTIVOID_RELEASE_KEY (the release environment''s secret)'
+    }
+    $signOut = & python -I -B (Join-Path $PSScriptRoot 'release_sign.py') sign `
+        --dll (Join-Path $stage 'mod/dlls/main.dll') --target $gameTarget --build $proto `
+        --out (Join-Path $stage 'mod/dlls/main.dll.sig')
+    $signExit = $LASTEXITCODE
+    Remove-Item Env:MULTIVOID_RELEASE_KEY
+    Write-Host "sign: $signOut"
+    if ($signExit -ne 0) { throw 'RELEASE package signature failed' }
+}
 # enabled.txt: UE4SS reads the FILE'S PRESENCE, and the field packages ship it with
 # the literal "true" inside. Match them rather than shipping an empty file.
 Set-Content -LiteralPath (Join-Path $stage 'mod/enabled.txt') -Value 'true' -Encoding ascii -NoNewline
@@ -219,6 +237,10 @@ $violations = @(Test-PackageZip -ZipPath $zipPath -ExpectedPayloadSha256 $payloa
 if ($violations.Count -gt 0) {
     throw ("package zip FAILED its own tree check:`n  " + ($violations -join "`n  "))
 }
+if ($Release) {
+    $sv = @(Test-PackageSignature -ZipPath $zipPath)
+    if ($sv.Count -gt 0) { throw "RELEASE zip carries no valid signature: $($sv -join '; ')" }
+}
 
 if (-not $KeepStage) { Remove-Item $stage -Recurse -Force }
 
@@ -230,3 +252,4 @@ Write-Host "  sha256 : $sha"
 Write-Host "  payload: $PayloadDll"
 Write-Host "  tree   : manifest.json, icon.png, README.md$(if ($logSections.Count -gt 0) { ", CHANGELOG.md ($($logSections.Count) build(s))" }), LICENSE, THIRD-PARTY-NOTICES.md, mod/enabled.txt, mod/dlls/main.dll"
 if ($Pak.Count -gt 0) { Write-Host "           + pak/ ($($Pak.Count) file(s))" }
+if ($Release) { Write-Host "           + mod/dlls/main.dll.sig" }

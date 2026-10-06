@@ -96,6 +96,10 @@ jobs:
       - name: Release keygen drill
         run: python3 -I -B .github/ci/release_sign_keygen_drill.py
 
+      - name: Package signature drill
+        shell: pwsh
+        run: ./.github/ci/package_signature_drill.ps1
+
       # ledger_lint reads the ledger and the public docs, so most of it needs no
       # API and no compiler -- but it ran only in the manual build (advisory
       # there) and at release time. That is how README_COUNTS came to sit RED for
