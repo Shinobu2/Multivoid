@@ -184,6 +184,9 @@ std::string NarrowName(const R::FName& n) {
 // inherits it, so any other lane reaching a verb through a reflected call would walk in under it.
 thread_local void* t_replayObject = nullptr;
 thread_local void* t_replayFunction = nullptr;
+// The scoped call's commit proof: the verb's name-watch POST runs only after the body really
+// ran -- a script-gate Cancel skips every POST -- and stamps this only for the exact pair.
+thread_local bool t_replayCommitted = false;
 
 struct ReplayScope {
     void* prevObj;
@@ -195,11 +198,27 @@ struct ReplayScope {
     ~ReplayScope() { t_replayObject = prevObj; t_replayFunction = prevFn; }
 };
 
-// The native fire, game thread. True iff the verb actually dispatched; callers gate the
-// broadcast and the replayed set on it, since a failed host fire must not make clients replay
-// an event the authority never executed, and a failed replay must not permanently consume
-// the row. quietFail silences the per-call refusal warn for a queue's spaced retries -- the
-// first refusal is loud and the row's retry line is said once, in NoteAttempt.
+// One dispatch attempt's result. Call answers "no dispatch fault", which a gate Cancel ALSO
+// satisfies, so Committed -- the verb's own POST observed inside the scope -- is the only
+// success. Cancelled is a refusal: it counts on the row's retry bound exactly like a Faulted.
+enum class FireOutcome { Faulted, Cancelled, Committed };
+
+FireOutcome FireOnce(void* eventer, ue_wrap::ParamFrame& f, bool observable) {
+    t_replayCommitted = false;
+    bool dispatched;
+    {
+        const ReplayScope replay(eventer, f.function());
+        dispatched = ue_wrap::Call(eventer, f);
+    }
+    if (!dispatched) return FireOutcome::Faulted;
+    return (!observable || t_replayCommitted) ? FireOutcome::Committed : FireOutcome::Cancelled;
+}
+
+// The native fire, game thread. True iff the verb's body committed (FireOnce): callers gate
+// the broadcast and the replayed set on it, since a refused host fire must not make clients
+// replay an event the authority never executed, and a refused replay must not permanently
+// consume the row. quietFail silences the per-call refusal warn for a queue's spaced
+// retries -- the first refusal is loud and the row's retry line is said once, in NoteAttempt.
 bool NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring& specialName,
                 bool quietFail = false) {
     void* eventer = EventerOf(ue_wrap::world_singleton::Gamemode());
@@ -207,33 +226,37 @@ bool NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring
         UE_LOGW("event_fire: no live trigger_eventer -- native fire dropped ('%ls')", eventName.c_str());
         return false;
     }
-    if (kind == FireKind::SpecialEvent) {
-        if (!g_runSpecialEventFn) { UE_LOGW("event_fire: runSpecialEvent unresolved"); return false; }
-        ue_wrap::ParamFrame f(g_runSpecialEventFn);
-        if (!f.valid()) return false;
-        f.Set<R::FName>(L"eventName1", ue_wrap::fname_utils::StringToFName(eventName));
-        const ReplayScope replay(eventer, g_runSpecialEventFn);
-        if (ue_wrap::Call(eventer, f)) {
-            UE_LOGI("event_fire: runSpecialEvent('%ls') dispatched", eventName.c_str());
-            return true;
-        }
-        if (!quietFail)
-            UE_LOGW("event_fire: runSpecialEvent('%ls') dispatch FAILED", eventName.c_str());
-        return false;
-    }
-    if (!g_runEventFn) { UE_LOGW("event_fire: runEvent unresolved"); return false; }
-    ue_wrap::ParamFrame f(g_runEventFn);
+    const char* verb = kind == FireKind::SpecialEvent ? "runSpecialEvent" : "runEvent";
+    void* fn = kind == FireKind::SpecialEvent ? g_runSpecialEventFn : g_runEventFn;
+    if (!fn) { UE_LOGW("event_fire: %s unresolved", verb); return false; }
+    ue_wrap::ParamFrame f(fn);
     if (!f.valid()) return false;
-    f.Set<R::FName>(L"event", ue_wrap::fname_utils::StringToFName(eventName));
-    f.Set<R::FName>(L"special", ue_wrap::fname_utils::StringToFName(specialName));
-    const ReplayScope replay(eventer, g_runEventFn);
-    if (ue_wrap::Call(eventer, f)) {
-        UE_LOGI("event_fire: runEvent('%ls', special='%ls') dispatched",
-                eventName.c_str(), specialName.c_str());
+    if (kind == FireKind::SpecialEvent) {
+        f.Set<R::FName>(L"eventName1", ue_wrap::fname_utils::StringToFName(eventName));
+    } else {
+        f.Set<R::FName>(L"event", ue_wrap::fname_utils::StringToFName(eventName));
+        f.Set<R::FName>(L"special", ue_wrap::fname_utils::StringToFName(specialName));
+    }
+    // The commit check needs an observer: the verb's watch live AND the gate held (a solo run
+    // or a join-window replay before the hold observes nothing, and takes the dispatch's word).
+    const bool observable = sg::IsEnabled() &&
+        (kind == FireKind::SpecialEvent ? g_specialWatchLive : g_watchLive);
+    const FireOutcome out = FireOnce(eventer, f, observable);
+    if (out == FireOutcome::Committed) {
+        if (kind == FireKind::SpecialEvent)
+            UE_LOGI("event_fire: runSpecialEvent('%ls') dispatched", eventName.c_str());
+        else
+            UE_LOGI("event_fire: runEvent('%ls', special='%ls') dispatched",
+                    eventName.c_str(), specialName.c_str());
         return true;
     }
-    if (!quietFail)
-        UE_LOGW("event_fire: runEvent('%ls') dispatch FAILED", eventName.c_str());
+    if (!quietFail) {
+        if (out == FireOutcome::Cancelled)
+            UE_LOGW("event_fire: %s('%ls') dispatch returned but the body was CANCELLED at the "
+                    "script gate -- counted as refused", verb, eventName.c_str());
+        else
+            UE_LOGW("event_fire: %s('%ls') dispatch FAILED", verb, eventName.c_str());
+    }
     return false;
 }
 
@@ -255,6 +278,8 @@ void Broadcast(FireKind kind, const std::string& name) {
 // host broadcast it, which is now this watch's job alone. POST so a cancelled body can never
 // announce a fire that did not run; a client replay's own call early-outs on the role gate.
 void OnRunEventPost(const sg::Call& call) {
+    // Reached only when the scoped call's body really ran: the replay's commit proof.
+    if (call.object == t_replayObject && call.function == t_replayFunction) t_replayCommitted = true;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
     if (!ResolvePass() || call.function != g_runEventFn) return;
@@ -273,6 +298,8 @@ void OnRunEventPost(const sg::Call& call) {
 // row's own broadcast carries only the arirInteraction name. Dev fires (reflected, no caller)
 // and the game's cheat menu reach it the same way and emit through here exactly once.
 void OnRunSpecialEventPost(const sg::Call& call) {
+    // Reached only when the scoped call's body really ran: the replay's commit proof.
+    if (call.object == t_replayObject && call.function == t_replayFunction) t_replayCommitted = true;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
     if (!ResolvePass() || call.function != g_runSpecialEventFn) return;
