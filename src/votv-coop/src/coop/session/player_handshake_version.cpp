@@ -143,15 +143,14 @@ bool ValidateJoinVersionOrRefuse(coop::net::Session& session, int senderSlot,
         verdict = WireVersionVerdict(peerGame,
                                      session.role() == net::Role::Host);
     }
-    // The host decides, both ways. MTA's server refuses a client below minclientversion
-    // (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:1930); its build notes say a custom
-    // public server admits only custom clients (reference/mtasa-blue/Shared/sdk/version.h:36), and the
-    // open code enforces it: a non-public build's netcode version carries its branch id
-    // (reference/mtasa-blue/Shared/sdk/version.h:119-131), the join is admitted only on equality
-    // (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:1913) and the rest are refused as
-    // DIFFERENT_BRANCH (CGame.cpp:2038-2055). Here the host holds that rule. net.allow_other_builds is
-    // a deliberate divergence: no MTA setting relaxes its kind check, and here the host may choose to
-    // admit another build. A client judges no host.
+    // The host decides, both ways. MTA's server admits a join only when the client's netcode version
+    // equals its own (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:1913). A non-public
+    // build carries a branch id in that version (reference/mtasa-blue/Shared/sdk/version.h:119-131; its
+    // note at :36 says a custom public server admits only custom clients), so a client of the other
+    // kind differs in the branch and is refused as DIFFERENT_BRANCH (CGame.cpp:2036-2039). Here the
+    // host holds the branch rule. net.allow_other_builds is a deliberate divergence: no MTA setting
+    // relaxes its kind check (the nearest is minclientversion, a version floor); kept so a self-built
+    // host can host friends on the official build. A client judges no host.
     bool admittedOther = false;
     if (verdict.empty() && session.role() == net::Role::Host) {
         const bool sameBytes =
