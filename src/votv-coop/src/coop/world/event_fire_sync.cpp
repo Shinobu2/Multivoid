@@ -1,14 +1,15 @@
 // coop/world/event_fire_sync.cpp -- see coop/world/event_fire_sync.h. The bytecode facts this
 // module stands on: the save slot's settime iterates allEvents, skips rows in passEvents, and
 // on a clock-cross fire calls the eventer's runEvent for the row and appends it to passEvents,
-// so a runEvent whose caller is settime is exactly a scheduler fire (the host observation seam),
-// and an empty allEvents kills the walk (the client suppression seam); runEvent is the only
-// function of that name, called from settime, from the eventer itself and from the game's own
-// event menu, which appends nothing; the gamemode's boot marks the rows before a new game's start
-// day passed without firing them, and rebuilds allEvents from the events table on every world
-// load, so the zeroed count self-heals and a client-written save cannot be poisoned; and the only
-// special trigger the table uses is the prank roll, host-local RNG, so the wire carries no
-// special field.
+// so a runEvent whose caller is settime is exactly a scheduler fire, and an empty allEvents
+// kills the walk (the client suppression seam); runEvent is the only function of that name,
+// called from settime, from the game's own event menu and through our reflected dispatch; the
+// gamemode's boot marks the rows before a new game's start day passed without firing them, and
+// rebuilds allEvents from the events table on every world load, so the zeroed count self-heals
+// and a client-written save cannot be poisoned; and the only special the table uses is the
+// prank roll, which summonArirPrank resolves through an internal runSpecialEvent call -- so the
+// watch sits on BOTH eventer verbs and the wire carries the name each call itself took (the
+// rolled case, not the prank verb).
 
 #include "coop/world/event_fire_sync.h"
 
@@ -51,16 +52,25 @@ int32_t g_offPassEvents = -1;         // saveSlot.passEvents (TArray<FName>)
 int32_t g_offAllEvents = -1;          // saveSlot.allEvents  (TArray<FName>)
 void* g_runEventFn = nullptr;         // runEvent(FName event, FName special)
 void* g_runSpecialEventFn = nullptr;  // runSpecialEvent(FName eventName1) -> bool
+void* g_summonArirPrankFn = nullptr;  // summonArirPrank(), runSpecialEvent's prank-roll caller
 void* g_settimeFn = nullptr;          // saveSlot.settime, the scheduler's walk
 int32_t g_offEventParam = -1;         // runEvent's `event` in its parameter frame
+int32_t g_offSpecialParam = -1;       // runSpecialEvent's `eventName1` in its parameter frame
 bool g_resolved = false;
 bool g_resolveFailed = false;
 
-// The host's watch on runEvent, registered once per process.
+// The host's watches on both eventer verbs, registered once per process. One emit per
+// committed call: the watches are the ONLY broadcast source (a dev HostFire's reflected call
+// reaches them like any other), and the sequence number makes repeats of a replayable name
+// (a special is repeatable) tellable apart -- the dedupe key is the occurrence, never the name.
 constexpr int kTagEventFire = 0x45564652;  // 'EVFR'
 constexpr const wchar_t* kRunEvent = L"runEvent";  // one pointer: the gate matches a name watch by it
+constexpr const wchar_t* kRunSpecialEvent = L"runSpecialEvent";
 bool g_watchInstalled = false;
 bool g_watchLive = false;
+bool g_specialWatchInstalled = false;
+bool g_specialWatchLive = false;
+unsigned g_hostFireSeq = 0;  // committed host fires across both verbs (game thread)
 
 // Client suppression and replay state, game thread.
 int g_zeroedAllEventsNum = 0;         // what we zeroed (restore on disconnect); 0 = nothing zeroed
@@ -195,7 +205,8 @@ int ReplayVerdict(const std::string& name, const char** laneOut) {
 
 bool MembersMissing() {
     return g_offSaveSlot < 0 || g_offEventer < 0 || g_offPassEvents < 0 || g_offAllEvents < 0 ||
-           !g_runEventFn || !g_runSpecialEventFn || !g_settimeFn || g_offEventParam < 0;
+           !g_runEventFn || !g_runSpecialEventFn || !g_settimeFn || g_offEventParam < 0 ||
+           g_offSpecialParam < 0;
 }
 
 bool ResolvePass() {
@@ -212,21 +223,28 @@ bool ResolvePass() {
     if (g_offAllEvents < 0) g_offAllEvents = R::FindPropertyOffset(ssCls, L"allEvents");
     g_runEventFn = R::FindFunction(evCls, L"runEvent");
     g_runSpecialEventFn = R::FindFunction(evCls, L"runSpecialEvent");
+    // The prank roll's frame is an origin label, not a requirement: its absence costs only
+    // the "prank-roll" tag in the fire log, so it stays out of the latching check.
+    g_summonArirPrankFn = R::FindFunction(evCls, L"summonArirPrank");
     g_settimeFn = R::FindFunction(ssCls, L"settime");
     g_offEventParam = g_runEventFn ? R::FindParamOffset(g_runEventFn, L"event") : -1;
+    g_offSpecialParam = g_runSpecialEventFn ? R::FindParamOffset(g_runSpecialEventFn, L"eventName1") : -1;
     if (MembersMissing()) {
         g_resolveFailed = true;
         UE_LOGW("event_fire: resolution INCOMPLETE on loaded classes (saveSlot=0x%X eventer=0x%X "
-                "passEvents=0x%X allEvents=0x%X runEvent=%s(event=0x%X) runSpecialEvent=%s settime=%s) -- "
+                "passEvents=0x%X allEvents=0x%X runEvent=%s(event=0x%X) "
+                "runSpecialEvent=%s(eventName1=0x%X) settime=%s) -- "
                 "latched OFF; game version mismatch?",
                 g_offSaveSlot, g_offEventer, g_offPassEvents, g_offAllEvents, g_runEventFn ? "yes" : "NO",
-                g_offEventParam, g_runSpecialEventFn ? "yes" : "NO", g_settimeFn ? "yes" : "NO");
+                g_offEventParam, g_runSpecialEventFn ? "yes" : "NO", g_offSpecialParam,
+                g_settimeFn ? "yes" : "NO");
         return false;
     }
     g_resolved = true;
     UE_LOGI("event_fire: resolved (saveSlot=0x%X passEvents=0x%X allEvents=0x%X eventer=0x%X "
-            "runEvent=yes runSpecialEvent=yes settime=yes)",
-            g_offSaveSlot, g_offPassEvents, g_offAllEvents, g_offEventer);
+            "runEvent=yes runSpecialEvent=yes summonArirPrank=%s settime=yes)",
+            g_offSaveSlot, g_offPassEvents, g_offAllEvents, g_offEventer,
+            g_summonArirPrankFn ? "yes" : "NO");
     return true;
 }
 
@@ -307,19 +325,43 @@ void Broadcast(FireKind kind, const std::string& name) {
             kind == FireKind::SpecialEvent ? "runSpecialEvent" : "runEvent", name.c_str());
 }
 
-// HOST: a scheduler fire, seen as it happens -- runEvent entered from settime, the one call that
-// fires a scheduled row. A dev fire reaches runEvent through our own ProcessEvent with no Blueprint
-// caller and broadcasts at its own dispatch; the game's event menu calls runEvent with no settime
-// either, and appends no row, as before.
-sg::Verdict OnRunEventPre(const sg::Call& call) {
+// The one emit point for host fires, at the body commit: runEvent entered from settime is a
+// scheduler fire, a call with no Blueprint caller and fromOurCode is our own HostFire dispatch,
+// and any other caller is the game's own menus -- every one reached clients before only if the
+// host broadcast it, which is now this watch's job alone. POST so a cancelled body can never
+// announce a fire that did not run; a client replay's own call early-outs on the role gate.
+void OnRunEventPost(const sg::Call& call) {
     auto* s = g_session.load(std::memory_order_acquire);
-    if (!s || !s->connected() || s->role() != coop::net::Role::Host) return sg::Verdict::Run;
-    if (!ResolvePass() || call.function != g_runEventFn || call.callerFunction != g_settimeFn)
-        return sg::Verdict::Run;
+    if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
+    if (!ResolvePass() || call.function != g_runEventFn) return;
     const std::string name = NarrowName(*reinterpret_cast<const R::FName*>(call.locals + g_offEventParam));
-    UE_LOGI("event_fire: host OBSERVED scheduler fire '%s' (settime -> runEvent)", name.c_str());
+    const char* origin = call.callerFunction == g_settimeFn ? "scheduler" :
+                         call.fromOurCode ? "dev-call" : "native";
+    ++g_hostFireSeq;
+    UE_LOGI("event_fire: host fire #%u runEvent('%s') origin=%s -- broadcasting",
+            g_hostFireSeq, name.c_str(), origin);
     Broadcast(FireKind::RunEvent, name);
-    return sg::Verdict::Run;
+}
+
+// HOST: a runSpecialEvent body just completed. The natural entry is a scheduled ariralPrank
+// row: runEvent -> summonArirPrank (a rep-tier Array_Random pick, removed from the pool on the
+// way out) -> runSpecialEvent, so THIS call is where the rolled outcome becomes known -- the
+// row's own broadcast carries only the arirInteraction name. Dev fires (reflected, no caller)
+// and the game's cheat menu reach it the same way and emit through here exactly once.
+void OnRunSpecialEventPost(const sg::Call& call) {
+    auto* s = g_session.load(std::memory_order_acquire);
+    if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
+    if (!ResolvePass() || call.function != g_runSpecialEventFn) return;
+    const std::string name =
+        NarrowName(*reinterpret_cast<const R::FName*>(call.locals + g_offSpecialParam));
+    const char* origin =
+        (g_summonArirPrankFn && call.callerFunction == g_summonArirPrankFn) ? "prank-roll" :
+        call.fromOurCode ? "dev-call" : "native";
+    const bool returned = call.result ? *static_cast<const bool*>(call.result) : true;
+    ++g_hostFireSeq;
+    UE_LOGI("event_fire: host fire #%u runSpecialEvent('%s') origin=%s returned=%d -- broadcasting",
+            g_hostFireSeq, name.c_str(), origin, returned ? 1 : 0);
+    Broadcast(FireKind::SpecialEvent, name);
 }
 
 // True iff the client's own passEvents already contains the row (the transferred save
@@ -457,13 +499,19 @@ void Install(coop::net::Session* session) {
     // Called every pump tick by the install fanout, which is also the retry until the cycle class
     // loads and until the gate has resolved the watch's name.
     if (!g_watchInstalled)
-        g_watchInstalled = sg::WatchName(kRunEvent, kTagEventFire, &OnRunEventPre, nullptr);
-    if (g_watchInstalled && !g_watchLive) {
+        g_watchInstalled = sg::WatchName(kRunEvent, kTagEventFire, nullptr, &OnRunEventPost);
+    if (!g_specialWatchInstalled)
+        g_specialWatchInstalled =
+            sg::WatchName(kRunSpecialEvent, kTagEventFire, nullptr, &OnRunSpecialEventPost);
+    if ((g_watchInstalled && !g_watchLive) || (g_specialWatchInstalled && !g_specialWatchLive))
         sg::ResolvePendingNames();
-        if (sg::NameWatchLive(kRunEvent, kTagEventFire)) {
-            g_watchLive = true;
-            UE_LOGI("event_fire: the host's scheduler fires are seen at runEvent (a script-gate watch)");
-        }
+    if (!g_watchLive && sg::NameWatchLive(kRunEvent, kTagEventFire)) {
+        g_watchLive = true;
+        UE_LOGI("event_fire: the host's fires are seen at runEvent (a script-gate watch)");
+    }
+    if (!g_specialWatchLive && sg::NameWatchLive(kRunSpecialEvent, kTagEventFire)) {
+        g_specialWatchLive = true;
+        UE_LOGI("event_fire: the host's special picks are seen at runSpecialEvent (a script-gate watch)");
     }
     // The client replay queue's lasting retry: a fire whose eventer was not up, or whose dispatch
     // was refused, no longer waits for the next fire to arrive -- this pump paces it instead.
@@ -501,13 +549,10 @@ bool HostFire(FireKind kind, const std::wstring& eventName, const std::wstring& 
             UE_LOGW("event_fire: HostFire('%ls') -- the event classes are not loaded", ev.c_str());
             return;
         }
-        if (!NativeFire(kind, ev, sp)) return;  // authority did not fire -> nothing to mirror
-        // The dev seam: a direct runEvent has no settime caller, so the watch leaves it to this
-        // broadcast. The wire carries the name only, never the special.
-        std::string narrow;
-        narrow.reserve(ev.size());
-        for (wchar_t c : ev) narrow.push_back((c > 0 && c < 128) ? static_cast<char>(c) : '?');
-        Broadcast(kind, narrow);
+        // No send of its own: the runEvent/runSpecialEvent watches see this reflected call like
+        // any other host fire and emit it once (a dev fire is the 'dev-call' origin). A refused
+        // dispatch commits nothing, so nothing reaches the wire.
+        NativeFire(kind, ev, sp);
     });
     return true;
 }

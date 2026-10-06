@@ -90,17 +90,21 @@ is left alone.
 ### Story and scheduled events
 
 The scheduler is the save's own time step: it walks the event table and runs each due row
-through the eventer, all inside Blueprints. The host sees each fire at the verb: a script-body
-watch on the eventer's `runEvent`, entered from the save's time step, broadcasts the row
-(`coop/world/event_fire_sync`). The client keeps its own copy of the walkable event list empty,
+through the eventer, all inside Blueprints. The host sees each fire at the verbs: script-body
+watches on the eventer's `runEvent` and `runSpecialEvent` broadcast every call the body commits
+-- a scheduled row's, a dev-menu fire's, the game's own menus', and, for the prank roll, the
+case `summonArirPrank` actually picked, one broadcast per occurrence (`coop/world/event_fire_sync`).
+The client keeps its own copy of the walkable event list empty,
 a one-integer write held right before each tick of the clock's cycle, which the game rebuilds
 unconditionally at every world load, so its scheduler fires nothing as the host's clock moves it. What a client does with a
 received fire is a per-row policy kept in the code: rows whose outputs already ride a lane
 (props, creatures, the ATV, sleep, the wisps, the cues, the devices) are not replayed, because
 replaying them would deliver the effect twice; the level flips, story flags and cosmetic sounds
-no lane carries are replayed through the same native verb; a random prank is never forwarded,
-because the client would roll a different one. A replay is skipped when the client's own passed
-list already carries the row, unless the host says the event is in flight. The developer menu's
+no lane carries are replayed through the same native verb; a random prank forwards the host's
+rolled case as a `runSpecialEvent` fire, so the client replays the same outcome rather than
+rolling a different one. A replay is skipped when the client's own passed
+list already carries the row, unless the host says the event is in flight, and a replay the
+eventer refuses stays queued and retries on a bound instead of being eaten. The developer menu's
 event trigger dispatches through the same host path, so a forced event broadcasts like a
 scheduled one.
 
