@@ -7,6 +7,8 @@
 #include <atomic>
 #include <cstdarg>
 #include <cstdio>
+#include <fcntl.h>
+#include <io.h>
 #include <cstring>
 #include <string>
 #include <ctime>
@@ -58,6 +60,19 @@ std::atomic<Sink> g_sink{nullptr};
 // set, else multivoid.log (per-process names for multi-instance tests). Anchored on the exe
 // directory, the install's one real home; the DLL's own directory is loader-dependent and
 // virtualised under the shim loader.
+
+// A write stream on a file other processes may read, rename and delete while it is open.
+FILE* OpenShared(const wchar_t* path) {
+    HANDLE h = ::CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS,
+                             FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return nullptr;
+    const int fd = _open_osfhandle(reinterpret_cast<intptr_t>(h), _O_WRONLY | _O_TEXT);
+    if (fd < 0) { ::CloseHandle(h); return nullptr; }
+    FILE* f = _fdopen(fd, "w");
+    if (!f) _close(fd);
+    return f;
+}
+
 void LogPath(wchar_t (&out)[MAX_PATH]) {
     out[0] = L'\0';
     const std::wstring dir = paths::ExeDir();
@@ -96,10 +111,22 @@ void EnsureOpen() {
             }
             ::MoveFileExW(path, prev, MOVEFILE_REPLACE_EXISTING);  // best-effort; ignore failure
         }
-        // Open with read sharing (others may read, not write), so the log can be tailed live while
-        // the game runs; without it the file is locked exclusively and diagnostics cannot be read
-        // until the game exits.
-        g_file = _wfsopen(path, L"w", _SH_DENYWR);
+        // Open with read and delete sharing: the log can be tailed live while the game runs, and the
+        // next launch can move it to .prev.log even while this process is still closing. With write
+        // denied to everyone, a launch that overlapped the previous process could neither rename the
+        // old file nor create a new one, and logged nothing. If the file is still held by a build that
+        // shares less, this session logs to multivoid.<PID>.log instead.
+        g_file = OpenShared(path);
+        if (!g_file) {
+            wchar_t alt[MAX_PATH];
+            wcscpy_s(alt, path);
+            const size_t alen = wcslen(alt);
+            if (alen > 4 && _wcsicmp(alt + alen - 4, L".log") == 0) alt[alen - 4] = L'\0';
+            wchar_t suffix[32];
+            swprintf_s(suffix, L".%lu.log", static_cast<unsigned long>(::GetCurrentProcessId()));
+            wcscat_s(alt, suffix);
+            g_file = OpenShared(alt);
+        }
         if (g_file) std::fprintf(g_file, "==== Multivoid log ====\n");
         g_opened = true;
     }
