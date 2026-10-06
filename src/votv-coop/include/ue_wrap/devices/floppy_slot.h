@@ -88,6 +88,10 @@ bool WriteSlot(DeviceKind kind, void* device, const Scalars& st, const Content& 
 // and no more. Its deferred spawn reads floppyReadwrites and floppyObjectData a second later.
 bool ClearSlot(DeviceKind kind, void* device);
 
+// Redraw what the device shows for the slot it holds now, writing nothing. False while the look
+// still cannot be drawn (its mesh component or the disc's mesh not there yet).
+bool RefreshLook(DeviceKind kind, void* device);
+
 // Level change: the classes, offsets and functions are world-scoped.
 void ResetCache();
 

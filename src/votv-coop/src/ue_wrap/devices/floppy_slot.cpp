@@ -339,6 +339,13 @@ bool ClearSlot(DeviceKind kind, void* device) {
     return Refresh(*d, device, -1);
 }
 
+bool RefreshLook(DeviceKind kind, void* device) {
+    const Desc* d = DescOf(kind);
+    if (!device || !d || !d->resolved) return false;
+    const int32_t type = *reinterpret_cast<const int32_t*>(reinterpret_cast<const uint8_t*>(device) + d->offType);
+    return Refresh(*d, device, type);
+}
+
 void ResetCache() {
     for (auto& d : g_desc) {
         d.resolved = false;

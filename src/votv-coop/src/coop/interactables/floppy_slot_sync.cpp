@@ -331,6 +331,39 @@ void PrimeQuadIfLaptop(FS::DeviceKind kind) {
 // reads no edge. A slot that already reads the incoming value is left alone: at a join most of a
 // base's boxes are empty on both peers, and writing each anyway would mint every string and swap
 // every mesh in the frame that closes the connect set. Returns true when it wrote.
+// A slot whose content was written but whose look could not be drawn yet (WriteSlot/ClearSlot said false) is redrawn
+// on later ticks until it can be: only the look, never the insert or the eject again. An equal canonical arriving later
+// does not cancel it, since the content is already right and only the look is behind. Bounded per slot.
+struct LookPending { void* device = nullptr; int32_t idx = -1; uint32_t tries = 0; };
+std::map<uint32_t, LookPending> g_lookPending;   // ShadowKey -> device
+constexpr uint32_t kLookTries = 600;             // about ten seconds of ticks
+
+void NoteLook(FS::DeviceKind kind, size_t index, void* device, bool drawn) {
+    const uint32_t key = ShadowKey(kind, index);
+    if (drawn) { g_lookPending.erase(key); return; }
+    LookPending& p = g_lookPending[key];
+    if (p.device != device) p = LookPending{device, R::InternalIndexOf(device), 0};
+}
+
+void RetryLooks() {
+    for (auto it = g_lookPending.begin(); it != g_lookPending.end();) {
+        LookPending& p = it->second;
+        const auto kind = static_cast<FS::DeviceKind>(it->first >> 16);
+        if (!p.device || !R::IsLiveByIndex(p.device, p.idx) || ++p.tries > kLookTries) {
+            if (p.tries > kLookTries)
+                UE_LOGW("floppy_slot_sync: a slot's look could not be drawn in %u tries -- left as it is", kLookTries);
+            it = g_lookPending.erase(it);
+            continue;
+        }
+        if (FS::RefreshLook(kind, p.device)) {
+            UE_LOGI("floppy_slot_sync: a slot's look caught up after %u tries", p.tries);
+            it = g_lookPending.erase(it);
+            continue;
+        }
+        ++it;
+    }
+}
+
 bool ApplySlot(FS::DeviceKind kind, size_t index, void* device, const Slot& s) {
     // Two empty slots agree before either one's content is read, and at a join most of a base's
     // boxes are that case -- reading the rows and the JSON first would mint a stale disc's record
@@ -346,8 +379,8 @@ bool ApplySlot(FS::DeviceKind kind, size_t index, void* device, const Slot& s) {
         PrimeShadow(kind, index, device);
         return false;
     }
-    if (s.st.floppyType < 0) FS::ClearSlot(kind, device);
-    else                     FS::WriteSlot(kind, device, s.st, s.c);
+    const bool drawn = s.st.floppyType < 0 ? FS::ClearSlot(kind, device) : FS::WriteSlot(kind, device, s.st, s.c);
+    NoteLook(kind, index, device, drawn);
     PrimeShadow(kind, index, device);
     PrimeQuadIfLaptop(kind);
     return true;
@@ -571,6 +604,7 @@ void Install(coop::net::Session* session) {
 }
 
 void Tick() {
+    RetryLooks();
     if (!GT::IsGameThread()) return;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected()) return;
@@ -743,6 +777,7 @@ void OnDisconnect() {
     g_awaiting.clear();
     g_connectRetry.clear();
     for (bool& have : g_haveCanonical) have = false;
+    g_lookPending.clear();
     g_laptopGen = 0;
     g_laptopGenDigest = 0;
     g_laptopGenKnown = false;
