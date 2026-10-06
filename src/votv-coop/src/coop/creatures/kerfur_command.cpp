@@ -21,6 +21,8 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <string>
 #include <mutex>
 #include <vector>
 
@@ -210,6 +212,54 @@ sg::Verdict OnStartKillPre(const sg::Call& c) {
     return sg::Verdict::Run;
 }
 
+// CLIENT: an Omega here is the host's robot mirrored, so its report job is the host's. Its doTask (the job
+// itself) and an actionName('get_reports') that reaches the body by a Blueprint route -- one the ProcessEvent
+// interceptor that relays a player's menu choice never sees -- are refused on a client. The report branch reads
+// getMainPlayer()->holding_actor, which on a client is this player, takes the disc data and destroys the held
+// disc (kerfurOmega ubergraph), so on a mirror it ate the client's disc or raised the refusal hint. Animation,
+// pose and the other verbs run as before.
+constexpr int kTagMirrorTask = 0x4B434B02;
+constexpr int kTagMirrorName = 0x4B434B03;
+bool g_mirrorWatched = false;
+
+bool IsClient() {
+    auto* s = LoadSession();
+    return s && s->connected() && s->role() == coop::net::Role::Client;
+}
+
+sg::Verdict OnMirrorDoTaskPre(const sg::Call&) {
+    if (!IsClient()) return sg::Verdict::Run;
+    static uint32_t sN = 0;
+    if (++sN <= 5 || sN % 100 == 0) UE_LOGI("kerfur_command: refused an Omega's doTask on this client (#%u) -- the job is the host's", sN);
+    return sg::Verdict::Cancel;
+}
+
+sg::Verdict OnMirrorActionNamePre(const sg::Call& c) {
+    if (!IsClient() || !c.locals) return sg::Verdict::Run;
+    static void* sFn = nullptr;
+    static int32_t sOff = -1;
+    if (c.function != sFn) { sFn = c.function; sOff = R::FindParamOffset(c.function, L"name"); }
+    if (sOff < 0) return sg::Verdict::Run;
+    std::wstring name;
+    {
+        R::FName n{};
+        std::memcpy(&n, c.locals + sOff, sizeof(n));
+        name = R::ToString(n);
+    }
+    if (name != L"get_reports") return sg::Verdict::Run;
+    UE_LOGI("kerfur_command: refused get_reports reaching an Omega's body on this client -- the host runs it");
+    return sg::Verdict::Cancel;
+}
+
+void WatchMirror() {
+    if (g_mirrorWatched) return;
+    g_mirrorWatched = true;
+    if (!sg::WatchClassName(P::name::NpcClass_KerfurOmega, L"doTask", kTagMirrorTask, &OnMirrorDoTaskPre, nullptr))
+        UE_LOGE("kerfur_command: the Omega doTask watch did not register -- a client's mirror can run the report job");
+    if (!sg::WatchClassName(P::name::NpcClass_KerfurOmega, L"actionName", kTagMirrorName, &OnMirrorActionNamePre, nullptr))
+        UE_LOGE("kerfur_command: the Omega actionName watch did not register");
+}
+
 // The watch settles at once where it can, so the first command runs with it live: the name resolve is a
 // game-thread engine call.
 void SettleKillWatch() {
@@ -295,6 +345,7 @@ bool TryRecordMenuCommand(void* self, const std::wstring& name, bool isClient) {
 
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
+    WatchMirror();  // both roles register; the callbacks act on a client only
     // Only a host serves, so the watch registers there, once.
     if (g_killWatched || g_killRefused || !session || !session->running() ||
         session->role() != coop::net::Role::Host)

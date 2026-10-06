@@ -329,6 +329,20 @@ void Tick() {
 
     const uint8_t mySlot = LocalSlot();
 
+    // A body that died or went ragdoll does not hold a screen. The game's own ragdollMode normally clears
+    // activeInterface itself (setActiveInterface(None) when one is set), but it has early outs, so the claim
+    // follows control rather than the raw field: while control is lost the effective screen is none, the
+    // falling edge below releases what was held, a pending claim is dropped, and no rising edge claims.
+    // Nothing in the game is called. A read that fails is not a loss.
+    void* raw = DS::ReadActiveInterface(local);
+    bool ragdoll = false, dead = false;
+    const bool lost = ue_wrap::engine::ReadMainPlayerRagdollState(local, ragdoll, dead) && (ragdoll || dead);
+    if (lost && !g_localKey.empty() && !g_claimLostSaid)
+        UE_LOGI("device_occupancy: releasing '%ls' -- the local body is %s (interface %p)", g_localKey.c_str(),
+                dead ? "dead" : "ragdolled", raw);
+    g_claimLostSaid = lost;
+    if (lost) g_pendingSend = false;
+
     // The pending claim retry: the rising edge fired before the slot was assigned or before the
     // channel accepted the send (a menu-window client). The falling edge clears this, so a retry
     // can never ship a stale claim.
@@ -339,26 +353,7 @@ void Tick() {
                 g_localKey.c_str(), static_cast<unsigned>(mySlot));
     }
 
-    void* w = DS::ReadActiveInterface(local);
-    // Does a claim outlive the player's control of the screen? A body that died or went ragdoll while
-    // its interface is still set would hold the device for every peer, so it leaves the interface,
-    // once per episode, and is said.
-    if (!g_localKey.empty()) {
-        bool ragdoll = false, dead = false;
-        const bool lost = ue_wrap::engine::ReadMainPlayerRagdollState(local, ragdoll, dead) && (ragdoll || dead);
-        if (lost && !g_claimLostSaid) {
-            UE_LOGW("device_occupancy: claim '%ls' still held while the local body is %s (interface %p) -- "
-                    "leaving the interface, so the falling edge releases it",
-                    g_localKey.c_str(), dead ? "dead" : "ragdolled", w);
-            // A body that cannot use the screen does not hold it: the game's own exit, once per episode; the
-            // widget's falling edge below then sends the release as any exit does.
-            if (w) DS::ForceExitInterface(local);
-            w = DS::ReadActiveInterface(local);
-        }
-        g_claimLostSaid = lost;
-    } else {
-        g_claimLostSaid = false;
-    }
+    void* w = lost ? nullptr : raw;
     if (w == g_localWidget) return;  // no edge -- the per-tick steady state
 
     // The falling edge (or a direct widget switch): release what we held.
