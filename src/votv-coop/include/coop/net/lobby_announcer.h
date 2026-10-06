@@ -1,8 +1,9 @@
 // coop/net/lobby_announcer.h -- the host side of the master plane.
 //
 // MTA is the precedent: CMasterServerAnnouncer and CMasterServer announce on host start, then keep the
-// lobby alive with a periodic heartbeat. We diverge in three ways: one master rather than a redundant list,
-// a 30 s heartbeat -- three to the master's 90 s lobby expiry -- and an explicit leave on stop.
+// lobby alive with a periodic heartbeat. We diverge in four ways: one master rather than a redundant list,
+// a 30 s heartbeat -- three to the master's 90 s lobby expiry --, an explicit leave on stop, and a
+// re-announce when the master answers that it forgot the session (the announcer owns the lifecycle).
 //
 //   POST /v1/host        sessionId, an opaque lobbyId, the host token, identities and ICE
 //   POST /v1/heartbeat   every 30 s: the lobby kept alive, its player count and their links, the host's
@@ -125,7 +126,7 @@ private:
 
     std::mutex threadMu_;         // serializes hbThread_ start/stop (a concurrent Host
                                   // must never move-assign over a joinable thread)
-    mutable std::mutex mu_;       // guards the creds snapshot + listed_
+    mutable std::mutex mu_;       // guards the creds snapshot, listed_, request_
     AnnounceRequest request_;     // what the live lobby was announced with
     std::string sessionId_;
     std::string token_;

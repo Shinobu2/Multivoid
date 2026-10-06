@@ -25,7 +25,7 @@ namespace J = coop::net::jsonu;
 // The build claim: this binary's own hash, its signing key's id (0 when unsigned) and its
 // signature, announced as read, verified or not -- the master records it and verifies nothing.
 // The master-list reply of MTA's ASE QueryLight carries the build type and number among the
-// server's fields (reference/mtasa-blue/Server/mods/deathmatch/logic/ASE.cpp:429-464, pushed at
+// server's fields (reference/mtasa-blue/Server/mods/deathmatch/logic/ASE.cpp:429-466, pushed at
 // reference/mtasa-blue/Server/mods/deathmatch/utils/CMasterServerAnnouncer.h:96-109);
 // this one carries the host's whole signed claim.
 struct BuildClaim {
@@ -251,11 +251,18 @@ void LobbyAnnouncer::HeartbeatLoop() {
         }
         if (ours) b["turn_user"] = held;
         const http::Response resp = http::Post(url, "/v1/heartbeat", J::Dump(b), 8000);
-        // The master's own answer to a session it does not hold (server/src/lobby.rs:452) says
-        // "unknown session"; a 403 from anything else, a proxy, is a plain failure and mints no
-        // duplicate lobby. MTA re-announces on a schedule
-        // (reference/mtasa-blue/Server/mods/deathmatch/utils/CMasterServerAnnouncer.h); this one
-        // acts on the master's answer, because our /v1/host mints a new lobby on every call.
+        // The master's own answer to a session it does not hold (server/src/lobby.rs:452) is
+        // "unknown session or bad token"; the match is on "unknown session", and
+        // the local fake master (fake_master.py) answers the same words. A 403 from anything
+        // else, a proxy, is a plain failure and mints no duplicate lobby. MTA re-announces on a
+        // timer: after a timeout it retries 5 times, 5 minutes apart, and otherwise gives up to a
+        // 24 h reminder
+        // (:48-49, :154-181 and :232 of
+        // reference/mtasa-blue/Server/mods/deathmatch/utils/CMasterServerAnnouncer.h), and its
+        // push re-sends the same entry every 10 minutes (:50, :96-109), an upsert. We retry on the
+        // 30/60/120/240/300 s schedule until the master answers, because a lobby the master forgot
+        // is missing from the browser; our /v1/host mints a new lobby per call, so the 403
+        // triggers a re-announce that replaces the lost one.
         if (resp.ok && resp.status == 403 &&
             resp.body.find("unknown session") != std::string::npos) {
             UE_LOGW("lobby: the master no longer knows lobbyId=%s (403) -- announcing again",
@@ -326,8 +333,9 @@ void LobbyAnnouncer::Stop() {
         was = active_.exchange(false);
         StopHeartbeatLocked();
         // Copy + clear the creds INSIDE threadMu_: Host() writes them under threadMu_
-        // too, so a concurrent re-announce is fully serialized against this Stop() --
-        // its fresh sessionId can never be consumed by THIS call's /leave below.
+        // too, so a concurrent Host() re-host is fully serialized against this Stop() --
+        // its fresh sessionId can never be consumed by THIS call's /leave below. The heartbeat
+        // thread's Reannounce() has already ended at the join above.
         std::lock_guard<std::mutex> lk(mu_);
         url = request_.masterUrl; sid = sessionId_; tok = token_;
         sessionId_.clear(); token_.clear(); lobbyId_.clear(); turnCur_.clear(); turnPrev_.clear();
