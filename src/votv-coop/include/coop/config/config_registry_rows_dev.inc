@@ -94,6 +94,9 @@ CFG_FLAG(selftest_break_build_trust, "selftest_break_build_trust", "dev", false,
 CFG_FLAG(build_trust_test_key, "build_trust_test_key", "dev", false, "VOTVCOOP_BUILD_TRUST_TEST_KEY",
     "Trust the build-trust selftest's TEST key as a release key on this peer, so a rig build signed with it reads "
     "as official here. Never set on a player's install.")
+CFG_FLAG(build_claim_foreign, "build_claim_foreign", "dev", false, "VOTVCOOP_BUILD_CLAIM_FOREIGN",
+    "Send this peer's Join with its build hash's first byte flipped, so a host reads it as another build (an arm of "
+    "the build-trust drill).")
 CFG_FLAG(selftest_break_identity, "selftest_break_identity", "dev", false, "VOTVCOOP_SELFTEST_BREAK_IDENTITY",
     "Makes the identity selftest's key-write case fail on purpose (a red arm).")
 CFG_ENUM(subject_drill, "subject_drill", "dev", "off", "off|insert|own|carry|carryred", "VOTVCOOP_SUBJECT_DRILL",

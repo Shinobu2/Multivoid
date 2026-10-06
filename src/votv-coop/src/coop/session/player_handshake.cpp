@@ -1,12 +1,14 @@
 // coop/session/player_handshake.cpp -- the Join handshake: what a peer sends about itself (its
-// element id, nickname, skin, display prefs, nick colour and game target), how the receiver writes
-// it into the roster ledger, the host's roster relay, the connect and joined lines, and the slot
-// assignment. See coop/session/player_handshake.h.
+// element id, nickname, skin, display prefs, nick colour, game target and build claim), how the
+// receiver writes it into the roster ledger, the host's roster relay, the connect and joined lines,
+// and the slot assignment. See coop/session/player_handshake.h.
+// The Join's chain: [u32 eid][nick][skin][flags][colour][game][build claim: sha256 32, u8 flags].
 
 #include "coop/session/player_handshake.h"
 
 #include "player_handshake_detail.h"  // co-located private header (src tree, not include/)
 
+#include "coop/build_trust/build_trust.h"  // the Join's build claim
 #include "coop/config/config.h"           // persist a host-assigned name
 #include "coop/config/config_registry.h"  // the my-name default
 #include "coop/text/repertoire.h"
@@ -216,7 +218,8 @@ void MaybeSendJoinToSlot(net::Session& session, int slot,
         joinPayload.push_back(BuildLocalPrefsFlags());
         // The nick colour after the flags byte.
         AppendNickColorField(joinPayload, coop::nick_color::LocalPacked());
-        // The game target, [u8 gamelen][game ASCII] after the colour: the other half of the version
+        // The game target, [u8 gamelen][game ASCII] after the colour (the build claim follows it,
+        // below): the other half of the version
         // pair (the build number rides the packet header as the protocol version). The receiver
         // checks it by byte equality at the top of HandleJoinMessage, the wire-level gate that also
         // covers direct connect and env boot, where no browser pre-flight ran. At most 23 chars.
@@ -225,6 +228,19 @@ void MaybeSendJoinToSlot(net::Session& session, int slot,
             const size_t gameLen = std::min<size_t>(std::strlen(game), 23);
             joinPayload.push_back(static_cast<uint8_t>(gameLen));
             joinPayload.insert(joinPayload.end(), game, game + gameLen);
+        }
+        // The build claim after the game target: [sha256 32 bytes][u8 flags], flags bit 0 = this
+        // build verified its own release signature. A host judges it at the Join seam
+        // (player_handshake_version.cpp); a client reads nothing of the host's. Both are read once
+        // here, with the rest of the payload. build_claim_foreign flips the hash's first byte so a
+        // host reads this peer as another build (the build-trust drill's arm).
+        {
+            uint8_t sha[coop::build_trust::kShaBytes];
+            std::memcpy(sha, coop::build_trust::Self().sha256, sizeof(sha));
+            if (coop::config::ResolveFlag(coop::config_registry::rows::build_claim_foreign))
+                sha[0] ^= 0xFF;
+            joinPayload.insert(joinPayload.end(), sha, sha + sizeof(sha));
+            joinPayload.push_back(coop::build_trust::SelfIsOfficial() ? 1 : 0);
         }
         joinPayloadBuilt = true;
     }
@@ -294,9 +310,10 @@ bool HandleJoinMessage(net::Session& session,
     }
     // The wire version gate first, before any identity side effect (player_handshake_version.cpp):
     // byte equality on the peer's game target (the build number is the header's protocol version,
-    // equal by construction); a mismatch or a malformed chain refuses and closes (a host Kick with
-    // a feed line, a client Fail popup). A refused joiner is the already-handled "connected, never
-    // Joined, disconnected" lifecycle.
+    // equal by construction), and on a host the verdict on the peer's build claim; a mismatch or a
+    // malformed chain refuses and closes (a host Kick with a feed line, a client Fail popup). A
+    // refused joiner is the already-handled "connected, never Joined, disconnected" lifecycle.
+    // This handler's own walk below stops after the colour and reads neither the game nor the claim.
     if (ValidateJoinVersionOrRefuse(session, senderSlot, msg.payload, msg.payloadLen))
         return true;
     // On a client this Join is the host introducing itself, and row 0 is born here: the host's

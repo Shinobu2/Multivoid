@@ -81,8 +81,10 @@ constexpr Row kRows[] = {
     {EndReason::AcceptFailed,            {"MV-H27", "The host could not accept the connection."}},
     {EndReason::HostClosed,              {"MV-H28", "The host closed the connection."}},
     {EndReason::ConnectFlood,            {"MV-H29", "Too many connections from you in a short time. Try again shortly."}},
+    {EndReason::UnofficialClientRefused, {"MV-H30", "This server admits only the official Multivoid build. Install the official release (the whole zip)."}},
+    {EndReason::OfficialClientRefused,   {"MV-H31", "This server runs a modified (unofficial) Multivoid build and admits only modified builds."}},
     // T -- the transport decided
-    {EndReason::Timeout,            {"MV-T01", "No answer from the host."}},
+    {EndReason::Timeout,           {"MV-T01", "No answer from the host."}},
     {EndReason::NoRoute,            {"MV-T02", "No route to the host through its firewall or router."}},
     {EndReason::Rendezvous,         {"MV-T03", "The signaling server could not reach the host."}},
     {EndReason::TransportHandshake, {"MV-T04", "The transport handshake with the host failed."}},

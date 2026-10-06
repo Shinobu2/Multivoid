@@ -225,6 +225,12 @@ CFG_FLOAT(voice_distance_cm, "voice.distance_cm", "voice", 4800.0f, 0, 1000000, 
     "host's to choose.")
 CFG_ROWFLAGS(voice_distance_cm, kRowServer | kRowReplicated | kRowLive | kRowNotify)
 CFG_LABEL(voice_distance_cm, "Voice range")
+CFG_FLAG(net_allow_other_builds, "net.allow_other_builds", "net", false, "VOTVCOOP_NET_ALLOW_OTHER_BUILDS",
+    "Let players whose Multivoid build differs from this server's join -- an unofficial build when this server runs "
+    "the official one, the official build when this server runs a modified one. Applies to the next joins; players "
+    "already in stay.")
+CFG_ROWFLAGS(net_allow_other_builds, kRowServer | kRowReplicated | kRowLive | kRowNotify)
+CFG_LABEL(net_allow_other_builds, "Allow other builds")
 CFG_INT(voice_jitter_threshold, "voice.jitter_threshold", "voice", 3, 0, 60, nullptr,
     "Jitter buffer: late-packet tolerance in frames before a reset.")
 CFG_INT(voice_prebuffer_frames, "voice.prebuffer_frames", "voice", 5, 0, 60, nullptr,

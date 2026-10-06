@@ -234,7 +234,9 @@ player holding `multivoid.admin.log` is told of every permission change.
 A command rewrites the one file it changes in its own layout, so keep notes elsewhere, not as extra keys in a
 permission file.
 
-The host's server settings -- today the voice range, `voice.distance_cm`, in centimetres -- change with
+The host's server settings -- today the voice range, `voice.distance_cm`, in centimetres, and
+"Allow other builds", `net.allow_other_builds`, which admits players on another Multivoid build
+([join.md](join.md)) -- change with
 `/set <setting> <value>` and go back to their default with `/reset <setting>`; every peer follows
 at once. When a server setting such as the voice range changes, every player's chat says so. F1's
 `Administration > Server settings` draws each of them and runs those same lines. A

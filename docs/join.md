@@ -23,7 +23,7 @@ sends a nonce, the host answers with its own nonce and a signature over both, th
 back, and the password proof rides inside that reply (`coop/net/peer_admission`,
 `coop/net/lobby_password`). The host then assigns a slot, and that assignment is the client's
 signal to begin: there is no fourth "I am done" message. Each peer's Join carries its element id,
-nickname, skin, preferences and game target (`coop/session/player_handshake`); the host asserts
+nickname, skin, preferences, game target and build claim (`coop/session/player_handshake`); the host asserts
 who occupies each slot with roster rows, re-sent as state rather than announced as events, and a
 row whose player number is zero means the slot is empty. That is how a departure reaches a
 client: it conforms to the current row, it never observes an absence.
@@ -31,6 +31,9 @@ client: it conforms to the current row, it never observes an absence.
 The version gate runs twice here. The build number is part of every packet header, so a peer on
 another build never parses a message at all. The game target rides the Join payload and is
 compared byte for byte; on a mismatch the host kicks with a reason and the client shows why.
+The build's own hash and whether it is the official build ride the same payload: a host on the
+official build refuses another build (MV-H30), and a host on a modified build refuses the official
+one (MV-H31), unless the host allows other builds.
 
 Before any of that, at the accept edge, the host applies one policy that costs no handshake and
 no seat: a per-address connection cap in the shape of MTA's join-flood
@@ -313,6 +316,8 @@ sentence on its status line.
 | `MV-H27` | The host could not accept the connection |
 | `MV-H28` | The host closed the connection with no code of its own; its words are shown |
 | `MV-H29` | Too many connections in a short time from one address, or from one proved identity over a relayed internet route; the cap is a host setting |
+| `MV-H30` | The host runs the official build and this client another one (its build hash differs); the popup says to install the official release |
+| `MV-H31` | The host runs a modified build and this client the official one |
 | `MV-T01` | No answer from the host, at the dial or later |
 | `MV-T02` | No route to the host through its firewall or router |
 | `MV-T03` | The signaling server could not reach the host |
@@ -375,7 +380,7 @@ and it is the reason the relay's own silence stays.
 |---|---|---|
 | `AuthHello`, `AuthChallenge`, `AuthProof` | both | the admission exchange, before any slot exists |
 | `AssignPeerSlot` | host to client | the slot and the host's element id; means admitted |
-| `Join` | each peer | element id, nickname, skin, preferences, game target |
+| `Join` | each peer | element id, nickname, skin, preferences, game target, build claim |
 | `RosterRow` | host to all | who occupies a slot, zero meaning empty, and the host's number for that occupancy; re-sent as state |
 | `SaveTransferRequest`, `SaveTransferBegin`, `SaveTransferChunk` | client, then host | the request; total bytes, sidecar bytes, checksum, game mode; the chunks |
 | `PlayerInventoryBlob` | both | the per-player profile, pre-world |
