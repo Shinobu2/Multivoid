@@ -127,6 +127,10 @@ void RenderOnlineSection(const coop::roster::Snapshot& rs) {
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(r.nick[0] ? r.nick : "Remote player");
             IdTooltip(r.playerId);
+            if (r.otherBuild) {
+                ImGui::SameLine(0.0f, S(6.0f));
+                ImGui::TextColored(ImVec4(1.00f, 0.82f, 0.35f, 0.85f), "other build");
+            }
             // Same renderer as the scoreboard (ui::link_format) -- this panel
             // used to carry its own copy of the cascade, so the vocabulary could
             // drift one surface at a time.

@@ -45,6 +45,9 @@ struct Row {
     bool isLocal = false;    // this row is YOU
     bool isHost  = false;    // this row's peer is the host (slot 0)
     bool connected = false;
+    // Host only: this player was admitted under net.allow_other_builds with another build. False on a
+    // client and for the host's own row.
+    bool otherBuild = false;
     // BOTH connection facts are the HOST's measurement, republished on RosterRow.
     // They answer ONE question -- "how is THIS PLAYER connected to the session" --
     // rather than "how do I reach them", so no row is special-cased by what the

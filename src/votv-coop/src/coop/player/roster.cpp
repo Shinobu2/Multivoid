@@ -98,6 +98,7 @@ void Refresh() {
         if (isHost) {
             const std::string& id = slot == 0 ? localId : led.guid;
             std::snprintf(r.playerId, sizeof(r.playerId), "%s", id.c_str());
+            r.otherBuild = led.otherBuild;
         }
         r.isLocal = rowIsLocal;
         r.isHost = (slot == 0);

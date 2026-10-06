@@ -205,6 +205,13 @@ void SetGuid(int slot, std::string guid) {
     g_rows[slot].guid = std::move(guid);
 }
 
+void SetOtherBuild(int slot) {
+    UE_ASSERT_GAME_THREAD("g_rows (roster_ledger::SetOtherBuild)");
+    if (!ValidSlot(slot) || !g_rows[slot].occupied()) return;
+    g_rows[slot].otherBuild = true;
+    UE_LOGI("roster_ledger: slot %d marked other build", slot);
+}
+
 void SetSkin(int slot, std::string skin) {
     UE_ASSERT_GAME_THREAD("g_rows (roster_ledger::SetSkin)");
     if (!ValidSlot(slot) || !g_rows[slot].occupied()) return;

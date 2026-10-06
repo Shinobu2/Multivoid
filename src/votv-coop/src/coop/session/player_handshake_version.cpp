@@ -16,6 +16,7 @@
 #include "coop/config/config.h"
 #include "coop/config/config_registry.h"
 #include "coop/net/session.h"
+#include "coop/player/roster_ledger.h"
 #include "coop/session/join_progress.h"
 #include "coop/version.h"
 #include "ue_wrap/core/log.h"
@@ -180,6 +181,7 @@ bool ValidateJoinVersionOrRefuse(coop::net::Session& session, int senderSlot,
             UE_LOGI("player_handshake: admitted another build (slot=%d nick='%ls' sha=%s): "
                     "net.allow_other_builds is on",
                     senderSlot, SanitizeNickname(refuseNick).c_str(), ShaPrefixHex(peerSha).c_str());
+            coop::roster_ledger::SetOtherBuild(senderSlot);
         }
         return false;
     }
