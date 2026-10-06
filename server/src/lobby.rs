@@ -2,7 +2,7 @@
 //! `/v1/host`, `/v1/heartbeat`, `/v1/leave`, `/v1/visibility` and `/v1/join`, plus the browse
 //! snapshot and the sweeper that reaps what stopped heartbeating.
 
-use crate::common::{clamp_str, ct_eq, identity_shape_ok, ip_bucket, log, token_hex, token_urlsafe};
+use crate::common::{build_claim_shape_ok, clamp_str, ct_eq, identity_shape_ok, ip_bucket, log, token_hex, token_urlsafe};
 use crate::version_gate::version_gate_env;
 use crate::ice::{heartbeat_turn, ice_block, turn_creds, HostTurn, TURN_TTL_HOST, TURN_TTL_JOIN};
 use crate::master_config::CFG;
@@ -77,6 +77,12 @@ pub struct Lobby {
     pub players_cur: i64,
     pub players_max: i64,
     pub listed: bool,
+    // The host's own claim of its build, recorded when well formed and verified by nobody here:
+    // the binary's SHA-256 (64 hex), the signing key's id (0 = unsigned) and the signature (128 hex).
+    // Empty / 0 for a host that sent none.
+    pub build_sha: String,
+    pub build_key: u8,
+    pub build_sig: String,
     pub last_seen: Instant,
     pub ip: String,
     pub conn: String, // "p2p" | "direct"
@@ -146,6 +152,9 @@ impl Lobby {
             players_cur: 0,
             players_max: 4,
             listed: true,
+            build_sha: String::new(),
+            build_key: 0,
+            build_sig: String::new(),
             last_seen: Instant::now(),
             ip: ip.to_string(),
             conn: "p2p".to_string(),
@@ -228,6 +237,29 @@ pub fn body_has(body: &Value, key: &str) -> bool {
 
 pub fn as_str<'a>(body: &'a Value, key: &str) -> Option<&'a str> {
     body.get(key).and_then(|v| v.as_str())
+}
+
+/// The build claim of a `/v1/host` body: (sha, key, sig). A body without `build_sha` carries none (the
+/// defaults, silently); a claim that is not well formed is dropped to the defaults with one log line
+/// and the host is still listed. The claim is optional data and the master verifies nothing, so a bad
+/// one costs the host nothing but its claim.
+pub fn build_claim_from_body(body: &Value) -> (String, u8, String) {
+    let Some(sha) = body.get("build_sha").and_then(Value::as_str) else {
+        return (String::new(), 0, String::new());
+    };
+    let key = body.get("build_key").and_then(Value::as_i64).unwrap_or(0);
+    let sig = body.get("build_sig").and_then(Value::as_str).unwrap_or("");
+    if build_claim_shape_ok(sha, key, sig) {
+        (sha.to_string(), key as u8, sig.to_string())
+    } else {
+        log("host announce: a malformed build claim was dropped");
+        (String::new(), 0, String::new())
+    }
+}
+
+/// Whether a `/v1/host` body lists the lobby: its `listed`, true when it sends none.
+pub fn host_listed(body: &Value) -> bool {
+    as_bool(body, "listed", true)
 }
 
 // ---- helpers ----------------------------------------------------------------
@@ -357,6 +389,8 @@ pub fn h_host(state: &mut MasterState, ip: &str, body: &Value) -> (u16, Value) {
     lo.world = clamp_field(body, "world", MAX_WORLD);
     lo.locked = as_bool(body, "locked", false);
     lo.players_max = as_int(body, "players_max", 4).clamp(1, 4);
+    (lo.build_sha, lo.build_key, lo.build_sig) = build_claim_from_body(body);
+    lo.listed = host_listed(body);
 
     if as_str(body, "conn") == Some("direct") {
         let dp = as_int(body, "direct_port", -1);
@@ -577,6 +611,9 @@ pub fn build_rows(state: &MasterState) -> Vec<Value> {
             "conn": lo.conn,
             "link": lo.links.word(&lo.conn),
             "links": {"relayed": lo.links.relayed, "direct": lo.links.direct, "lan": lo.links.lan},
+            "build_sha": lo.build_sha,
+            "build_key": lo.build_key,
+            "build_sig": lo.build_sig,
         }));
     }
     rows
@@ -651,8 +688,8 @@ pub async fn sweeper() {
 
 #[cfg(test)]
 mod tests {
-    use super::LobbyLinks;
-    use crate::common::identity_shape_ok;
+    use super::{build_claim_from_body, host_listed, LobbyLinks};
+    use crate::common::{build_claim_shape_ok, identity_shape_ok};
 
     #[test]
     fn a_lobby_row_names_its_players_links_in_one_word() {
@@ -692,5 +729,58 @@ mod tests {
         assert!(!identity_shape_ok(&format!("gen:{hex64}0")));  // odd length
         assert!(!identity_shape_ok(&format!("gen:{}", hex64.to_uppercase()))); // case
         assert!(!identity_shape_ok(&format!("gen:{} x", &hex64[..62])));       // spaced
+    }
+
+    #[test]
+    fn build_claim_shape_accepts_the_three_forms_a_host_sends() {
+        let sha = "ab01cd23".repeat(8);
+        let sig = "ef45ab67".repeat(16);
+        assert!(build_claim_shape_ok(&sha, 0, ""));      // unsigned
+        assert!(build_claim_shape_ok(&sha, 1, &sig));    // a release key
+        assert!(build_claim_shape_ok(&sha, 255, &sig));  // the test key
+    }
+
+    #[test]
+    fn build_claim_shape_refuses_what_cannot_be_a_claim() {
+        let sha = "ab01cd23".repeat(8);
+        let sig = "ef45ab67".repeat(16);
+        assert!(!build_claim_shape_ok(&sha, 256, &sig));
+        assert!(!build_claim_shape_ok(&sha, -1, &sig));
+        assert!(!build_claim_shape_ok(&sha, 0, &sig));              // unsigned with a signature
+        assert!(!build_claim_shape_ok(&sha, 1, ""));                // signed without one
+        assert!(!build_claim_shape_ok(&sha, 1, &sig[..127]));       // short signature
+        assert!(!build_claim_shape_ok(&sha.to_uppercase(), 0, "")); // case
+        assert!(!build_claim_shape_ok(&sha[..63], 0, ""));          // short hash
+    }
+
+    #[test]
+    fn a_host_body_keeps_a_well_formed_claim() {
+        let sha = "ab01cd23".repeat(8);
+        let sig = "ef45ab67".repeat(16);
+        let signed = serde_json::json!({"build_sha": sha, "build_key": 7, "build_sig": sig});
+        assert_eq!(build_claim_from_body(&signed), (sha.clone(), 7, sig.clone()));
+        let unsigned = serde_json::json!({"build_sha": sha, "build_key": 0, "build_sig": ""});
+        assert_eq!(build_claim_from_body(&unsigned), (sha.clone(), 0, String::new()));
+        let sha_only = serde_json::json!({"build_sha": sha});
+        assert_eq!(build_claim_from_body(&sha_only), (sha, 0, String::new()));
+    }
+
+    #[test]
+    fn a_host_body_drops_a_malformed_claim_and_a_missing_one_is_none() {
+        let sha = "ab01cd23".repeat(8);
+        let sig = "ef45ab67".repeat(16);
+        let none = (String::new(), 0u8, String::new());
+        let drops = |b: serde_json::Value| assert_eq!(build_claim_from_body(&b), none);
+        drops(serde_json::json!({"build_sha": sha, "build_key": 0, "build_sig": sig}));
+        drops(serde_json::json!({"build_sha": &sha[..63], "build_key": 0, "build_sig": ""}));
+        drops(serde_json::json!({"build_sha": sha.to_uppercase(), "build_key": 0, "build_sig": ""}));
+        drops(serde_json::json!({"name": "x"}));
+    }
+
+    #[test]
+    fn a_host_body_lists_unless_it_says_not() {
+        assert!(!host_listed(&serde_json::json!({"listed": false})));
+        assert!(host_listed(&serde_json::json!({"listed": true})));
+        assert!(host_listed(&serde_json::json!({})));
     }
 }
