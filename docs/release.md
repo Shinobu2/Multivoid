@@ -65,7 +65,9 @@ release is fired as the last thing; its publish job waits for the maintainer's a
 6. **Watch the run to green.** The judge refuses with a labelled verdict on any missed
    precondition; a refusal is stateless, so fix the cause and re-run (dispatch `release-core`
    with the tag). The publish job waits for the maintainer's approval of the `release`
-   environment; a run whose environment has no key fails when that job starts. The release is
+   environment; a run waiting for that approval still holds the `release` concurrency group,
+   so a re-run queues behind it until the deployment is approved or rejected. A run whose
+   environment has no key fails when that job starts. The release is
    done when the page shows the asset and its SHA256; the failure email is the only backstop.
 7. **The published row.** Append `published` with the same N, game, tag, commit and today's
    date, and push it while watching the green run.
