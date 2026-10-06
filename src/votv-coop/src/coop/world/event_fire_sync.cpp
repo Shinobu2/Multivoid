@@ -117,7 +117,6 @@ const char* const kReplayRows[] = {
     // Story and save flips (level-placed triggers; no lane):
     "treehouse_0", "treehouse_1", "treehouse_2", "treehouse_3", "treehouse_4", "treehouse_5",
     "break_RomeoSierra", "break_Victor", "break_Victor2",
-    "obelisk",
     // Force-object appends (a save array the client's own dish scan reads; no lane):
     "looker_0-1", "looker_1-1", "looker_2-1", "looker_3-1", "looker_4-1",
     "arirSignal", "arirSpk", "picSignal", "peace",
@@ -151,15 +150,26 @@ const NoReplayRow kNoReplayRows[] = {
     // NPC leaves); replaying the arm would spawn them client-local. Host-only until the ship gets
     // a lane:
     { "arirShip", "actor spawn on armed overlap (no lane)" },
-    { "earthTp", "SELF (pose stream)" },
+    // The obelisk's graph is not a bare flag flip: obelisk_C spawns prop_C/prop_obelisk_C actors
+    // and punches getMainPlayer -- a replay would double-spawn the props client-local and hit the
+    // client's own player. Host-only until the scene gets a lane:
+    { "obelisk", "obelisk_C prop spawns + getMainPlayer punch (no lane)" },
+    // earthTp fires newsky_C.tp: the black hole, sky and ambience flip plus a 2D sound and
+    // emails -- no player teleport at all, and no lane carries those yet:
+    { "earthTp", "newsky_C.tp sky/blackhole flip + 2D cue + emails (no lane yet)" },
     { "vehtp", "atv lane" },
-    { "bedEvent", "sleep lane" },
+    // bedEvent runs trigger_bedEvent -> bedEvent_C, which moves the bed and teleports
+    // getMainPlayer on wake; the sleep lane only gates client dreams, it does not carry this:
+    { "bedEvent", "bedEvent_C bed/player transform + wake teleport (no lane)" },
     { "picnic", "prop lane" }, { "destroyPicnic", "prop lane" },
     { "enasus", "prop lane" }, { "enacros", "prop lane" },
     { "cookier", "prop lane (armed prop)" }, { "paperGray", "prop lane (armed prop)" },
     { "arirEgg", "prop lane (armed prop)" },
     { "console", "device lanes" }, { "lightswitch", "device lanes" },
-    { "keypadGuess", "device lanes" }, { "atvExplode", "atv lane (trap flag)" },
+    { "keypadGuess", "device lanes" },
+    // atvExplode writes car.trap -- a host-owned flag no lane carries (atv_condition_sync
+    // transfers neither trap nor zapped):
+    { "atvExplode", "car.trap is host-owned (no lane carries trap/zapped)" },
     // Host-local by design:
     { "agrav", "physics divergence (by-design host-local)" },
     { "treehouseSleep", "per-player teleport" },
