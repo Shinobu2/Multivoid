@@ -89,7 +89,6 @@ bool PeekDeferredAnnounce(DeferredAnnounce& out) {
 // g_hostStatus is the last host-action result the UI shows. All under g_cfgMu.
 std::mutex g_cfgMu;
 std::string g_hostStatus;
-std::string g_ownLobbyId;  // our own announced lobbyId -> we never list or join it (no self-join)
 // The nickname default comes from the shared registry constant.
 std::string g_nickname = coop::config_registry::kMyNameDefault;  // local display nickname (seeded from config; browser overwrites)
 
@@ -159,10 +158,7 @@ std::string HostStatus() {
     return g_hostStatus;
 }
 
-std::string OwnLobbyId() {
-    std::lock_guard<std::mutex> lk(g_cfgMu);
-    return g_ownLobbyId;
-}
+std::string OwnLobbyId() { return Announcer().OwnLobbyId(); }
 
 namespace {
 // A display name has no edge spaces -- the sanitiser's rule, applied where the name enters. Not a
@@ -191,13 +187,6 @@ std::string Nickname() {
     std::lock_guard<std::mutex> lk(g_cfgMu);
     return g_nickname;
 }
-
-namespace {
-void SetOwnLobbyId(const std::string& id) {
-    std::lock_guard<std::mutex> lk(g_cfgMu);
-    g_ownLobbyId = id;
-}
-}  // namespace
 
 const char* GameTarget() { return coop::version::kGameTarget; }
 
@@ -308,7 +297,6 @@ void HostLobby(const std::string& name, const std::string& world, bool locked, i
                 Announcer().Host(masterUrl, name, world, locked, playersMax, 8000);
             if (info.ok && !coop::shutdown::IsShuttingDown()) {
                 const net::Config cfg = LobbyP2PConfig(net::Role::Host, info);
-                SetOwnLobbyId(info.lobbyId);  // never list or join our own lobby
                 QueueStart(cfg);
                 UE_LOGI("session_manager: HOST ready -- lobby=%s identity=%s (session boot = harness Tier 2)",
                         info.lobbyId.c_str(), info.hostIdentity.c_str());
@@ -336,7 +324,6 @@ void AnnounceEnvHostHidden(const std::string& name, const std::string& world) {
                 Announcer().Host(masterUrl, name, world,
                                  /*locked=*/false, /*playersMax=*/4, 8000);
             if (info.ok) {
-                SetOwnLobbyId(info.lobbyId);  // never list or join our own lobby
                 Announcer().SetListed(false); // the hide-from-list flag, immediately
                 // Seed the UI mirror too, or the scoreboard's "Show in server browser" tick reads
                 // on while hidden.
@@ -470,7 +457,6 @@ bool HostWithSave(const SaveChoice& choice, const std::string& name, bool locked
             g_hostIsDirect.store(cfg.topology == net::Topology::LanDirect,
                                  std::memory_order_relaxed);
             if (listed) {
-                SetOwnLobbyId(info.lobbyId);  // never list or join our own lobby
                 // Arm the deferral even though we just announced: hiding a DIRECT lobby retracts it
                 // (/v1/leave), so a Hide then Show cycle needs something to re-announce from. AUTO
                 // stays un-hideable at host time: the master is a relay game's only rendezvous.
@@ -564,8 +550,6 @@ void SetListed(bool listed) {
                                   "Friends can still Direct Connect by IP.");
                     return;
                 }
-                // A re-announce mints a fresh lobbyId, so the self-join guard is re-pointed at it.
-                SetOwnLobbyId(info.lobbyId);
                 UE_LOGI("session_manager: deferred announce done -- lobby=%s is now listed "
                         "(the master learns this host's address at THIS moment, not at host "
                         "time)", info.lobbyId.c_str());
@@ -581,7 +565,6 @@ void SetListed(bool listed) {
                 DeferredAnnounce d;
                 const bool rearm = PeekDeferredAnnounce(d);
                 Announcer().Stop();       // POST /v1/leave + stop the heartbeat: record GOES
-                SetOwnLobbyId(std::string());
                 if (rearm) ArmDeferredAnnounce(d.masterUrl, d.name, d.world, d.locked,
                                                d.playersMax, d.directPort);
                 UE_LOGI("session_manager: DIRECT lobby retracted (/v1/leave) -- the master no "
@@ -614,7 +597,6 @@ void EndHostedLobby() {
         std::lock_guard<std::mutex> lk(g_pendHostMu);
         g_hasPendingHost = false;
     }
-    SetOwnLobbyId(std::string());  // no longer hosting -> clear the own-lobby self-join guard
     g_listedState.store(true, std::memory_order_relaxed);  // back to the no-lobby default
     g_hostIsDirect.store(false, std::memory_order_relaxed);
     DisarmDeferredAnnounce();  // the lobby is over; a stale deferral must not outlive it

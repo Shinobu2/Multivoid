@@ -31,8 +31,8 @@ std::string HostStatus();
 void SetHostStatus(const std::string& status);
 
 // Our own announced lobby id, empty when not hosting an announced lobby. The browser filters
-// this row out and JoinLobby refuses it, so a host never connects to itself. Set on announce,
-// cleared by EndHostedLobby. Thread-safe.
+// this row out and JoinLobby refuses it, so a host never connects to itself. Read from the
+// announcer, which holds the lobby it announced, re-announcements included. Thread-safe.
 std::string OwnLobbyId();
 
 // The local display nickname, seeded from config at boot and overwritten by the browser,

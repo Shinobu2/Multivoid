@@ -11,7 +11,7 @@
 //
 // Threading: Host() blocks, so call it on a worker. On success it spawns the heartbeat worker thread, and
 // Stop() signals and joins it. The credentials are mutex-guarded, since the heartbeat thread reads them
-// while SetListed writes listed_.
+// while SetListed writes listed_ and a re-announce replaces them.
 
 #pragma once
 
@@ -42,6 +42,32 @@ struct HostInfo {
     TurnCredential turn;         // the relay credential minted for this host, or empty
 };
 
+// What a lobby was announced with. Kept by the announcer so it can announce the same game again
+// when the master forgets it; timeoutMs bounds every POST of the request, the re-announce's too.
+struct AnnounceRequest {
+    std::string masterUrl;
+    std::string name;
+    std::string world;
+    bool locked = false;
+    int playersMax = 0;
+    int timeoutMs = 0;
+    int directPort = 0;   // positive: a DIRECT lobby, announced with this listen port
+};
+
+// The outcome of one re-announce POST (heartbeat thread). `listed` is the value the POSTed body
+// carried.
+struct ReannounceResult {
+    bool ok = false;        // the master answered 200 with a session, a token and a lobby id
+    bool stopped = false;   // Stop() or shutdown began: nothing was POSTed
+    bool reached = false;   // the master answered at all
+    int status = 0;
+    bool listed = false;
+    std::string lobbyId;    // the new lobby's id when ok
+};
+
+// The announcer owns the lobby's lifecycle: it keeps the request it announced with, and when the
+// master answers a heartbeat that it no longer knows the session (a restart, a reap), the heartbeat
+// thread announces the same game again, the master minting a new session and lobby id.
 class LobbyAnnouncer {
 public:
     ~LobbyAnnouncer();
@@ -87,14 +113,20 @@ public:
 
     bool active() const { return active_.load(); }
 
+    // The lobby this announcer holds; empty while it holds none, from the start of a Stop() and
+    // through an announce's POST. Any thread.
+    std::string OwnLobbyId() const;
+
 private:
     void HeartbeatLoop();
+    // Heartbeat thread: POSTs the kept request again.
+    ReannounceResult Reannounce();
     void StopHeartbeatLocked();   // caller holds threadMu_; signals + joins hbThread_
 
     std::mutex threadMu_;         // serializes hbThread_ start/stop (a concurrent Host
                                   // must never move-assign over a joinable thread)
     mutable std::mutex mu_;       // guards the creds snapshot + listed_
-    std::string masterUrl_;
+    AnnounceRequest request_;     // what the live lobby was announced with
     std::string sessionId_;
     std::string token_;
     std::string lobbyId_;
