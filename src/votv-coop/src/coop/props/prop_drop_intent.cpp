@@ -17,6 +17,7 @@
 #include "coop/props/container_contents_sync.h"  // TakeObjInFlight; a thrown container's birth slice
 #include "coop/element/element.h"                // the source's element type and mirror flag
 #include "coop/session/world_load_episode.h"  // InEpisode (quiet during the join loadObjects churn)
+#include "coop/world/world_actor_sync.h"      // MaterializingActor (the pre-bind mirror window)
 #include "ue_wrap/core/call.h"                   // ParamFrame + Call (setKey on the host re-spawn)
 #include "ue_wrap/engine/engine.h"                 // BeginDeferredSpawn/FinishDeferredSpawn/SetActorScale3D
 #include "ue_wrap/core/fname_utils.h"            // StringToFName
@@ -89,8 +90,13 @@ std::vector<PendingPlace> g_pending;         // GT-only
 // registry every binding writes (fresh mirrors, save adoptions), not the host's NPC lifecycle map,
 // which never holds a client's mirrors. The element must be bound to this very live actor, be a
 // mirror, and be a kind the host runs: an unknown or not-yet-bound source is not proof of a mirror.
+// The one source the registry cannot name is the world-actor mirror being materialised: its
+// BeginPlay runs inside the finish spawn, before its row exists, so a child prop born in that
+// window is judged against the exact actor the window publishes (MaterializeScope). Exact-actor
+// only -- a prop born while some OTHER mirror materialises is not an echo.
 bool IsHostCharacterMirror(void* src) {
     namespace EL = coop::element;
+    if (src && src == coop::world_actor_sync::MaterializingActor()) return true;
     auto& reg = EL::Registry::Get();
     const EL::ElementId eid = reg.EidForActor(src);
     if (eid == EL::kInvalidId) return false;
