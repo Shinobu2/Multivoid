@@ -90,3 +90,6 @@ Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host ""
 if ($fails -gt 0) { Write-Host "package_signature_drill: $fails ARM(S) FAILED" -ForegroundColor Red; exit 1 }
 Write-Host "package_signature_drill: ALL PASS" -ForegroundColor Green
+# An explicit 0: the CI's pwsh shell otherwise exits with $LASTEXITCODE, the code of the last
+# native call -- here a red arm's verify, which fails by design.
+exit 0
