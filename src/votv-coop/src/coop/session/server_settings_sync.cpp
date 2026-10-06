@@ -104,7 +104,7 @@ bool SendRow(Session& s, int slot, const reg::Row* row, uint8_t flags, const cha
 
 // The subscriber, game thread: a replicated row changed on the host, so every slot that holds its
 // snapshot is sent every replicated row again, each as its own message. A subscriber carries no
-// row argument, so a change re-sends all of them (one today; a change is a person's act, so the
+// row argument, so a change re-sends all of them (two today; a change is a person's act, so the
 // walk is cold). The session layer's own begin and end notify once per row yet send nothing: at
 // begin no slot holds a snapshot, at end the session no longer runs.
 //

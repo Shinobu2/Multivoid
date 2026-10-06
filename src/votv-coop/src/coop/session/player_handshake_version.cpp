@@ -145,15 +145,25 @@ bool ValidateJoinVersionOrRefuse(coop::net::Session& session, int senderSlot,
     }
     // The host decides, both ways. MTA's server refuses a client below minclientversion
     // (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:1930); its build notes say a custom
-    // public server admits only custom clients (reference/mtasa-blue/Shared/sdk/version.h:36), which its
-    // closed net module enforces -- here the host holds that rule. A client judges no host.
+    // public server admits only custom clients (reference/mtasa-blue/Shared/sdk/version.h:36), and the
+    // open code enforces it: a non-public build's netcode version carries its branch id
+    // (reference/mtasa-blue/Shared/sdk/version.h:119-131), the join is admitted only on equality
+    // (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:1913) and the rest are refused as
+    // DIFFERENT_BRANCH (CGame.cpp:2038-2055). Here the host holds that rule. net.allow_other_builds is
+    // a deliberate divergence: no MTA setting relaxes its kind check, and here the host may choose to
+    // admit another build. A client judges no host.
     bool admittedOther = false;
     if (verdict.empty() && session.role() == net::Role::Host) {
-        const bool hostOfficial = coop::build_trust::SelfIsOfficial();
         const bool sameBytes =
             std::memcmp(peerSha, coop::build_trust::Self().sha256, coop::build_trust::kShaBytes) == 0;
-        const bool sameOfficial = hostOfficial && sameBytes;
-        const bool refusedKind = hostOfficial ? !sameOfficial : (peerOfficial && !sameBytes);
+        // The signature check runs only for a differing hash: a same-build join cannot change the
+        // verdict. An official host refuses any other hash, a modified host an official client.
+        bool hostOfficial = false;
+        bool refusedKind = false;
+        if (!sameBytes) {
+            hostOfficial = coop::build_trust::SelfIsOfficial();
+            refusedKind = hostOfficial || peerOfficial;
+        }
         if (refusedKind) {
             if (coop::config::ResolveFlag(coop::config_registry::rows::net_allow_other_builds)) {
                 admittedOther = true;

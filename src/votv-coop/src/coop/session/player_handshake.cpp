@@ -219,10 +219,10 @@ void MaybeSendJoinToSlot(net::Session& session, int slot,
         // The nick colour after the flags byte.
         AppendNickColorField(joinPayload, coop::nick_color::LocalPacked());
         // The game target, [u8 gamelen][game ASCII] after the colour (the build claim follows it,
-        // below): the other half of the version
-        // pair (the build number rides the packet header as the protocol version). The receiver
-        // checks it by byte equality at the top of HandleJoinMessage, the wire-level gate that also
-        // covers direct connect and env boot, where no browser pre-flight ran. At most 23 chars.
+        // below): the other half of the version pair (the build number rides the packet header
+        // as the protocol version). The receiver checks it by byte equality at the top of
+        // HandleJoinMessage, the wire-level gate that also covers direct connect and env boot,
+        // where no browser pre-flight ran. At most 23 chars.
         {
             const char* game = coop::version::kGameTarget;
             const size_t gameLen = std::min<size_t>(std::strlen(game), 23);
@@ -231,8 +231,9 @@ void MaybeSendJoinToSlot(net::Session& session, int slot,
         }
         // The build claim after the game target: [sha256 32 bytes][u8 flags], flags bit 0 = this
         // build verified its own release signature. A host judges it at the Join seam
-        // (player_handshake_version.cpp); a client reads nothing of the host's. Both are read once
-        // here, with the rest of the payload. build_claim_foreign flips the hash's first byte so a
+        // (player_handshake_version.cpp); a client reads nothing of the host's. The hash and the
+        // flag are read when the payload is built: once per pump tick that sends a Join (the latch
+        // is the caller's per-tick local). build_claim_foreign flips the hash's first byte so a
         // host reads this peer as another build (the build-trust drill's arm).
         {
             uint8_t sha[coop::build_trust::kShaBytes];
