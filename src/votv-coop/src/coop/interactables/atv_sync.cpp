@@ -42,6 +42,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <chrono>
 #include <vector>
 
 namespace coop::atv_sync {
@@ -496,13 +497,51 @@ void OnAtvRelease(const coop::net::AtvReleasePayload& payload, uint8_t senderPee
             key.c_str());
 }
 
+// A spawn that could not run yet (the wrapper unresolved, or the spawn itself failed) waits here and is retried, so a
+// transient miss does not leave the ATV missing until a rejoin: the pose stream only moves an ATV that exists. A
+// destroy cancels the wait; a spawn that lands, or the budget running out, ends it.
+struct PendingSpawn { coop::net::AtvSpawnPayload payload{}; uint32_t tries = 0; uint64_t nextMs = 0; };
+std::unordered_map<std::wstring, PendingSpawn> g_pendingSpawn;
+constexpr uint32_t kSpawnTries = 20;
+constexpr uint64_t kSpawnRetryMs = 500;
+constexpr size_t   kSpawnPendingCap = 16;
+
+uint64_t SpawnNowMs() {
+    return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+void DeferSpawn(const std::wstring& key, const coop::net::AtvSpawnPayload& payload, const char* why) {
+    auto it = g_pendingSpawn.find(key);
+    if (it == g_pendingSpawn.end()) {
+        if (g_pendingSpawn.size() >= kSpawnPendingCap) return;
+        it = g_pendingSpawn.emplace(key, PendingSpawn{payload, 0, 0}).first;
+    }
+    PendingSpawn& p = it->second;
+    if (++p.tries > kSpawnTries) {
+        UE_LOGW("atv: runtime-ATV synthKey='%ls' still not spawned after %u tries (%s) -- given up", key.c_str(),
+                kSpawnTries, why);
+        g_pendingSpawn.erase(it);
+        return;
+    }
+    p.nextMs = SpawnNowMs() + kSpawnRetryMs;
+    if (p.tries == 1) UE_LOGW("atv: runtime-ATV synthKey='%ls' not spawned yet (%s) -- retrying", key.c_str(), why);
+}
+
+void RetryPendingSpawns();
+
 void OnAtvSpawn(const coop::net::AtvSpawnPayload& payload, uint8_t /*senderPeerSlot*/) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || s->role() == coop::net::Role::Host) return;  // client-only (the host owns the real ATV)
-    if (!A::EnsureResolved()) return;
     std::wstring synthKey = StringFromWireKey(payload.synthKey);
     if (synthKey.empty()) { UE_LOGW("atv: OnAtvSpawn empty synthKey -- dropping"); return; }
-    if (g_atvs.find(synthKey) != g_atvs.end()) return;  // already spawned (re-announce / connect dup) -- idempotent
+    if (!A::EnsureResolved()) { DeferSpawn(synthKey, payload, "the ATV wrapper is not resolved"); return; }
+    auto known = g_atvs.find(synthKey);
+    if (known != g_atvs.end()) {
+        if (R::IsLiveByIndex(known->second.actor, known->second.idx)) { g_pendingSpawn.erase(synthKey); return; }
+        if (known->second.actor) g_synthForActor.erase(known->second.actor);
+        g_atvs.erase(known);   // a dead row is not "already spawned"
+    }
     if (!std::isfinite(payload.x) || !std::isfinite(payload.y) || !std::isfinite(payload.z) ||
         !std::isfinite(payload.pitch) || !std::isfinite(payload.yaw) || !std::isfinite(payload.roll)) {
         UE_LOGW("atv: OnAtvSpawn non-finite pose synthKey='%ls' -- dropping", synthKey.c_str());
@@ -515,8 +554,10 @@ void OnAtvSpawn(const coop::net::AtvSpawnPayload& payload, uint8_t /*senderPeerS
     void* spawned = A::SpawnMirror(className, loc, rot);  // physics LEFT ON -- a native idle grabbable ATV
     if (!spawned) {
         UE_LOGW("atv: OnAtvSpawn SpawnMirror failed synthKey='%ls' class='%ls'", synthKey.c_str(), className.c_str());
+        DeferSpawn(synthKey, payload, "SpawnMirror failed");
         return;
     }
+    g_pendingSpawn.erase(synthKey);
     AtvEntry e{};
     e.actor = spawned;
     e.idx = R::InternalIndexOf(spawned);
@@ -532,6 +573,7 @@ void OnAtvDestroy(const coop::net::AtvDestroyPayload& payload, uint8_t /*senderP
     if (!s || s->role() == coop::net::Role::Host) return;  // client-only
     std::wstring synthKey = StringFromWireKey(payload.synthKey);
     if (synthKey.empty()) return;
+    g_pendingSpawn.erase(synthKey);  // a destroy ends a spawn still waiting
     if (!IndexCurrent()) return;  // the pass prunes a dead-world entry itself
     auto it = g_atvs.find(synthKey);
     if (it == g_atvs.end()) return;
@@ -542,6 +584,15 @@ void OnAtvDestroy(const coop::net::AtvDestroyPayload& payload, uint8_t /*senderP
     g_atvs.erase(it);
     UE_LOGI("atv: runtime-ATV mirror synthKey='%ls' %s", synthKey.c_str(),
             destroyed ? "destroyed" : "dropped from the lane, not destroyed here");
+}
+
+void RetryPendingSpawns() {
+    if (g_pendingSpawn.empty()) return;
+    const uint64_t now = SpawnNowMs();
+    std::vector<coop::net::AtvSpawnPayload> due;
+    for (auto& kv : g_pendingSpawn)
+        if (now >= kv.second.nextMs) due.push_back(kv.second.payload);
+    for (const auto& p : due) OnAtvSpawn(p, 0);
 }
 
 void QueueConnectBroadcastForSlot(int peerSlot) {
@@ -578,6 +629,7 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
 }
 
 void Tick() {
+    RetryPendingSpawns();
     // Every early return means this module is not deciding who owns what, and the collision guard
     // must then be inert: it suppresses damage by default, and armed against a stale set it would
     // make the local ATV invulnerable. Disarmed first; the path that earns it re-arms at the end.
@@ -698,6 +750,7 @@ void Tick() {
 }
 
 void OnDisconnect() {
+    g_pendingSpawn.clear();
     // Disarmed first: nothing publishes an owned set from here, and a live hit must reach the game.
     coop::atv_hit_guard::SetActive(false);
     coop::atv_hit_guard::PublishOwned(nullptr, 0);
