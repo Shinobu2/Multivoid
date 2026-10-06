@@ -11,14 +11,20 @@ writer: a dev disclaimer, then what is new (the notes file for that build), then
 steps with a link to [install.md](install.md), then the build provenance (the source commit and
 the checksum).
 
+The zip also carries `mod/dlls/main.dll.sig`, the release signature, made in the publish job
+with the `release` environment's key. The `release` environment holds the release key. It has
+the maintainer as its required reviewer, with self-review allowed and administrators unable to
+bypass it, and it deploys only to tags `v*` and the branch `main`; `release_sign.py keygen`
+refuses to set a key into an environment protected any other way.
+
 Build numbers are minted in one place, the append-only, human-written ledger
 `.github/ci/LEDGER.tsv`. A tag or a release page is a deletable platform object and a drift
 detector, never the authority. The identity a release carries is the version pair on
 [versioning.md](versioning.md).
 
 Dev releases are rare, end-of-session acts: the cacheless CI build takes most of an hour, so a
-release is fired as the last thing and left to finish, while every iteration runs on local
-builds.
+release is fired as the last thing; its publish job waits for the maintainer's approval of the
+`release` environment, while every iteration runs on local builds.
 
 ## The procedure
 
@@ -58,8 +64,9 @@ builds.
    tag reach the remote together and the number is unique there from that moment.
 6. **Watch the run to green.** The judge refuses with a labelled verdict on any missed
    precondition; a refusal is stateless, so fix the cause and re-run (dispatch `release-core`
-   with the tag). The release is done when the page shows the asset and its SHA256; the
-   failure email is the only backstop.
+   with the tag). The publish job waits for the maintainer's approval of the `release`
+   environment; a run whose environment has no key fails when that job starts. The release is
+   done when the page shows the asset and its SHA256; the failure email is the only backstop.
 7. **The published row.** Append `published` with the same N, game, tag, commit and today's
    date, and push it while watching the green run.
 8. **The update check.** For a stable, set `COOP_LATEST_PROTO=<N>` and
@@ -118,5 +125,5 @@ and locally at any time.
   wording is computed from the numbers, and no dev axis exists in the identity.
 - The judge, the fingerprint and the ledger predicates live in `.github/ci/` and execute from
   the main branch's head, where editing them is a protected act. The publish job checks out the
-  tag for the release content and identity and overlays only those predicates from main, so
-  the refuse-to-publish logic is never readable from a tag.
+  tag for the release content and identity and overlays only those predicates and the release
+  signer from main, so the refuse-to-publish logic is never readable from a tag.

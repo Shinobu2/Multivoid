@@ -108,6 +108,8 @@ and no listing, and it is shorter than what follows.
    `WindowsNoEditor\VotV\Binaries\Win64\Mods\Multivoid`
    inside your game install -- so that the file
    `...\Mods\Multivoid\dlls\main.dll` exists.
+   That folder holds `dlls\main.dll.sig`, the release signature: without it the game reports
+   the build as unofficial.
 3. If the zip has a `pak\` folder (the player-model skins), copy its **contents**
    into `WindowsNoEditor\VotV\Content\Paks\LogicMods\multivoid`
    (create the folder if it does not exist). Without this step other players'
