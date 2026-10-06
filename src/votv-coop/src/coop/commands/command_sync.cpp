@@ -189,6 +189,7 @@ coop::commands::settings::Ports RealSettingsPorts() {
     p.set = &coop::config::SetServerRow;
     p.reset = &coop::config::ResetServerRow;
     p.current = &CurrentValueOf;
+    p.log = &LogAction;
     return p;
 }
 

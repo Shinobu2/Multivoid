@@ -6,6 +6,7 @@
 
 #include "coop/commands/settings_commands.h"
 
+#include "coop/commands/action_source.h"
 #include "coop/commands/command_dispatcher.h"
 
 #include <string>
@@ -32,6 +33,20 @@ const config_registry::Row* NamedRow(const Ports& p, Context& ctx) {
     return row;
 }
 
+// Records a setting the verb changed: the row's key and label as the target, the command line as
+// the description. Called only when the row's text differs before and after.
+void Record(const Ports& p, const Context& ctx, const config_registry::Row* row, const std::string& description) {
+    if (!p.log) return;
+    coop::permissions::Action a;
+    FillSource(ctx, a);
+    a.targetType = "setting";
+    a.targetId = row->key;
+    const char* label = config_registry::RowLabel(row);
+    a.targetName = label ? label : row->key;
+    a.description = description;
+    p.log(a);
+}
+
 Handler SetHandler(const Ports& p) {
     return [p](Context& ctx) {
         const config_registry::Row* row = NamedRow(p, ctx);
@@ -39,14 +54,21 @@ Handler SetHandler(const Ports& p) {
         const std::string& value = ctx.texts[1];
         std::string why;
         if (!p.valid(row, value, &why)) { ctx.Reply(std::string(row->key) + ": " + why); return; }
+        const std::string before = p.current(row);
         switch (p.set(row, value.c_str())) {
-            case SetResult::Saved:
-                ctx.Reply(std::string(row->key) + " is now " + p.current(row) + ".");
+            case SetResult::Saved: {
+                const std::string after = p.current(row);
+                ctx.Reply(std::string(row->key) + " is now " + after + ".");
+                if (after != before) Record(p, ctx, row, "/set " + std::string(row->key) + " " + after);
                 break;
-            case SetResult::HeldNotSaved:
-                ctx.Reply(std::string(row->key) + " is now " + p.current(row) +
+            }
+            case SetResult::HeldNotSaved: {
+                const std::string after = p.current(row);
+                ctx.Reply(std::string(row->key) + " is now " + after +
                           " for this game; the settings file could not be written.");
+                if (after != before) Record(p, ctx, row, "/set " + std::string(row->key) + " " + after);
                 break;
+            }
             case SetResult::Refused: ctx.Reply(std::string(row->key) + " was not changed."); break;
         }
     };
@@ -56,15 +78,21 @@ Handler ResetHandler(const Ports& p) {
     return [p](Context& ctx) {
         const config_registry::Row* row = NamedRow(p, ctx);
         if (row == nullptr) return;
+        const std::string before = p.current(row);
         switch (p.reset(row)) {
-            case SetResult::Saved:
-                ctx.Reply(std::string(row->key) + " is back to " + p.current(row) + ".");
+            case SetResult::Saved: {
+                const std::string after = p.current(row);
+                ctx.Reply(std::string(row->key) + " is back to " + after + ".");
+                if (after != before) Record(p, ctx, row, "/reset " + std::string(row->key));
                 break;
-            case SetResult::HeldNotSaved:
+            }
+            case SetResult::HeldNotSaved: {
                 ctx.Reply(std::string(row->key) +
                           " could not be reset: the settings file could not be written, so its "
                           "stored value still answers.");
+                if (p.current(row) != before) Record(p, ctx, row, "/reset " + std::string(row->key));
                 break;
+            }
             case SetResult::Refused: ctx.Reply(std::string(row->key) + " was not changed."); break;
         }
     };
