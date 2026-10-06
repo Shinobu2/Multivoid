@@ -12,7 +12,13 @@
 // master's tick drives roach movement, the food-eat mutation and crush traces, which a client running
 // it would diverge, so it and its summoner are refused while the roach sync drives the client
 // population. The jellyfish path's spawn makes seven fish inside its graph, and the host's are
-// mirrored through the source-gated catch, so a client's own, its 18:00 roll's, is refused.
+// mirrored through the source-gated catch, so a client's own, its 18:00 roll's, is refused. The
+// event creatures (the vent crawler, the gray pack, the eggs and the tentacle balls) are the same
+// shape pushed one level down: on a client they exist only as host mirrors, so their AI, timers,
+// overlaps and despawn verbs are refused while the AnimBP and the pose stream stay; and the
+// bodies that mint them inside the gray controller, the balls follower, the super egger and the
+// eventer's own runEvent are refused on the client, because their BeginDeferred calls are
+// bytecode-internal and no spawn interceptor ever sees them.
 
 #include "coop/world/spawn_authority.h"
 
@@ -40,33 +46,114 @@ bool IsActiveClientSession() {
 }
 
 // One row: the body a client must not run, named by its class and its function. The function is
-// spelled as the live header dump spells it; names compare without case.
+// spelled as the live header dump spells it; names compare without case. `allowOurs` marks the
+// one row our own lanes legitimately invoke on a client: the event replay
+// (event_fire_sync::TryReplay) reaches runEvent's body through a reflected Call, so that row
+// refuses native fires only. Every creature and event-spawner row stays false -- a mirror
+// materialised through our own Call must still never arm its gameplay.
 struct Row {
     const wchar_t* cls;
     const wchar_t* fn;
     const char* tag;
+    bool allowOurs;
 };
 constexpr Row kRows[] = {
-    {L"mushroomMaster_C",            L"Spawn",          "mushroomMaster.Spawn"},
-    {L"mushroomSpawner_C",           L"Spawn",          "mushroomSpawner.Spawn"},
+    {L"mushroomMaster_C",            L"Spawn",          "mushroomMaster.Spawn",          false},
+    {L"mushroomSpawner_C",           L"Spawn",          "mushroomSpawner.Spawn",         false},
     // A late-game class: keyed by name, the watch holds from the class's first body, whenever it loads.
-    {L"ticker_yellowWispSpawner_C",  L"ReceiveTick",    "yellowWispSpawner.ReceiveTick"},
+    {L"ticker_yellowWispSpawner_C",  L"ReceiveTick",    "yellowWispSpawner.ReceiveTick", false},
     // Sky wisps: world-anchored, so the host rolls; the source-gated catch and the variant
     // allowlist mirror the products.
-    {L"ticker_wispSpawner_C",        L"ReceiveTick",    "wispSpawner.ReceiveTick"},
+    {L"ticker_wispSpawner_C",        L"ReceiveTick",    "wispSpawner.ReceiveTick",       false},
     // The space jellyfish: the host's run is mirrored through the source-gated catch.
-    {L"jellyfishPath_C",             L"spawn",          "jellyfishPath.spawn"},
+    {L"jellyfishPath_C",             L"spawn",          "jellyfishPath.spawn",           false},
     // The roach sim's entries: the ticker's cross-object call and the three looping timer
     // delegates. The roach sync drives the client population instead.
-    {L"cockroachMaster_C",           L"summonRoach",    "cockroachMaster.summonRoach"},
-    {L"cockroachMaster_C",           L"addRoachTimer",  "cockroachMaster.addRoachTimer"},
-    {L"cockroachMaster_C",           L"spawnNestTimer", "cockroachMaster.spawnNestTimer"},
-    {L"cockroachMaster_C",           L"CustomEvent",    "cockroachMaster.CustomEvent"},
+    {L"cockroachMaster_C",           L"summonRoach",    "cockroachMaster.summonRoach",   false},
+    {L"cockroachMaster_C",           L"addRoachTimer",  "cockroachMaster.addRoachTimer", false},
+    {L"cockroachMaster_C",           L"spawnNestTimer", "cockroachMaster.spawnNestTimer",false},
+    {L"cockroachMaster_C",           L"CustomEvent",    "cockroachMaster.CustomEvent",   false},
     // The ticks.
-    {L"ticker_insomniacSpawner_C",   L"ReceiveTick",    "insomniacSpawner.ReceiveTick"},
-    {L"ticker_fossilhoundSpawner_C", L"ReceiveTick",    "fossilhoundSpawner.ReceiveTick"},
-    {L"cockroachMaster_C",           L"ReceiveTick",    "cockroachMaster.ReceiveTick"},
-    {L"ticker_roachSummoner_C",      L"ReceiveTick",    "roachSummoner.ReceiveTick"},
+    {L"ticker_insomniacSpawner_C",   L"ReceiveTick",    "insomniacSpawner.ReceiveTick",  false},
+    {L"ticker_fossilhoundSpawner_C", L"ReceiveTick",    "fossilhoundSpawner.ReceiveTick",false},
+    {L"cockroachMaster_C",           L"ReceiveTick",    "cockroachMaster.ReceiveTick",   false},
+    {L"ticker_roachSummoner_C",      L"ReceiveTick",    "roachSummoner.ReceiveTick",     false},
+
+    // The story-event creatures: on a client every instance is a host mirror -- the local
+    // spawn paths are suppressed through the allowlist or refused below -- so the gameplay
+    // entries are refused class-wide. Animation and presentation stay: nothing here touches
+    // the AnimBP, the timelines simply never arm without their owning entries, and the host's
+    // pose stream owns the transform.
+    // ventCrawler_C: the whole scene is the BeginPlay body -- it binds the prop_vent_C ref,
+    // plays the moveTL timeline (which itself SetActorLocations the crawl), arms the vent-bang
+    // and footstep events, and ends in the door writes, the setEvent flag and K2_DestroyActor
+    // (ventCrawler_C UG @2669). The box overlap is the end-of-crawl contact: a client pawn
+    // touching the mirror must not open the doors locally (@2363).
+    {L"ventCrawler_C",               L"ReceiveBeginPlay","ventCrawler.ReceiveBeginPlay", false},
+    {L"ventCrawler_C",               L"BndEvt__ventCrawler_Box_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature",
+                                                            "ventCrawler.BoxBeginOverlap",false},
+    // grayTest_C: BeginPlay re-attaches the mesh, gathers the pack and arms the wander MoveTo
+    // plus the two looping 3 s timers and the 5-10 s despawn timer (@1117). The sphere overlap
+    // is the player-catch: on a mainPlayer touch it calls grayController->despawn() and
+    // deacCams() (@1508). deacCams/disableCams deactivate the client's own cameras, rdrone and
+    // kerfur -- the damage write, not animation.
+    {L"grayTest_C",                  L"ReceiveBeginPlay","grayTest.ReceiveBeginPlay",    false},
+    {L"grayTest_C",                  L"BndEvt__grayTest_Sphere_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature",
+                                                            "grayTest.SphereBeginOverlap",false},
+    {L"grayTest_C",                  L"deacCams",       "grayTest.deacCams",             false},
+    {L"grayTest_C",                  L"disableCams",    "grayTest.disableCams",          false},
+    // eg_C: BeginPlay arms the wander (@1466); the tick bobs the mesh but also rolls the
+    // camera-distance check into retrieve() and the rendered/setEvent writes (@15) -- refusing
+    // it costs the bob, while letting it run lets a client egg hop on its own. retrieve() is
+    // the fly-away despawn: collision off, gravity off, a 10 s delay into gamemode->eg=null
+    // and setEvent (@1476). OnLanded continues the move chain (@1869).
+    {L"eg_C",                        L"ReceiveBeginPlay","eg.ReceiveBeginPlay",          false},
+    {L"eg_C",                        L"ReceiveTick",    "eg.ReceiveTick",                false},
+    {L"eg_C",                        L"OnLanded",       "eg.OnLanded",                   false},
+    {L"eg_C",                        L"retrieve",       "eg.retrieve",                   false},
+    // tentacleBall_C: BeginPlay resolves the anim instance, starts Timeline_0 and the ambient
+    // loop, and arms the 15-30 s timer and the first move (@7603). The tick is the brain:
+    // proximity scans, the pindown/chase decision, the stare updates (@8872). move() is the
+    // MoveTo verb it reaches (@10046); the sphere hit is the melee contact (@10314). The
+    // montage-notify talk/light callbacks and step() stay -- sound and light presentation.
+    {L"tentacleBall_C",              L"ReceiveBeginPlay","tentacleBall.ReceiveBeginPlay",false},
+    {L"tentacleBall_C",              L"ReceiveTick",    "tentacleBall.ReceiveTick",      false},
+    {L"tentacleBall_C",              L"move",           "tentacleBall.move",             false},
+    {L"tentacleBall_C",              L"BndEvt__tentacleBall_Sphere_K2Node_ComponentBoundEvent_0_ComponentHitSignature__DelegateSignature",
+                                                            "tentacleBall.SphereHit",    false},
+
+    // The event spawners themselves: a client's copies must never mint children. Every
+    // BeginDeferred inside these graphs is bytecode-internal, so the spawn interceptor never
+    // sees them; refusing the bodies that contain them is the only suppression that holds.
+    // grayEventController_C (level-placed on both sides): spawn() is the only body with the
+    // grayTest BeginDeferred (@2617, the marker loop) -- it also plays the Audio, writes
+    // isRaining=false and runs the deac-cams SphereOverlap. begin() (@3064) is the eventer's
+    // entry -- the player punch, the transformer break, the car zap -- and turnedon (@3388)
+    // and the triggerbox overlap (@3309) are its local activations.
+    {L"grayEventController_C",       L"begin",          "grayEventController.begin",     false},
+    {L"grayEventController_C",       L"turnedon",       "grayEventController.turnedon",  false},
+    {L"grayEventController_C",       L"spawn",          "grayEventController.spawn",     false},
+    {L"grayEventController_C",       L"BndEvt__grayEventController_triggerbox_K2Node_ComponentBoundEvent_0_ComponentBeginOverlapSignature__DelegateSignature",
+                                                            "grayEventController.triggerboxOverlap",false},
+    // tentacleBallsFollower_C (level-placed on both sides): runTrigger is the five-ball spawn
+    // loop plus the setBuddies pass and the cleanup timers (@3432). The tick moves the follow
+    // marker along the spline and writes setEvent at the resume and end points (@2012); the
+    // client's copy has an empty balls array and nothing to guide.
+    {L"tentacleBallsFollower_C",     L"runTrigger",     "tentacleBallsFollower.runTrigger",false},
+    {L"tentacleBallsFollower_C",     L"ReceiveTick",    "tentacleBallsFollower.ReceiveTick",false},
+    // superEgger_C: a client's copy is a world-actor mirror, but FinishSpawning runs its
+    // BeginPlay, which builds the spawn grid and chains spwn() -- the only body with the eg_C
+    // BeginDeferred (@1399, @1316). Refusing both keeps the mirror a husk.
+    {L"superEgger_C",                L"ReceiveBeginPlay","superEgger.ReceiveBeginPlay",  false},
+    {L"superEgger_C",                L"spwn",           "superEgger.spwn",               false},
+
+    // The dispatcher: a client's trigger_eventer_C must never fire an event natively. The
+    // scheduler is dormant (event_fire_sync zeroes allEvents) and the creature rows are held
+    // out of the replay, but a level trigger chain, a save-restore call or the dev menu can
+    // reach runEvent's body directly, and every spawn site inside is bytecode-internal --
+    // unsuppressed local creatures. Native fires only (allowOurs): the replay's reflected
+    // Call still runs the rows the wire holds for it.
+    {L"trigger_eventer_C",           L"runEvent",       "eventer.runEvent",              true},
 };
 constexpr int kRowCount = static_cast<int>(std::size(kRows));
 constexpr int kTagBase = 0x53410000;   // 'SA', then the row
@@ -79,6 +166,10 @@ SG::Verdict OnRowPre(const SG::Call& call) {
     if (!IsActiveClientSession()) return SG::Verdict::Run;
     const int row = call.tag - kTagBase;
     if (row < 0 || row >= kRowCount) return SG::Verdict::Run;
+    // Native fires only when the row says so: the event replay reaches runEvent through our own
+    // reflected call, and a refused replay would delete the event the wire asked for. The
+    // creature rows keep allowOurs false, so a mirror born inside our own Call is still inert.
+    if (kRows[row].allowOurs && call.fromOurCode) return SG::Verdict::Run;
     const std::uint64_t n = ++g_refused[row];
     if ((n & (n - 1)) == 0)
         UE_LOGI("spawn_authority[%s]: client-refuse %p (call #%llu)", kRows[row].tag, call.object,
