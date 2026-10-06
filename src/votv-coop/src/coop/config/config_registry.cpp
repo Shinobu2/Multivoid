@@ -450,6 +450,11 @@ constexpr bool NoCredentialAddress() {
     }
     return true;
 }
+constexpr bool NoServerAddress() {
+    for (size_t i = 0; i < kRowCount; ++i)
+        if ((kRowFlags[i] & kRowServer) && (kRowFlags[i] & kRowAddress)) return false;
+    return true;
+}
 constexpr bool NotifyImpliesReplicated() {
     for (size_t i = 0; i < kRowCount; ++i)
         if ((kRowFlags[i] & kRowNotify) && !(kRowFlags[i] & kRowReplicated)) return false;
@@ -496,6 +501,8 @@ static_assert(ReplicatedImpliesServer(), "a kRowReplicated row must also be kRow
 static_assert(NoLabelledIdentity(), "a labelled row must not be Kind::Identity: a pane has no drawer for it");
 static_assert(NoReplicatedCredential(), "a credential row must never be kRowReplicated");
 static_assert(NoCredentialAddress(), "a credential row must never be kRowAddress");
+static_assert(NoServerAddress(),
+              "a kRowServer row must never be kRowAddress: the action log writes a server setting's value as it is");
 static_assert(NotifyImpliesReplicated(), "a notify row must be replicated");
 static_assert(NoNotifyAddress(), "a notify row is never an address row");
 static_assert(NotifyIsLabelled(), "a notify row must be labelled");
