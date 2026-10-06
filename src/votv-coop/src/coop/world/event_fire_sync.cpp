@@ -178,6 +178,23 @@ std::string NarrowName(const R::FName& n) {
     return s;
 }
 
+// The replay bypass, thread-local and exact: spawn_authority refuses the eventer's verbs on a
+// client, and only the call this scope marks -- that eventer object, that function -- may pass.
+// The gate's fromOurCode flag is the wider flag it replaces: every synchronous coop dispatch
+// inherits it, so any other lane reaching a verb through a reflected call would walk in under it.
+thread_local void* t_replayObject = nullptr;
+thread_local void* t_replayFunction = nullptr;
+
+struct ReplayScope {
+    void* prevObj;
+    void* prevFn;
+    ReplayScope(void* o, void* f) : prevObj(t_replayObject), prevFn(t_replayFunction) {
+        t_replayObject = o;
+        t_replayFunction = f;
+    }
+    ~ReplayScope() { t_replayObject = prevObj; t_replayFunction = prevFn; }
+};
+
 // The native fire, game thread. True iff the verb actually dispatched; callers gate the
 // broadcast and the replayed set on it, since a failed host fire must not make clients replay
 // an event the authority never executed, and a failed replay must not permanently consume
@@ -195,6 +212,7 @@ bool NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring
         ue_wrap::ParamFrame f(g_runSpecialEventFn);
         if (!f.valid()) return false;
         f.Set<R::FName>(L"eventName1", ue_wrap::fname_utils::StringToFName(eventName));
+        const ReplayScope replay(eventer, g_runSpecialEventFn);
         if (ue_wrap::Call(eventer, f)) {
             UE_LOGI("event_fire: runSpecialEvent('%ls') dispatched", eventName.c_str());
             return true;
@@ -208,6 +226,7 @@ bool NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring
     if (!f.valid()) return false;
     f.Set<R::FName>(L"event", ue_wrap::fname_utils::StringToFName(eventName));
     f.Set<R::FName>(L"special", ue_wrap::fname_utils::StringToFName(specialName));
+    const ReplayScope replay(eventer, g_runEventFn);
     if (ue_wrap::Call(eventer, f)) {
         UE_LOGI("event_fire: runEvent('%ls', special='%ls') dispatched",
                 eventName.c_str(), specialName.c_str());
@@ -584,6 +603,10 @@ void OnDisconnect() {
     g_pending.clear();
     g_replayed.clear();
     g_session.store(nullptr, std::memory_order_release);
+}
+
+bool InReplayScope(void* object, void* function) {
+    return t_replayObject && t_replayObject == object && t_replayFunction == function;
 }
 
 unsigned ReplayCount() { return g_replays.load(std::memory_order_relaxed); }

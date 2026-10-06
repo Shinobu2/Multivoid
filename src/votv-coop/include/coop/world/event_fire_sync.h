@@ -59,6 +59,12 @@ void Install(coop::net::Session* session);
 // included). Returns false only when refused (connected as a client -- host is authoritative).
 bool HostFire(FireKind kind, const std::wstring& eventName, const std::wstring& specialName);
 
+// spawn_authority's eventer rows consult this: true only while the exact (object, function)
+// pair it asks about sits inside this module's own reflected replay Call on this thread -- the
+// narrow bypass the gate refusals honour, where the gate's fromOurCode flag passes any coop
+// dispatch on the same thread. False on every other thread and outside the Call.
+bool InReplayScope(void* object, void* function);
+
 // CLIENT receiver (event_dispatch_world, reliable drain, game thread): replay per policy, or
 // queue until the eventer resolves (join window). Host receiving its own kind = dropped upstream.
 void OnReliable(const coop::net::EventFirePayload& payload);
