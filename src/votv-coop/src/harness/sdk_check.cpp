@@ -355,6 +355,18 @@ void RunNpcAllowlistCheck(int& ok, int& fail, int& failPriority) {
     char buf[128];
     std::snprintf(buf, sizeof(buf), "  NPC allowlist: %d / %zu resolved", npcOk, P::name::kNpcAllowlistSize);
     ReportLine(buf);
+    // The late list resolves lazily inside the allowlist test, so an unresolved entry here is
+    // expected (the class may load only with its event) -- informational, never a failure.
+    for (size_t i = 0; i < P::name::kNpcLateAllowlistSize; ++i) {
+        const bool found = R::FindClass(P::name::kNpcLateAllowlist[i]) != nullptr;
+        UE_LOGI("sdk-check: late NPC class '%ls' %s", P::name::kNpcLateAllowlist[i],
+                found ? "resolved" : "not yet loaded (expected for an unfired event)");
+        char lbuf[160];
+        std::snprintf(lbuf, sizeof(lbuf), "  late NPC class '%s' %s",
+                      Narrow(P::name::kNpcLateAllowlist[i]).c_str(),
+                      found ? "resolved" : "not yet loaded");
+        ReportLine(lbuf);
+    }
 }
 
 void RunAssetChecks(int& ok, int& fail, int& failPriority) {
