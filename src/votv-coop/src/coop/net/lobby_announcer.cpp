@@ -56,9 +56,10 @@ HostInfo LobbyAnnouncer::Host(const std::string& masterUrl, const std::string& n
     }
     // The build claim: this binary's own hash, its signing key's id (0 when unsigned) and its
     // signature, announced as read, verified or not -- the master records it and verifies nothing.
-    // MTA's master-list announce carries only a build type and a build number (reference/mtasa-blue/
-    // Server/mods/deathmatch/logic/ASE.cpp:429-464, pushed at Server/mods/deathmatch/utils/
-    // CMasterServerAnnouncer.h:100-111); this one carries the host's whole signed claim.
+    // MTA's master-list announce carries only a build type and a build number
+    // (reference/mtasa-blue/Server/mods/deathmatch/logic/ASE.cpp:429-464, pushed at
+    // reference/mtasa-blue/Server/mods/deathmatch/utils/CMasterServerAnnouncer.h:100-111);
+    // this one carries the host's whole signed claim.
     // A hash that was never computed sends no claim: it must not read as an unsigned build.
     if (coop::build_trust::Self().step >= coop::build_trust::SelfStep::NoSigFile) {
         const std::string sha = coop::build_trust::SelfShaHex();
