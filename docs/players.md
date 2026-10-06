@@ -228,8 +228,9 @@ The same files can be edited in game with `/mv`, in LuckPerms' `/lp` shape: `/mv
 <node> [true|false]`, `/mv user <who> parent add <group>`, `/mv group <name> permission set ...`, `/mv creategroup
 <name>`, `/mv user <who> info`, `/mv listgroups`, and `/mv reload` after editing a file by hand; `/help` lists them
 all. The host can run every one; a friend runs the ones the host granted (`multivoid.mv.user.permission.set` and its
-siblings; editing a player who is not online also needs that node's `.offline`), and no friend can take one of the mod's permissions away from the host. Each change is written to the files at once, and
-recorded in `permissions\actions.jsonl` beside them; a player holding `multivoid.admin.log` is told of every change.
+siblings; editing a player who is not online also needs that node's `.offline`), and no friend can take one of the mod's permissions away from the host. Each change is written to the files at once. Every admin action that changes something -- a kick, a ban or unban, a teleport, a
+server setting changed, a permission edited -- is recorded in `permissions\actions.jsonl` in the server's folder; a
+player holding `multivoid.admin.log` is told of every permission change.
 A command rewrites the one file it changes in its own layout, so keep notes elsewhere, not as extra keys in a
 permission file.
 
