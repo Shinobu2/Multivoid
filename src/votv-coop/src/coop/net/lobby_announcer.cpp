@@ -2,6 +2,7 @@
 
 #include "coop/net/lobby_announcer.h"
 
+#include "coop/build_trust/build_trust.h"
 #include "coop/net/http_client.h"
 #include "coop/net/peer_identity.h"  // LocalIdentityString -- the identity joiners dial
 #include "coop/net/protocol.h"  // kProtocolVersion -- announced for the browser's join gate
@@ -52,6 +53,19 @@ HostInfo LobbyAnnouncer::Host(const std::string& masterUrl, const std::string& n
     if (directPort > 0) {  // DIRECT lobby (see header): master advertises src-ip:port
         b["conn"] = "direct";
         b["direct_port"] = directPort;
+    }
+    // The build claim: this binary's own hash, its signing key's id (0 when unsigned) and its
+    // signature, announced as read, verified or not -- the master records it and verifies nothing.
+    // A hash that was never computed sends no claim: it must not read as an unsigned build.
+    if (coop::build_trust::Self().step >= coop::build_trust::SelfStep::NoSigFile) {
+        const std::string sha = coop::build_trust::SelfShaHex();
+        const unsigned key =
+            (coop::build_trust::Self().step == coop::build_trust::SelfStep::SigPresent)
+                ? static_cast<unsigned>(coop::build_trust::Self().sig.keyId) : 0u;
+        b["build_sha"] = sha;
+        b["build_key"] = key;
+        b["build_sig"] = coop::build_trust::SelfSigHex();
+        UE_LOGI("lobby: announcing the build claim key=%u sha=%.8s", key, sha.c_str());
     }
     const http::Response resp = http::Post(masterUrl, "/v1/host", J::Dump(b), timeoutMs);
     // No master address in these lines: they reach the console, and which master was asked is the

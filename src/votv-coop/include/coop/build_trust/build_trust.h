@@ -86,5 +86,6 @@ bool SelfIsOfficial();             // step == SigPresent && SignatureVerifies(si
 const char* StepName(SelfStep step);
 const char* StatusSuffix();        // "" when SelfIsOfficial(), else " (unofficial build)"
 std::string SelfShaHex();          // 64 lowercase hex of Self().sha256
+std::string SelfSigHex();          // 128 lowercase hex of Self().sig.sig when step == SigPresent, else ""
 
 }  // namespace coop::build_trust
