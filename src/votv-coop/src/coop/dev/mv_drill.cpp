@@ -47,10 +47,11 @@ Arm ArmNow() {
 }
 
 // The rig's ids: the two installs' identity keys (the same names the grants fixtures carry), and
-// the offline player the seeded store names.
+// the offline player the seeded store names, and an id no player holds.
 #define MVD_HOST "7f990136fefd61696706ff16d74362df"
 #define MVD_CLIENT "9af578e3dea27e43f722b3a2c7af8b1f"
 #define MVD_OWNER "000000000000000000000000000c4d01"
+#define MVD_ABSENT "ffffffffffffffffffffffffffffffff"
 constexpr const char* kHostId = MVD_HOST;
 constexpr const char* kClientId = MVD_CLIENT;
 
@@ -113,11 +114,18 @@ constexpr Step kH10[] = {{Kind::Send, "mv creategroup mvtmp", "Done: /mv createg
 constexpr Step kH11[] = {{Kind::Send, "mv user " MVD_OWNER " permission unset mvdrill.only",
                           "Done: /mv user " MVD_OWNER " permission unset mvdrill.only", false},
                          {Kind::ExpectFile, "users\\" MVD_OWNER ".json", nullptr, false}};
+// The host's server settings and the offline ban and unban: each lands one record in the action
+// log. The id of kH14 and kH15 is held by no player, so nobody seated is touched.
+constexpr Step kH12[] = {{Kind::Send, "set voice.distance_cm 6000", "voice.distance_cm is now 6000.", false}};
+constexpr Step kH13[] = {{Kind::Send, "reset voice.distance_cm", "voice.distance_cm is back to 4800.", false}};
+constexpr Step kH14[] = {{Kind::Send, "banid " MVD_ABSENT, "Banned ffffffff (offline).", false}};
+constexpr Step kH15[] = {{Kind::Send, "unban " MVD_ABSENT, "Unbanned ffffffff.", false}};
 
 #define MVD_ITEM(arr) Item{arr, std::size(arr)}
 constexpr Item kHostItems[] = {MVD_ITEM(kH1), MVD_ITEM(kH2), MVD_ITEM(kH3), MVD_ITEM(kH4),
                                MVD_ITEM(kH5), MVD_ITEM(kH6), MVD_ITEM(kH7), MVD_ITEM(kH8),
-                               MVD_ITEM(kH9), MVD_ITEM(kH10), MVD_ITEM(kH11)};
+                               MVD_ITEM(kH9), MVD_ITEM(kH10), MVD_ITEM(kH11), MVD_ITEM(kH12),
+                               MVD_ITEM(kH13), MVD_ITEM(kH14), MVD_ITEM(kH15)};
 constexpr size_t kRedItem = 4;  // the host's item 5
 
 // The client's script: one item per entry.
@@ -344,6 +352,7 @@ void ClearLists() {
 }
 
 #undef MVD_ITEM
+#undef MVD_ABSENT
 #undef MVD_OWNER
 #undef MVD_CLIENT
 #undef MVD_HOST

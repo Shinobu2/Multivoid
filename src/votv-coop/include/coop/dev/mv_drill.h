@@ -6,7 +6,8 @@
 // (every other line). A Send judges the first reply past the size the list had when it was
 // submitted; a WaitNotice searches every notice seen so far. The host starts once a client is
 // seated, proved and world-ready, edits the store (breaks it on purpose, reloads, sets, creates and
-// deletes a group) and reads the files it wrote; the client waits for the host's grant and notice,
+// deletes a group), reads the files it wrote, then sets and resets the voice range and bans and
+// unbans an absent id; the client waits for the host's grant and notice,
 // then sends its own lines, one of which is a delegate edit the host's feed is told of. No step
 // waits on a clock: a budget only fails a hung step. `red` expects a wrong reply at the host's
 // step 5.1, so it must fail. The drill refuses to start when command_drill or settings_drill is on
