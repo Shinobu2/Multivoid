@@ -49,6 +49,12 @@ state in after the finish call returns: a disc's eject loads it from the slot's 
 birth's own initialisation is too early for a record, and without the drain a disc the host
 ejected reached every client blank.
 
+Point-sack redemption is a client intent: the host authorizes reach, reserves the live UObject
+incarnation across callbacks, destroys it, and pays only after that incarnation is no longer
+live (`coop/items/point_sack_intent`). A successful dispatch with the sack still live pays
+nothing. `[?]` Concurrent redemption needs a two-peer test; a consumed sack whose payment fails
+has no automatic recovery.
+
 ### How a birth finds its local actor
 
 A birth names a key, so the receiver looks that key up first and, finding it, converges the actor

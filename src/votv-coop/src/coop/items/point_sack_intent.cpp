@@ -12,6 +12,7 @@
 
 #include "ue_wrap/actors/prop.h"               // GetInteractableKeyString
 #include "ue_wrap/core/game_thread.h"
+#include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
@@ -39,6 +40,20 @@ std::atomic<coop::net::Session*> g_session{nullptr};
 bool g_watchRegistered = false;
 bool g_watchSettled = false;
 uint64_t g_sent = 0, g_paid = 0, g_refused = 0;
+
+// Engine callbacks can redeem again before the outer destroy returns.
+struct Redemption {
+    ue_wrap::CachedObjRef sack;
+    Redemption* previous;
+    static Redemption* active;
+    explicit Redemption(void* actor) : previous(active) { sack.Set(actor); active = this; }
+    ~Redemption() { active = previous; }
+    static bool Contains(void* actor) {
+        for (auto* p = active; p; p = p->previous) if (p->sack.Is(actor)) return true;
+        return false;
+    }
+};
+Redemption* Redemption::active = nullptr;  // game-thread stack
 
 bool IsSack(void* actor) {
     if (!actor) return false;
@@ -120,11 +135,14 @@ void OnRedeem(coop::net::Session& session, const coop::net::PointSackRedeemPaylo
     // No sack is the ordinary end of a second request, or of two players opening one sack.
     if (!sack) { Refuse(senderSlot, key, p.elementId, "no such sack here -- already opened"); return; }
     if (!IsSack(sack)) { Refuse(senderSlot, key, p.elementId, "not a point sack"); return; }
+    if (Redemption::Contains(sack)) { Refuse(senderSlot, key, p.elementId, "redemption in progress"); return; }
+    const Redemption redemption(sack);
     const auto tok = EL::IntentTarget::ForClientIntent(session, senderSlot, kReachUU);
     if (const auto sub = tok.Authorize(sack); !sub) {
         Refuse(senderSlot, key, p.elementId, EL::OutcomeName(sub.outcome));
         return;
     }
+    if (!redemption.sack.Is(sack)) { Refuse(senderSlot, key, p.elementId, "sack no longer live"); return; }
     static void* sCls = nullptr;
     static int32_t sOffPoints = -1;
     void* cls = R::ClassOf(sack);
@@ -132,12 +150,10 @@ void OnRedeem(coop::net::Session& session, const coop::net::PointSackRedeemPaylo
     if (sOffPoints < 0) { Refuse(senderSlot, key, p.elementId, "the sack's points did not resolve"); return; }
     int32_t points = 0;
     std::memcpy(&points, static_cast<const uint8_t*>(sack) + sOffPoints, sizeof(points));
-    // Consumed once: the sack is destroyed first and paid only if it really went, so a destroy that
-    // failed leaves it for a later request instead of paying for a sack that is still there. The
-    // destroy seam sends the destroy to every peer.
-    const int32_t idx = R::InternalIndexOf(sack);
-    if (!ue_wrap::engine::DestroyActor(sack) && R::IsLiveByIndex(sack, idx)) {
-        Refuse(senderSlot, key, p.elementId, "the sack's destroy did not run -- not paid");
+    // Call success is dispatch, not consumption. Pay only after this incarnation is dead.
+    ue_wrap::engine::DestroyActor(sack);
+    if (redemption.sack.Is(sack)) {
+        Refuse(senderSlot, key, p.elementId, "the sack is still live after destroy -- not paid");
         return;
     }
     if (!ue_wrap::economy::AddPoints(points)) {

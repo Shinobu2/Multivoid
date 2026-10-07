@@ -5,8 +5,8 @@
 // credit lands only in the client's mirror of the shared balance, and the host's next balance row
 // takes it away again, while the sack's destroy reaches the host and the points are lost for both.
 // A connected client's action on a sack is refused at the script-body gate and sent to the host as
-// a PointSackRedeem naming the sack; the host checks the sender's reach, pays the sack's own
-// `points` from its copy and destroys that copy, whose destroy reaches every peer. The sack is the
+// a PointSackRedeem naming the sack; the host checks the sender's reach, destroys its copy,
+// and pays its own `points` only when that incarnation is no longer live. The sack is the
 // consumption record: a repeated or late request finds no sack and pays nothing.
 
 #pragma once
