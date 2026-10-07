@@ -63,8 +63,8 @@ bool SetActive(void* comp, bool value, bool reset) {
     if (!fn) return false;
     ue_wrap::ParamFrame f(fn);
     if (!f.valid()) return false;
-    f.Set<bool>(L"bNewActive", value);
-    f.Set<bool>(L"bReset", reset);
+    // A missed param leaves a half-written frame: never dispatch it.
+    if (!f.Set<bool>(L"bNewActive", value) || !f.Set<bool>(L"bReset", reset)) return false;
     return ue_wrap::Call(comp, f);
 }
 

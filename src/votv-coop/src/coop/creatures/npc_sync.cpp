@@ -85,8 +85,8 @@ thread_local PendingNpcSpawn t_pendingNpc{coop::element::kInvalidId, nullptr};
 // chain walk checking every base per hop. The late list (kNpcLateAllowlist,
 // sdk_profile_names.h) is matched statelessly instead of by cached class pointer: its
 // event-scene classes may load only when their event approaches, so nothing resolves them at
-// install, and each hop's own name is compared against every entry -- the allocation-free
-// compare the world-actor lane's product gate uses, under IsDescendantOfAny's 16-hop bound.
+// install, and each hop's own name is compared against every entry -- the same compare the
+// world-actor lane's product gate uses, under IsDescendantOfAny's 16-hop bound.
 // No shared state means the test is safe from the parallel-anim workers it fires on, a
 // subclass matches through its loaded base's name, and a reloaded class matches again under
 // its new address: nothing survives a class reload to stale-allowlist the recycled pointer.

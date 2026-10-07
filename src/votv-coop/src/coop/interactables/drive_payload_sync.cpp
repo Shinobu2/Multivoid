@@ -596,9 +596,16 @@ void OnBound(uint32_t eid, void* actor, int senderSlot) {
 void OnPeerLeft(uint8_t slot) {
     if (slot >= coop::net::kMaxPeers) return;
     g_asm.ClearSlot(slot);
-    for (auto it = g_parked.begin(); it != g_parked.end();) it = it->second.senderSlot == slot ? g_parked.erase(it) : std::next(it);
-    for (auto it = g_brought.begin(); it != g_brought.end();)
-        it = it->second.slot == slot ? g_brought.erase(it) : std::next(it);
+    // The retry counter is the departed author's own write attempt: dropping it with the row
+    // keeps a later row for the same eid from inheriting the class-default bypass.
+    for (auto it = g_parked.begin(); it != g_parked.end();) {
+        if (it->second.senderSlot == slot) { g_writeFails.erase(it->first); it = g_parked.erase(it); }
+        else ++it;
+    }
+    for (auto it = g_brought.begin(); it != g_brought.end();) {
+        if (it->second.slot == slot) { g_writeFails.erase(it->first); it = g_brought.erase(it); }
+        else ++it;
+    }
     for (auto it = g_broughtPending.begin(); it != g_broughtPending.end();)
         it = it->slot == slot ? g_broughtPending.erase(it) : std::next(it);
     g_nextRefusalSay[slot] = {};

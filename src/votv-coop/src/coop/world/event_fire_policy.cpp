@@ -54,8 +54,8 @@ const NoReplayRow kNoReplayRows[] = {
     // client's own player. Host-only until the scene gets a lane:
     { "obelisk", "obelisk_C prop spawns + getMainPlayer punch (no lane)" },
     // earthTp fires newsky_C.tp: the black hole, sky and ambience flip plus a 2D sound and
-    // emails -- no player teleport at all, and no lane carries those yet:
-    { "earthTp", "newsky_C.tp sky/blackhole flip + 2D cue + emails (no lane yet)" },
+    // emails -- the emails already ride the host's append feed, and no lane carries the rest:
+    { "earthTp", "newsky_C.tp sky/blackhole flip + 2D cue (emails ride the host append feed)" },
     { "vehtp", "atv lane" },
     // bedEvent runs trigger_bedEvent -> bedEvent_C, which moves the bed and teleports
     // getMainPlayer on wake; the sleep lane only gates client dreams, it does not carry this:

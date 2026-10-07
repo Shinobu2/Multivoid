@@ -7,6 +7,7 @@
 #include "coop/net/blob_chunks.h"
 #include "coop/net/session.h"
 
+#include "ue_wrap/core/cached_obj_ref.h"
 #include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
@@ -334,7 +335,7 @@ void PrimeQuadIfLaptop(FS::DeviceKind kind) {
 // A slot whose content was written but whose look could not be drawn yet (WriteSlot/ClearSlot said false) is redrawn
 // on later ticks until it can be: only the look, never the insert or the eject again. An equal canonical arriving later
 // does not cancel it, since the content is already right and only the look is behind. Bounded per slot.
-struct LookPending { void* device = nullptr; int32_t idx = -1; uint32_t tries = 0; };
+struct LookPending { ue_wrap::CachedObjRef device; uint32_t tries = 0; };
 std::map<uint32_t, LookPending> g_lookPending;   // ShadowKey -> device
 constexpr uint32_t kLookTries = 100;             // ten seconds at kLookRetryMs
 constexpr uint64_t kLookRetryMs = 100;
@@ -344,20 +345,27 @@ void NoteLook(FS::DeviceKind kind, size_t index, void* device, bool drawn) {
     const uint32_t key = ShadowKey(kind, index);
     if (drawn) { g_lookPending.erase(key); return; }
     LookPending& p = g_lookPending[key];
-    if (p.device != device) p = LookPending{device, R::InternalIndexOf(device), 0};
+    if (p.device.Raw() != device) { p.device.Set(device); p.tries = 0; }
 }
 
 void RetryLooks() {
+    // No current world means a travel is underway: every pending look holds without an engine
+    // call. A device of a known other world fails its Get below and the entry drops, never
+    // reaching RefreshLook.
+    if (ue_wrap::world_identity::CurrentWorldKind() ==
+        ue_wrap::world_identity::WorldKind::Unknown)
+        return;
     for (auto it = g_lookPending.begin(); it != g_lookPending.end();) {
         LookPending& p = it->second;
         const auto kind = static_cast<FS::DeviceKind>(it->first >> 16);
-        if (!p.device || !R::IsLiveByIndex(p.device, p.idx) || ++p.tries > kLookTries) {
+        void* device = p.device.Get();
+        if (!device || ++p.tries > kLookTries) {
             if (p.tries > kLookTries)
                 UE_LOGW("floppy_slot_sync: a slot's look could not be drawn in %u tries -- left as it is", kLookTries);
             it = g_lookPending.erase(it);
             continue;
         }
-        if (FS::RefreshLook(kind, p.device)) {
+        if (FS::RefreshLook(kind, device)) {
             UE_LOGI("floppy_slot_sync: a slot's look caught up after %u tries", p.tries);
             it = g_lookPending.erase(it);
             continue;
@@ -791,6 +799,7 @@ void OnDisconnect() {
     g_rate.clear();
     g_asm.Clear();
     g_nextSweep = 0;
+    g_nextLookTry = 0;
     g_session.store(nullptr, std::memory_order_release);
 }
 

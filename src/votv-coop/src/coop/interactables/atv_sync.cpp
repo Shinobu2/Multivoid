@@ -499,8 +499,14 @@ void OnAtvRelease(const coop::net::AtvReleasePayload& payload, uint8_t senderPee
 
 // A spawn that could not run yet (the wrapper unresolved, or the spawn itself failed) waits here and is retried, so a
 // transient miss does not leave the ATV missing until a rejoin: the pose stream only moves an ATV that exists. A
-// destroy cancels the wait; a spawn that lands, or the budget running out, ends it.
-struct PendingSpawn { coop::net::AtvSpawnPayload payload{}; uint32_t tries = 0; uint64_t nextMs = 0; };
+// destroy cancels the wait; a spawn that lands, the budget running out, or the world leaving the stamped generation
+// ends it.
+struct PendingSpawn {
+    coop::net::AtvSpawnPayload payload{};
+    uint32_t tries = 0;
+    uint64_t nextMs = 0;
+    uint32_t worldGen = 0;  // the ue_wrap::world_identity::Generation() the payload describes
+};
 std::unordered_map<std::wstring, PendingSpawn> g_pendingSpawn;
 constexpr uint32_t kSpawnTries = 20;
 constexpr uint64_t kSpawnRetryMs = 500;
@@ -518,6 +524,7 @@ void DeferSpawn(const std::wstring& key, const coop::net::AtvSpawnPayload& paylo
         it = g_pendingSpawn.emplace(key, PendingSpawn{payload, 0, 0}).first;
     }
     it->second.payload = payload;   // the newest description of this ATV wins
+    it->second.worldGen = ue_wrap::world_identity::Generation();
     PendingSpawn& p = it->second;
     if (++p.tries > kSpawnTries) {
         UE_LOGW("atv: runtime-ATV synthKey='%ls' still not spawned after %u tries (%s) -- given up", key.c_str(),
@@ -595,6 +602,11 @@ void OnAtvDestroy(const coop::net::AtvDestroyPayload& payload, uint8_t /*senderP
 
 void RetryPendingSpawns() {
     if (g_pendingSpawn.empty()) return;
+    // A row stamped for a world since left describes an ATV of that world: drop it; whatever
+    // still exists comes back through the new world's own announce and connect snapshot.
+    const uint32_t gen = ue_wrap::world_identity::Generation();
+    for (auto it = g_pendingSpawn.begin(); it != g_pendingSpawn.end();)
+        it = it->second.worldGen != gen ? g_pendingSpawn.erase(it) : std::next(it);
     const uint64_t now = SpawnNowMs();
     std::vector<coop::net::AtvSpawnPayload> due;
     for (auto& kv : g_pendingSpawn)
@@ -636,7 +648,6 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
 }
 
 void Tick() {
-    RetryPendingSpawns();
     // Every early return means this module is not deciding who owns what, and the collision guard
     // must then be inert: it suppresses damage by default, and armed against a stale set it would
     // make the local ATV invulnerable. Disarmed first; the path that earns it re-arms at the end.
@@ -657,6 +668,11 @@ void Tick() {
     auto* s = g_session.load(std::memory_order_acquire);
 
     if (!s || !s->connected()) return;
+    // Deferred spawns retry only in the world the index just proved: a connected client inside
+    // Gameplay. An Unknown or loading world neither spawns nor spends an attempt.
+    if (s->role() != coop::net::Role::Host &&
+        ue_wrap::world_identity::CurrentWorldKind() == ue_wrap::world_identity::WorldKind::Gameplay)
+        RetryPendingSpawns();
     void* localPlayer = coop::players::Registry::Get().Local();
     const uint8_t localSlot = coop::players::Registry::Get().LocalPeerId();
     const uint64_t nowMs = NowMs();
