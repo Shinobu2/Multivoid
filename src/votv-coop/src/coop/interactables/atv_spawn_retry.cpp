@@ -18,7 +18,8 @@ struct PendingSpawn {
     coop::net::AtvSpawnPayload payload{};
     uint32_t tries = 0;
     uint64_t nextMs = 0;
-    uint32_t worldGen = 0;  // the ue_wrap::world_identity::Generation() the payload describes
+    uint32_t worldGen = 0;
+    bool worldBound = false;  // bind only when the receiving world is ready
 };
 std::unordered_map<std::wstring, PendingSpawn> g_pendingSpawn;
 constexpr uint32_t kSpawnTries = 20;
@@ -30,23 +31,33 @@ uint64_t SpawnNowMs() {
         std::chrono::steady_clock::now().time_since_epoch()).count());
 }
 
-void DeferSpawn(const std::wstring& key, const coop::net::AtvSpawnPayload& payload, const char* why) {
+void DeferSpawn(const std::wstring& key, const coop::net::AtvSpawnPayload& payload, const char* why,
+                bool attempted) {
     auto it = g_pendingSpawn.find(key);
+    if (it != g_pendingSpawn.end() && it->second.worldBound &&
+        it->second.worldGen != ue_wrap::world_identity::Generation()) {
+        g_pendingSpawn.erase(it);
+        it = g_pendingSpawn.end();
+    }
     if (it == g_pendingSpawn.end()) {
         if (g_pendingSpawn.size() >= kSpawnPendingCap) return;
         it = g_pendingSpawn.emplace(key, PendingSpawn{payload, 0, 0}).first;
     }
     it->second.payload = payload;   // the newest description of this ATV wins
-    it->second.worldGen = ue_wrap::world_identity::Generation();
     PendingSpawn& p = it->second;
-    if (++p.tries > kSpawnTries) {
+    if (attempted && !p.worldBound) {
+        p.worldGen = ue_wrap::world_identity::Generation();
+        p.worldBound = true;
+    }
+    if (attempted && ++p.tries > kSpawnTries) {
         UE_LOGW("atv: runtime-ATV synthKey='%ls' still not spawned after %u tries (%s) -- given up", key.c_str(),
                 kSpawnTries, why);
         g_pendingSpawn.erase(it);
         return;
     }
     p.nextMs = SpawnNowMs() + kSpawnRetryMs;
-    if (p.tries == 1) UE_LOGW("atv: runtime-ATV synthKey='%ls' not spawned yet (%s) -- retrying", key.c_str(), why);
+    if (attempted && p.tries == 1)
+        UE_LOGW("atv: runtime-ATV synthKey='%ls' not spawned yet (%s) -- retrying", key.c_str(), why);
 }
 
 void RetryPendingSpawns() {
@@ -55,7 +66,7 @@ void RetryPendingSpawns() {
     // still exists comes back through the new world's own announce and connect snapshot.
     const uint32_t gen = ue_wrap::world_identity::Generation();
     for (auto it = g_pendingSpawn.begin(); it != g_pendingSpawn.end();)
-        it = it->second.worldGen != gen ? g_pendingSpawn.erase(it) : std::next(it);
+        it = it->second.worldBound && it->second.worldGen != gen ? g_pendingSpawn.erase(it) : std::next(it);
     const uint64_t now = SpawnNowMs();
     std::vector<coop::net::AtvSpawnPayload> due;
     for (auto& kv : g_pendingSpawn)

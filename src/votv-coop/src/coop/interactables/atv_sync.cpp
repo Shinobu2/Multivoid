@@ -26,6 +26,7 @@
 #include "coop/net/wire_key_util.h"  // WireKeyFromString / StringFromWireKey / FnvKey (shared)
 #include "coop/player/players_registry.h"   // Registry::Local / LocalPeerId / kMaxPeers
 #include "coop/player/roster_ledger.h"      // SubscribeSlotReplaced: a departed author must not hold an ATV
+#include "coop/session/world_load_episode.h"
 
 #include "ue_wrap/devices/atv.h"
 #include "ue_wrap/engine/engine.h"          // ReadMainPlayerGrabState (grabber authority) + Get/SetActorRootPhysicsVelocity
@@ -500,7 +501,7 @@ void OnAtvRelease(const coop::net::AtvReleasePayload& payload, uint8_t senderPee
 
 void OnAtvSpawn(const coop::net::AtvSpawnPayload& payload, uint8_t /*senderPeerSlot*/) {
     auto* s = g_session.load(std::memory_order_acquire);
-    if (!s || s->role() == coop::net::Role::Host) return;  // client-only (the host owns the real ATV)
+    if (!s || !s->connected() || s->role() != coop::net::Role::Client) return;
     std::wstring synthKey = StringFromWireKey(payload.synthKey);
     if (synthKey.empty()) { UE_LOGW("atv: OnAtvSpawn empty synthKey -- dropping"); return; }
     // The payload is checked before any wait: a malformed spawn is dropped, only a sound one is deferred.
@@ -514,6 +515,11 @@ void OnAtvSpawn(const coop::net::AtvSpawnPayload& payload, uint8_t /*senderPeerS
     if (className.empty()) {
         UE_LOGW("atv: OnAtvSpawn empty className synthKey='%ls' -- dropping", synthKey.c_str());
         spawn_retry::DiscardSpawn(synthKey);
+        return;
+    }
+    if (ue_wrap::world_identity::CurrentWorldKind() != ue_wrap::world_identity::WorldKind::Gameplay ||
+        !IndexCurrent() || !coop::world_load_episode::HasQuiesced()) {
+        spawn_retry::DeferSpawn(synthKey, payload, "receiving world not ready", false);
         return;
     }
     if (!A::EnsureResolved()) { spawn_retry::DeferSpawn(synthKey, payload, "the ATV wrapper is not resolved"); return; }
