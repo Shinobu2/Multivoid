@@ -1,27 +1,9 @@
-// coop/world/spawn_authority.cpp -- see the header. The rows rest on these bytecode facts: the
-// mushroom master arms one looping spawn timer at begin-play, and its spawn mints spawner children
-// with a lifespan, so refused children are reaped by the engine independently of the refused event;
-// the mushroom spawner's own looping timer materialises the food cap and self-destroys, and with
-// spawn refused the lifespan reaps it; the yellow-wisp ticker spawns at a navmesh random-walk point,
-// not around the player, and its product is host-mirrored, so the client must not run its own
-// spawner; the sky-wisp ticker spawns the sky wisps at absolute map coordinates, so the host rolls
-// and clients mirror through the source-gated catch and the variant allowlist; the night-egg
-// ticker rolls the same world-anchored shape (a weighted night roll mints one eg_C at fixed map
-// coordinates and writes gamemode->eg), so the host rolls and a client's own tick is refused;
-// the roach master's
-// summon and its three looping timer entries fire independently of its tick. The tick rows: the
-// insomniac and fossilhound tickers roll inside their tick with no delay chains or reap duties, so
-// refusing the tick stops the roll and the product, and the products are host-mirrored; the roach
-// master's tick drives roach movement, the food-eat mutation and crush traces, which a client running
-// it would diverge, so it and its summoner are refused while the roach sync drives the client
-// population. The jellyfish path's spawn makes seven fish inside its graph, and the host's are
-// mirrored through the source-gated catch, so a client's own, its 18:00 roll's, is refused. The
-// event creatures (the vent crawler, the gray pack, the eggs and the tentacle balls) are the same
-// shape pushed one level down: on a client they exist only as host mirrors, so their AI, timers,
-// overlaps and despawn verbs are refused while the AnimBP and the pose stream stay; and the
-// bodies that mint them inside the gray controller, the balls follower, the super egger and the
-// eventer's own verbs are refused on the client, because their BeginDeferred calls are
-// bytecode-internal and no spawn interceptor ever sees them.
+// coop/world/spawn_authority.cpp -- see the header and the bytecode evidence beside each row.
+// World-anchored rolls and mirrored creatures' gameplay run on the host. Mushroom children's
+// engine lifespans still reap them when their spawn timer is refused. Roach timers need their
+// own rows because they fire independently of tick. Event-spawner bodies need gate watches:
+// their bytecode-internal BeginDeferred calls never reach the spawn interceptor. Client mirrors
+// retain animation and pose updates while their AI, contact and despawn bodies are refused.
 
 #include "coop/world/spawn_authority.h"
 

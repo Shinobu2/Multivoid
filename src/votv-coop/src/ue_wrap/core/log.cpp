@@ -69,9 +69,9 @@ std::atomic<Sink> g_sink{nullptr};
 // directory, the install's one real home; the DLL's own directory is loader-dependent and
 // virtualised under the shim loader.
 
-// A write stream on a file other processes may read, rename and delete while it is open.
+// Readers may tail the live log; other processes must not rename or truncate it.
 FILE* OpenShared(const wchar_t* path) {
-    HANDLE h = ::CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS,
+    HANDLE h = ::CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
                              FILE_ATTRIBUTE_NORMAL, nullptr);
     if (h == INVALID_HANDLE_VALUE) return nullptr;
     const int fd = _open_osfhandle(reinterpret_cast<intptr_t>(h), _O_WRONLY | _O_TEXT);
@@ -103,11 +103,7 @@ void EnsureOpen() {
     if (!g_opened) {
         wchar_t path[MAX_PATH] = {};
         LogPath(path);
-        wcscpy_s(g_livePath, path);
-        // Preserve the previous session's log before the open below truncates it: players hit a
-        // problem, then often relaunch before sending the log, and one level of history means the
-        // bug session survives that relaunch. The prior process has exited (each launch is a fresh
-        // process), so the rename is safe.
+        // Preserve a closed run's log. A live writer denies rename and forces the PID fallback.
         {
             wchar_t prev[MAX_PATH] = {};
             wcscpy_s(prev, path);
@@ -118,16 +114,13 @@ void EnsureOpen() {
             } else {
                 wcscat_s(prev, L".prev");
             }
-            wcscpy_s(g_prevPath, prev);
-            ::MoveFileExW(path, prev, MOVEFILE_REPLACE_EXISTING);  // best-effort; ignore failure
+            if (::MoveFileExW(path, prev, MOVEFILE_REPLACE_EXISTING)) wcscpy_s(g_prevPath, prev);
+            g_file = OpenShared(path);
+            if (g_file) wcscpy_s(g_livePath, path);
         }
-        // Open with read and delete sharing: the log can be tailed live while the game runs, and the
-        // next launch can move it to .prev.log even while this process is still closing. With write
-        // denied to everyone, a launch that overlapped the previous process could neither rename the
-        // old file nor create a new one, and logged nothing. If the file is still held by a build that
-        // shares less, this session logs to multivoid.<PID>.log instead.
-        g_file = OpenShared(path);
+        // This also covers an overlapping older build that does not share delete access.
         if (!g_file) {
+            g_prevPath[0] = L'\0';
             wchar_t alt[MAX_PATH];
             wcscpy_s(alt, path);
             const size_t alen = wcslen(alt);
@@ -138,7 +131,6 @@ void EnsureOpen() {
             g_file = OpenShared(alt);
             if (g_file) {
                 wcscpy_s(g_livePath, alt);
-                g_prevPath[0] = L'\0';
             }
         }
         if (g_file) {

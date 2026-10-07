@@ -110,7 +110,9 @@ checks the expected event argument and grants one invocation; completion belongs
 invocation's frame. A settled-dead watch is terminal. `[?]` Nested calls, fault handling and
 late join still need runtime testing. The developer menu's
 event trigger dispatches through the same host path, so a forced event broadcasts like a
-scheduled one.
+scheduled one. It refuses running clients, including a join in progress. A queued trigger is
+bound to the submitting session's start serial and world generation, so restarting the same
+session object cannot carry an old request into the next run.
 
 The game keeps a registry of in-flight events: a reference count and the live event actors,
 maintained by the actors themselves. The host sees each event begin and end at `lib_C::setEvent`

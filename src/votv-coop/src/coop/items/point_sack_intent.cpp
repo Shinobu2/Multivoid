@@ -66,7 +66,7 @@ bool IsSack(void* actor) {
 // game's, run the game's body.
 sg::Verdict OnActionPre(const sg::Call& c) {
     auto* s = g_session.load(std::memory_order_acquire);
-    if (!s || !s->connected() || s->role() != coop::net::Role::Client) return sg::Verdict::Run;
+    if (!s || !s->running() || s->role() != coop::net::Role::Client) return sg::Verdict::Run;
     if (!IsSack(c.object)) return sg::Verdict::Run;
     const std::wstring key = ue_wrap::prop::GetInteractableKeyString(c.object);
     const EL::ElementId eid = coop::prop_element_tracker::GetPropElementIdForActor(c.object);
@@ -78,7 +78,11 @@ sg::Verdict OnActionPre(const sg::Call& c) {
                 "left alone (the host's sack stays)", c.object);
         return sg::Verdict::Cancel;
     }
-    if (s->SendReliableToSlot(0, coop::net::ReliableKind::PointSackRedeem, &p, sizeof(p))) ++g_sent;
+    if (!s->SendReliableToSlot(0, coop::net::ReliableKind::PointSackRedeem, &p, sizeof(p))) {
+        UE_LOGW("point_sack: redeem request not sent -- sack left intact for retry");
+        return sg::Verdict::Cancel;
+    }
+    ++g_sent;
     UE_LOGI("point_sack: this client's sack key='%ls' eid=%u sent to the host (%llu sent) -- the host pays it",
             key.c_str(), p.elementId, static_cast<unsigned long long>(g_sent));
     return sg::Verdict::Cancel;

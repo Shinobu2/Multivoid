@@ -36,22 +36,11 @@ enum class FireKind : uint8_t {
     SpecialEvent = 1,  // trigger_eventer.runSpecialEvent(name)
 };
 
-// Cache the session; register the host's watches on runEvent and runSpecialEvent (once per
-// process); drain a queued replay on this tick; and, once the daynightCycle_C class has loaded,
-// register the client's hold on the cycle's own tick (once per process): right before each tick,
-// allEvents.Num is held at 0. The cycle's settime walks that list on every clock change the
-// host's samples make, so without the hold due rows would fire natively on the client -- and the
-// first sample after a world load, which the clock lane writes at the same tick, could make many
-// due at once. Restored on disconnect; the local world resumes scheduling. Called every pump
-// tick by the install fanout. Game thread.
-//
-// One class of fire the watches deliberately leave alone: a trigger-volume fire (bedEvent, a
-// scare armed by TBoxActivator) executes per-peer natively when THAT peer overlaps, which is
-// per-viewer by the game's own design. Everything else the verbs run on the host emits once: a
-// dev fire reaches the verb through our own ProcessEvent with no Blueprint caller, the game's
-// own event and cheat menus call it with theirs, and the prank roll's runSpecialEvent is entered
-// from summonArirPrank. A dev-fired row the scheduler later re-fires emits again, and the
-// client's replayed-set dedupes its side.
+// Game-thread pump: cache the session, register both host watches, drain pending replays and
+// hold the client's allEvents.Num at zero before the cycle tick. This prevents settime from
+// firing local scheduled events on a received clock sample. Disconnect restores the list.
+// Trigger-volume scares remain per viewer; host menu, scheduler and prank fires emit through
+// the same watches. A repeated scheduled row still meets the client's replayed-set dedupe.
 void Install(coop::net::Session* session);
 
 // The ONE native-fire primitive. Posts the reflected runEvent/runSpecialEvent to the game thread
@@ -60,7 +49,7 @@ void Install(coop::net::Session* session);
 // through the same seam. specialName crosses ONLY into the local native call (RandomPrank =
 // L"ariralPrank"); the wire carries the name each verb took -- for a prank roll, the CHOSEN case
 // emitted at its own runSpecialEvent. Callable from any thread (the menu's render thread
-// included). Returns false only when refused (connected as a client -- host is authoritative).
+// included). Returns false when refused as a running client, including while joining.
 bool HostFire(FireKind kind, const std::wstring& eventName, const std::wstring& specialName);
 
 // spawn_authority's eventer rows pass the gate's own Call: true only for the one invocation

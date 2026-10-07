@@ -193,8 +193,6 @@ void Coast(void* actor, const char* reason) {
     Open(actor, /*claimed=*/false, reason ? reason : "");
 }
 
-size_t Count() { return g_driven.size(); }
-
 size_t CoastingCount() {
     size_t n = 0;
     for (const Driven& d : g_driven)

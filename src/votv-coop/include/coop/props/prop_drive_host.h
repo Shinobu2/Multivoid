@@ -27,9 +27,7 @@ namespace coop::prop_drive_host {
 // class the wire never expresses. `reason` names the verb for the log. Game thread.
 void Claim(void* actor, const char* reason);
 
-// How many props are under the drive now, claimed and coasting, and how many of them coast with no
-// verb's claim. Game thread.
-size_t Count();
+// How many props coast with no verb's claim. Game thread.
 size_t CoastingCount();
 
 // The verb let go of `actor`: the prop coasts under the stream until it rests, then the end edge

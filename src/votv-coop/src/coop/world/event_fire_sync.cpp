@@ -17,6 +17,7 @@
 
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
+#include "coop/net/session_serial.h"
 #include "coop/world/time_sync.h"
 
 #include "ue_wrap/core/call.h"
@@ -576,31 +577,33 @@ void Install(coop::net::Session* session) {
 
 bool HostFire(FireKind kind, const std::wstring& eventName, const std::wstring& specialName) {
     auto* s = g_session.load(std::memory_order_acquire);
-    if (s && s->connected() && s->role() != coop::net::Role::Host) {
-        UE_LOGW("event_fire: HostFire refused -- connected as a client (host is authoritative)");
+    if (s && s->running() && s->role() != coop::net::Role::Host) {
+        UE_LOGW("event_fire: HostFire refused -- running as a client (host is authoritative)");
         return false;
     }
-    // Stamped at submit for the task to re-check: the world generation, the session pointer and
-    // whether a connected host session asked for this fire -- any of them can be gone or
-    // replaced before the task runs.
+    // Session objects can be reused without a world change. Stamp the start as well as the pointer.
     const uint32_t gen = ue_wrap::world_identity::Generation();
+    const uint32_t serial = coop::net::session_serial::Current();
+    const bool wasRunning = s && s->running();
     const bool wasConnectedHost = s && s->connected() && s->role() == coop::net::Role::Host;
     const std::wstring ev = eventName;
     const std::wstring sp = specialName.empty() ? L"None" : specialName;
-    GT::Post([kind, ev, sp, s, gen, wasConnectedHost] {
+    GT::Post([kind, ev, sp, s, gen, serial, wasRunning, wasConnectedHost] {
         auto* cur = g_session.load(std::memory_order_acquire);
-        if (cur && cur->connected() && cur->role() != coop::net::Role::Host) {
+        if (cur && cur->running() && cur->role() != coop::net::Role::Host) {
             UE_LOGW("event_fire: HostFire('%ls') dropped -- the session is a running CLIENT now",
                     ev.c_str());
             return;
         }
-        if (cur != s || ue_wrap::world_identity::Generation() != gen) {
+        if (cur != s || ue_wrap::world_identity::Generation() != gen ||
+            coop::net::session_serial::Current() != serial) {
             UE_LOGW("event_fire: HostFire('%ls') dropped -- the world or the session changed "
                     "between submit and dispatch", ev.c_str());
             return;
         }
-        // A fire a connected host session asked for dies with it rather than rerun as solo.
-        if (wasConnectedHost && !(cur && cur->connected())) {
+        // A fire submitted by a starting or connected host dies with that session.
+        if ((wasRunning && !(cur && cur->running())) ||
+            (wasConnectedHost && !(cur && cur->connected()))) {
             UE_LOGW("event_fire: HostFire('%ls') dropped -- the submitting host session ended "
                     "before dispatch", ev.c_str());
             return;

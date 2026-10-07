@@ -52,7 +52,8 @@ ejected reached every client blank.
 Point-sack redemption is a client intent: the host authorizes reach, reserves the live UObject
 incarnation across callbacks, destroys it, and pays only after that incarnation is no longer
 live (`coop/items/point_sack_intent`). A successful dispatch with the sack still live pays
-nothing. `[?]` Concurrent redemption needs a two-peer test; a consumed sack whose payment fails
+nothing. A joining client's action is also intercepted: a refused send leaves the sack intact
+for another press after joining. `[?]` Concurrent redemption needs a two-peer test; a consumed sack whose payment fails
 has no automatic recovery.
 
 ### How a birth finds its local actor

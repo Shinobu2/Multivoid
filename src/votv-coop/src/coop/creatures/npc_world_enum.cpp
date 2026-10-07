@@ -119,23 +119,10 @@ coop::element::ElementId EnrollUntrackedNpcActor(void* obj, const std::wstring& 
     return eid;
 }
 
-// The EX_CallMath spawn catch. The source spawner classes whose deferred-spawn output is
-// host-authoritative and mirrored: the wisps event swarm (up to 32 wisps); the piramid event
-// chain (four killer wisps on the NPC lane and one pyramid on the world-actor lane, a spawn
-// the interceptor never sees); the ambient sky-wisp ticker and its colour variants (it
-// anchors at absolute map coordinates, not around a player, so the host rolls them and the
-// client's ticker is cancelled in the spawn authority); the night-egg ticker, the same
-// world-anchored shape (its tick's weighted roll mints one eg_C at fixed map coordinates and
-// writes gamemode->eg, and the client's own tick is refused in the spawn authority); and the
-// sell gun's coin mint, whose deferred spawn inside the sell verb is bytecode-internal on the
-// host's own sale and on the re-commit of a client's sale alike, so the world-actor lane's
-// interceptor never sees it and without this row the coin allowlist entry is inert; and the
-// jellyfish path, whose spawn makes its seven fish inside its own graph. The four story-event
-// spawners below close the same gap for the event creatures: every one of their BeginDeferred
-// sites is bytecode-internal (a CallFunc inside the ubergraph, never ProcessEvent-dispatched),
-// so without the row the creature mirrors never exist. Their outputs still pass the allowlist
-// gates in the queue branch below (NPC main-or-late, else world-actor), so no arbitrary EX
-// spawn enrolls.
+// Source allowlist for bytecode-internal EX_CallMath spawns that bypass the interceptor.
+// These world-anchored spawners, event creatures and sell-gun coins belong to the host.
+// The queue still checks each output against the NPC or world-actor class allowlist;
+// an allowed source alone cannot enroll an arbitrary actor.
 constexpr const wchar_t* kExSpawnSourceClasses[] = {
     L"trigger_wispSwarm_C",        // the wisps event swarm
     L"piramidSpawner_C",           // the piramid event chain

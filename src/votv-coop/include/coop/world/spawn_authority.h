@@ -7,19 +7,10 @@
 // it is not shared: a spawner whose product has no mirror yet runs on every peer, each rolling its
 // own. The deer, bp7 and hexahive spawners, measured rolling on a connected client, are such.
 
-// ONE table: each row is a body a client must not run, a spawner's entry function or its tick --
-// and, for the story-event creatures, the AI, timer and contact bodies of an actor that on a
-// client exists only as a host mirror, plus the mint bodies of the event spawners whose output
-// mints bytecode-internally where no spawn interceptor can see it -- refused at the script gate
-// by a watch keyed on the row's class and function names. So a row holds
-// for every instance, a late one included, on every dispatch route of the game thread (the gate fires
-// there, and every spawner body runs there), and for a class the game re-creates with each world; the
-// refusal is gated on an active client session, so the host and solo play run every body and a
-// session's end has nothing to restore. A joining client's session starts in the menu world, so that
-// world's spawners (a cockroach master among them) are refused too while the save downloads, behind
-// the loading curtain, in a world the load then discards. Which classes are refused, and which are
-// left running because their anchor is the LOCAL player, is the table in docs/npcs-and-kerfur.md,
-// "Which spawners a client refuses".
+// One class/function table covers shared spawners and host-mirrored creatures' gameplay bodies.
+// Script-gate watches cover late instances and bytecode-internal calls. They refuse only during
+// an active client session, including its joining menu world; host and solo bodies keep running.
+// Per-player spawners remain local. See docs/npcs-and-kerfur.md, "Which spawners a client refuses".
 
 namespace coop::net {
 class Session;

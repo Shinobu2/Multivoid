@@ -58,8 +58,10 @@ to a target, never through synthesised input.
 
 ### Logs and assertions
 
-Every copy writes a levelled, timestamped `multivoid.log` beside the mod, and a scenario's verdict
-is a line in it. One log assertion checks the pile carry-and-throw loop against thirteen
+Every process writes a levelled, timestamped log beside the game executable, and a scenario's
+verdict is a line in it. A closed `multivoid.log` rotates to `multivoid.prev.log`; an overlapping
+process uses `multivoid.<PID>.log`, keeping the first process's live path intact. The reporter
+reads the actual chosen paths. One log assertion checks the pile carry-and-throw loop against thirteen
 invariants across both peers' logs and prints a verdict table; a capture step
 grabs a game window from outside the process for the screenshot scenarios.
 

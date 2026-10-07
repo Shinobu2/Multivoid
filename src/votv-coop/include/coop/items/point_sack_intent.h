@@ -4,10 +4,11 @@
 // lib_C::addPoints(points), a hint naming the sum, and K2_DestroyActor on itself. On a client that
 // credit lands only in the client's mirror of the shared balance, and the host's next balance row
 // takes it away again, while the sack's destroy reaches the host and the points are lost for both.
-// A connected client's action on a sack is refused at the script-body gate and sent to the host as
+// A running client's action on a sack is refused at the script-body gate and sent to the host as
 // a PointSackRedeem naming the sack; the host checks the sender's reach, destroys its copy,
 // and pays its own `points` only when that incarnation is no longer live. The sack is the
-// consumption record: a repeated or late request finds no sack and pays nothing.
+// consumption record: a repeated or late request finds no sack and pays nothing. A failed send
+// during joining leaves the sack intact for retry.
 
 #pragma once
 
