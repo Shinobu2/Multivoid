@@ -345,7 +345,7 @@ void NoteLook(FS::DeviceKind kind, size_t index, void* device, bool drawn) {
     const uint32_t key = ShadowKey(kind, index);
     if (drawn) { g_lookPending.erase(key); return; }
     LookPending& p = g_lookPending[key];
-    if (p.device.Raw() != device) { p.device.Set(device); p.tries = 0; }
+    if (!p.device.Is(device)) { p.device.Set(device); p.tries = 0; }
 }
 
 void RetryLooks() {

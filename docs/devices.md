@@ -367,6 +367,8 @@ concept with one owner, and they are state, not an event: the host holds every d
 peer polls its own devices once a second behind a digest that reads the raw field bytes, and a peer
 whose own game changed a slot sends the host the outcome as a claim. The host applies it and answers
 with the canonical, which is also the acknowledgement (`coop/interactables/floppy_slot_sync`).
+Visual retries identify the device by UObject slot serial as well as address; a replacement at
+the same address gets a fresh retry budget. `[?]` Visual convergence needs an in-game check.
 
 The laptop also edits the files of the disc it holds, which its file quad carries as edit scripts
 (`coop/interactables/laptop_buffer_sync`). So the laptop's slot is watched for which disc it holds
