@@ -135,7 +135,12 @@ own `upd` runs on the host, a client puts back any other row its copy of a drive
 the host's row for it, and a drive a client brings into the world (a birth, a re-placement from its
 inventory, a container or its hand, one it holds that the host never saw) sends its row to the host,
 which takes that one row from that client and answers any other client row with its own
-(`coop/interactables/drive_payload_sync`);
+(`coop/interactables/drive_payload_sync`). A failed client write keeps no permission to overwrite
+a later host row: every retry checks the class default again. Only the same author's unchanged,
+read-back residue permits a retry over a partial write. That residue is withheld from broadcasts
+and join seeds; bounded restoration keeps the first preimage. An unread residue stays withheld
+until its drive or session ends, since this lane has no writer revision. `[?]` Partial engine
+writes and rollback faults still need a two-peer runtime check;
 the eraser's delete, pressed on a client, runs on the host, and every press and wipe of the host's
 eraser shows on each client's own eraser (`coop/interactables/eraser_press_intent`); the
 rack is presser index-operations the host terminates, a full canonical array back, and a deny

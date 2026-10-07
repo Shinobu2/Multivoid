@@ -2,6 +2,8 @@
 
 #include "coop/interactables/drive_payload_sync.h"
 
+#include "drive_payload_retry.h"  // co-located private header: the retry rules, engine-free
+
 #include "coop/element/registry.h"
 #include "coop/interactables/desk_snd_fx.h"      // ScopedWireApply (the shared desk wire guard)
 #include "coop/interactables/drive_rack_sync.h"  // TryConsumeDenyReap: a denied rack take's ghost
@@ -24,6 +26,7 @@
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -34,8 +37,11 @@ namespace R  = ue_wrap::reflection;
 namespace DC = ue_wrap::drive_chain;
 namespace SD = ue_wrap::signal_dynamic;
 namespace sg = ue_wrap::script_gate;
+namespace RT = coop::drive_payload_retry;
 using Clock = std::chrono::steady_clock;
 using coop::element::LivePropActor;
+using RT::Gate;
+using RT::Leftover;
 
 constexpr int  kTagUpd = 0x44525550;  // 'DRUP'
 constexpr auto kPendingTtl = std::chrono::seconds(10);
@@ -62,9 +68,17 @@ struct Parked { std::vector<uint8_t> blob; uint8_t senderSlot = 0xFF; Clock::tim
 std::map<uint32_t, Parked> g_parked;
 
 // A row whose write into the live drive failed (the struct write can stop part way) is retried a bounded number of
-// times through the park, with the author's permission kept; the count is per eid and cleared on success.
+// times through the park, with the author's permission kept; the count is per eid and cleared on success. The count
+// permits nothing: a retry is held to the same rule as a first write, bar a leftover of its own (below).
 constexpr uint32_t kWriteRetries = 30;
 std::map<uint32_t, uint32_t> g_writeFails;
+
+// HOST: a drive a failed write left part-written, its rollback not landing either (drive_payload_retry.h). No writer
+// chose that row, so no client is sent it; only that author's write may land over it, and only while the drive still
+// reads exactly that. Any other row found in its place is a writer's, the host's row from then on. With no retry of the
+// write waiting it is put back to the previous row, a bounded number of times. Ends with its drive.
+struct LeftoverRec { ue_wrap::CachedObjRef ref; Leftover lo; };
+std::map<uint32_t, LeftoverRec> g_leftover;
 
 struct Noted { ue_wrap::CachedObjRef ref; Clock::time_point until; };
 std::vector<Noted> g_noted;  // CLIENT: drives this player brought into the world, until their eid binds
@@ -162,6 +176,47 @@ void SweepKept(Map& m) {
     for (auto it = m.begin(); it != m.end();) it = it->second.ref.Alive() ? std::next(it) : m.erase(it);
 }
 
+// HOST: the leftover of this very drive, or null; one kept for a drive since gone or replaced under the eid is dropped.
+Leftover* FindLeftover(uint32_t eid, void* actor) {
+    auto it = g_leftover.find(eid);
+    if (it == g_leftover.end()) return nullptr;
+    if (!it->second.ref.Is(actor)) {
+        g_leftover.erase(it);
+        return nullptr;
+    }
+    return &it->second.lo;
+}
+
+// Only for a leftover whose residue was read: an unread one is never Changed.
+void SayChanged(uint32_t eid, const Leftover& lo, const SD::Row& now) {
+    UE_LOGW("drive_payload_sync: eid=%u -- a writer changed the drive a failed write left part-written (it reads '%ls', "
+            "size %.0f; the write left '%ls', %.0f; before it '%ls', %.0f): the host's row now, slot %u's write will "
+            "not land over it", eid, now.name.c_str(), now.size, lo.left ? lo.left->name.c_str() : L"<unread>",
+            lo.left ? lo.left->size : -1.f, lo.pre.name.c_str(), lo.pre.size, lo.slot);
+}
+
+// Kept, with the evidence said: `left` names what the drive read, or that the read failed.
+void KeepLeftover(uint32_t eid, void* actor, Leftover lo, const char* what) {
+    UE_LOGW("drive_payload_sync: eid=%u -- %s: the drive reads %ls'%ls' (size %.0f), not its previous row '%ls' "
+            "(slot %u's write); withheld from every client%s", eid, what, lo.left ? L"" : L"<unread> ",
+            lo.left ? lo.left->name.c_str() : L"", lo.left ? lo.left->size : -1.f, lo.pre.name.c_str(), lo.slot,
+            lo.left ? "" : ", never rewritten or put back by this lane (an unread residue is no row to compare)");
+    LeftoverRec& r = g_leftover[eid];
+    r.ref.Set(actor);
+    r.lo = std::move(lo);
+}
+
+// HOST: true while the drive still reads what a failed write left, no writer's row and none to send. A row found in
+// its place is a writer's, and the leftover ends there.
+bool Withheld(uint32_t eid, void* actor, const SD::Row& now) {
+    Leftover* lo = FindLeftover(eid, actor);
+    if (!lo) return false;
+    if (RT::Withholds(*lo, now)) return true;
+    SayChanged(eid, *lo, now);
+    g_leftover.erase(eid);
+    return false;
+}
+
 std::vector<uint8_t> Blob(uint32_t eid, const std::vector<uint8_t>& bytes) {
     std::vector<uint8_t> out(4 + bytes.size());
     std::memcpy(out.data(), &eid, 4);
@@ -188,7 +243,7 @@ bool SendBytes(coop::net::Session* s, uint32_t eid, const std::vector<uint8_t>& 
 // HOST: send a drive's row to every ready client, bar `exceptSlot`, when it differs from what they hold.
 void HostSendIfChanged(coop::net::Session* s, uint32_t eid, void* actor, int exceptSlot = -1) {
     SD::Row row;
-    if (!DC::ReadDriveRow(actor, row)) return;
+    if (!DC::ReadDriveRow(actor, row) || Withheld(eid, actor, row)) return;
     const std::vector<uint8_t> bytes = Bytes(row);
     const uint64_t h = coop::blob_chunks::Fnv64(bytes);
     if (Kept* k = Find(g_lastSent, eid, actor); k && k->hash == h) return;
@@ -299,30 +354,45 @@ Take HostTakeClientRow(coop::net::Session* s, uint32_t eid, void* actor, const S
     auto author = g_brought.find(eid);
     SD::Row mine;
     if (!DC::ReadDriveRow(actor, mine)) return Take::WriteFailed;
-    if (author == g_brought.end() || author->second.slot != senderSlot || author->second.ref.Get() != actor)
+    // A retry is held to the class default like a first write; only its own failed write's leftover, still unchanged,
+    // stands in for it. A failure count is no permission: the host may have written the drive since.
+    Leftover* lo = FindLeftover(eid, actor);
+    const Gate gate = RT::GateFor(lo, mine, !lo && IsClassDefault(actor, Hash(mine)), senderSlot);
+    if (gate == Gate::Changed) {
+        SayChanged(eid, *lo, mine);
+        g_leftover.erase(eid);
+        lo = nullptr;
+    }
+    if (author == g_brought.end() || author->second.slot != senderSlot || !author->second.ref.Is(actor))
         why = "not a drive that client brought";
-    // A retry of this drive's own failed write may find the drive part-written by that write; only a
-    // first attempt asks for the class default.
-    else if (g_writeFails.find(eid) == g_writeFails.end() && !IsClassDefault(actor, Hash(mine)))
-        why = "the host already holds a row for it";
+    else if (gate == Gate::Changed) why = "a writer changed it after that client's failed write";
+    else if (gate == Gate::Held) why = lo ? "a failed write left it, not that client's or unread" : "the host already holds a row for it";
     else if (!RowSane(row)) why = "a row with a non-finite or negative amount";
     if (why) {
-        SendBytes(s, eid, Bytes(mine), senderSlot);
+        if (!lo) SendBytes(s, eid, Bytes(mine), senderSlot);  // a leftover is no row to answer with
         ++g_counts.refused;
         SayRefusal(senderSlot, eid, why);
         return Take::Refused;
     }
     // The author's permission is spent only by a write that landed: a failed write (the struct write can stop part
-    // way) puts the host's previous row back, keeps the permission, and the row is retried.
+    // way) puts the host's previous row back, keeps the permission, and the row is retried. The previous row is the one
+    // from before the first failed attempt; a rollback that does not land leaves a leftover. One a retry finds is taken
+    // out before the writes, so nothing nested in them inherits it.
+    std::optional<Leftover> prior;
+    if (lo) {
+        prior = std::move(*lo);
+        g_leftover.erase(eid);
+    }
     {
         ApplyScope scope;
         coop::desk_snd_fx::ScopedWireApply guard;
         SD::Row landed;
         if (!DC::WriteDriveRow(actor, row) || !DC::ReadDriveRow(actor, landed) || Hash(landed) != Hash(row)) {
             SD::Row back;
-            if (!DC::WriteDriveRow(actor, mine) || !DC::ReadDriveRow(actor, back) || Hash(back) != Hash(mine))
-                UE_LOGW("drive_payload_sync: eid=%u -- the failed write's rollback did not land either; the retry "
-                        "rewrites it", eid);
+            DC::WriteDriveRow(actor, prior ? prior->pre : mine);
+            const bool read = DC::ReadDriveRow(actor, back);
+            if (auto left = RT::AfterFailedWrite(prior ? &*prior : nullptr, mine, read ? &back : nullptr, senderSlot))
+                KeepLeftover(eid, actor, std::move(*left), "the failed write's rollback did not land either");
             return Take::WriteFailed;
         }
         DC::CallDriveUpd(actor);
@@ -346,8 +416,13 @@ void RetryWrite(uint32_t eid, const std::vector<uint8_t>& blob, uint8_t senderSl
         return;
     }
     g_writeFails.erase(eid);
-    UE_LOGW("drive_payload_sync: the row for eid=%u did not land after %u tries -- given up, the previous row stands",
-            eid, kWriteRetries);
+    if (g_leftover.find(eid) != g_leftover.end())
+        UE_LOGW("drive_payload_sync: the row for eid=%u did not land after %u tries -- given up; the drive holds what "
+                "the failed write left, withheld from every client while its previous row is put back", eid,
+                kWriteRetries);
+    else
+        UE_LOGW("drive_payload_sync: the row for eid=%u did not land after %u tries -- given up, the previous row "
+                "stands", eid, kWriteRetries);
 }
 
 void ApplyBlob(const std::vector<uint8_t>& blob, uint8_t senderSlot, bool fromParked) {
@@ -429,6 +504,57 @@ void RetryParked() {
     }
 }
 
+// HOST: a leftover with no retry of its write waiting (given up, its author gone, or its parked row replaced) is put
+// back to the drive's previous row once a second, a bounded number of times, while the drive still reads exactly that.
+// Past the bound, or with its residue unread, it stays withheld, said once and counted in the minute's stats, until a
+// writer replaces it (a read residue only), its author's write lands, or its drive or the session ends.
+void RestoreLeftovers(coop::net::Session* s) {
+    std::vector<uint32_t> due;
+    for (auto it = g_leftover.begin(); it != g_leftover.end();) {
+        if (!it->second.ref.Is(it->second.ref.Raw())) {
+            it = g_leftover.erase(it);
+            continue;
+        }
+        if (RT::MayRestore(it->second.lo, kWriteRetries) && g_parked.find(it->first) == g_parked.end())
+            due.push_back(it->first);
+        ++it;
+    }
+    for (const uint32_t eid : due) {
+        void* actor = LivePropActor(eid);
+        SD::Row now;
+        if (!actor || !FindLeftover(eid, actor) || !DC::ReadDriveRow(actor, now)) continue;
+        if (!Withheld(eid, actor, now)) {
+            HostSendIfChanged(s, eid, actor);
+            continue;
+        }
+        const Leftover held = std::move(g_leftover[eid].lo);
+        g_leftover.erase(eid);
+        SD::Row back;
+        bool read = false;
+        {
+            ApplyScope scope;
+            coop::desk_snd_fx::ScopedWireApply guard;
+            DC::WriteDriveRow(actor, held.pre);
+            read = DC::ReadDriveRow(actor, back);
+            if (read && back == held.pre) DC::CallDriveUpd(actor);
+        }
+        auto left = RT::AfterFailedWrite(&held, held.pre, read ? &back : nullptr, held.slot);
+        if (!left) {
+            UE_LOGI("drive_payload_sync: eid=%u -- the drive a failed write left part-written is back to its previous "
+                    "row ('%ls', size %.0f)", eid, held.pre.name.c_str(), held.pre.size);
+            HostSendIfChanged(s, eid, actor);
+            continue;
+        }
+        if (!read || ++left->restores == kWriteRetries) {
+            KeepLeftover(eid, actor, std::move(*left), "the previous row could not be put back");
+            continue;
+        }
+        LeftoverRec& r = g_leftover[eid];
+        r.ref.Set(actor);
+        r.lo = std::move(*left);
+    }
+}
+
 // HOST: a drop intent's drive enrolled; its author's row is the one the host takes for it.
 void ResolveBrought(void* actor, uint32_t eid) {
     for (auto it = g_broughtPending.begin(); it != g_broughtPending.end(); ++it) {
@@ -507,6 +633,7 @@ void Tick() {
     if (now >= g_nextSlow) {
         g_nextSlow = now + std::chrono::seconds(1);
         RetryParked();
+        if (IsHost(s)) RestoreLeftovers(s);
         SweepNotes();
         SweepKept(g_held);
         SweepKept(g_lastSent);
@@ -516,9 +643,10 @@ void Tick() {
     if (now >= g_nextStats) {
         g_nextStats = now + std::chrono::seconds(60);
         UE_LOGI("drive_payload_sync: 60s sent=%llu applied=%llu accepted=%llu putBack=%llu ownSent=%llu refused=%llu "
-                "parked=%zu", (unsigned long long)g_counts.sent, (unsigned long long)g_counts.applied,
+                "parked=%zu withheld=%zu", (unsigned long long)g_counts.sent, (unsigned long long)g_counts.applied,
                 (unsigned long long)g_counts.accepted, (unsigned long long)g_counts.putBack,
-                (unsigned long long)g_counts.ownSent, (unsigned long long)g_counts.refused, g_parked.size());
+                (unsigned long long)g_counts.ownSent, (unsigned long long)g_counts.refused, g_parked.size(),
+                g_leftover.size());
     }
 }
 
@@ -539,7 +667,7 @@ void QueueConnectBroadcastForSlot(int peerSlot) {
         if (!p.actor || !R::IsLiveByIndex(p.actor, p.internalIdx) || !DC::IsDriveClass(R::ClassOf(p.actor))) continue;
         ++drives;
         SD::Row row;
-        if (!DC::ReadDriveRow(p.actor, row)) continue;
+        if (!DC::ReadDriveRow(p.actor, row) || Withheld(static_cast<uint32_t>(p.id), p.actor, row)) continue;
         const std::vector<uint8_t> bytes = Bytes(row);
         if (IsClassDefault(p.actor, coop::blob_chunks::Fnv64(bytes))) continue;
         if (SendBytes(s, static_cast<uint32_t>(p.id), bytes, peerSlot)) ++sent;
@@ -597,7 +725,7 @@ void OnPeerLeft(uint8_t slot) {
     if (slot >= coop::net::kMaxPeers) return;
     g_asm.ClearSlot(slot);
     // The retry counter is the departed author's own write attempt: dropping it with the row
-    // keeps a later row for the same eid from inheriting the class-default bypass.
+    // keeps a later row for the same eid from inheriting its count.
     for (auto it = g_parked.begin(); it != g_parked.end();) {
         if (it->second.senderSlot == slot) { g_writeFails.erase(it->first); it = g_parked.erase(it); }
         else ++it;
@@ -606,6 +734,10 @@ void OnPeerLeft(uint8_t slot) {
         if (it->second.slot == slot) { g_writeFails.erase(it->first); it = g_brought.erase(it); }
         else ++it;
     }
+    // A leftover of its write is no longer any client's to write over, a later occupant of the slot least of all: its
+    // previous row is put back instead.
+    for (auto& kv : g_leftover)
+        if (kv.second.lo.slot == slot) kv.second.lo.slot = 0xFF;
     for (auto it = g_broughtPending.begin(); it != g_broughtPending.end();)
         it = it->slot == slot ? g_broughtPending.erase(it) : std::next(it);
     g_nextRefusalSay[slot] = {};
@@ -616,6 +748,10 @@ void OnDisconnect() {
     g_held.clear();
     g_parked.clear();
     g_writeFails.clear();
+    if (!g_leftover.empty())
+        UE_LOGW("drive_payload_sync: the session ended with %zu drive(s) holding what a failed write left -- not put "
+                "back", g_leftover.size());
+    g_leftover.clear();
     g_noted.clear();
     g_brought.clear();
     g_broughtPending.clear();
