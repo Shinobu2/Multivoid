@@ -189,7 +189,7 @@ SG::Verdict OnRowPre(const SG::Call& call) {
     // the verb on the same thread. A refused replay would delete the event the wire asked for;
     // the creature rows keep no bypass, so a mirror born inside our own Call is still inert.
     if (kRows[row].replayBypass &&
-        coop::event_fire_sync::InReplayScope(call.object, call.function)) {
+        coop::event_fire_sync::InReplayScope(call)) {
         return SG::Verdict::Run;
     }
     const std::uint64_t n = ++g_refused[row];

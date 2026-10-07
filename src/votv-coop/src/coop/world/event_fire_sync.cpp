@@ -13,6 +13,8 @@
 
 #include "coop/world/event_fire_sync.h"
 
+#include "event_fire_attempt_detail.h"  // co-located private header (src tree, not include/)
+
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/world/time_sync.h"
@@ -185,98 +187,104 @@ std::string NarrowName(const R::FName& n) {
     return s;
 }
 
-// The replay bypass, thread-local and exact: spawn_authority refuses the eventer's verbs on a
-// client, and only the call this scope marks -- that eventer object, that function -- may pass.
-// The gate's fromOurCode flag is the wider flag it replaces: every synchronous coop dispatch
-// inherits it, so any other lane reaching a verb through a reflected call would walk in under it.
-thread_local void* t_replayObject = nullptr;
-thread_local void* t_replayFunction = nullptr;
-// The scoped call's commit proof: the verb's name-watch POST runs only after the body really
-// ran -- a script-gate Cancel skips every POST -- and stamps this only for the exact pair.
-thread_local bool t_replayCommitted = false;
+// The attempt core lives in the co-located detail header so an offline check can drive the
+// production logic itself.
+using detail::ReplayAttempt;
+using detail::ReplayScope;
+using detail::t_attempt;
+using detail::FireOutcome;
+using detail::ClassifyFireOutcome;
 
-struct ReplayScope {
-    void* prevObj;
-    void* prevFn;
-    ReplayScope(void* o, void* f) : prevObj(t_replayObject), prevFn(t_replayFunction) {
-        t_replayObject = o;
-        t_replayFunction = f;
-    }
-    ~ReplayScope() { t_replayObject = prevObj; t_replayFunction = prevFn; }
-};
-
-// One dispatch attempt's result. Call answers "no dispatch fault", which a gate Cancel ALSO
-// satisfies, so Committed -- the verb's own POST observed inside the scope -- is the only
-// success. Cancelled is a refusal: it counts on the row's retry bound exactly like a Faulted.
-enum class FireOutcome { Faulted, Cancelled, Committed };
-
-// The commit check needs an observer: the verb's watch live AND the gate held. A client replay
-// requires this before dispatching (its Committed is the exact POST or nothing); a solo or dev
-// fire keeps the unobserved path and takes the dispatch's word.
-bool FireObservable(FireKind kind) {
-    return sg::IsEnabled() &&
-           (kind == FireKind::SpecialEvent ? g_specialWatchLive : g_watchLive);
+// The name argument the current invocation carries must equal the attempt's expected event
+// (`event`/`eventName1`; `special` is always None and its offset unresolved).
+bool AttemptParamsMatch(const sg::Call& call) {
+    const ReplayAttempt* a = t_attempt;
+    if (!a || call.object != a->object || call.function != a->function || !call.locals) return false;
+    const int32_t off = a->function == g_runSpecialEventFn ? g_offSpecialParam
+                      : a->function == g_runEventFn        ? g_offEventParam : -1;
+    if (off < 0) return false;
+    const R::FName got = *reinterpret_cast<const R::FName*>(call.locals + off);
+    return got.ComparisonIndex == a->eventIndex && got.Number == a->eventNumber;
 }
 
-FireOutcome FireOnce(void* eventer, ue_wrap::ParamFrame& f, bool observable) {
-    t_replayCommitted = false;
-    bool dispatched;
-    {
-        const ReplayScope replay(eventer, f.function());
-        dispatched = ue_wrap::Call(eventer, f);
-    }
-    if (!dispatched) return FireOutcome::Faulted;
-    return (!observable || t_replayCommitted) ? FireOutcome::Committed : FireOutcome::Cancelled;
+// PRE, observe-only (always Run): bind the attempt to the first invocation carrying its own
+// target and name argument -- the invocation's identity for the commit check, not a "body
+// ran" proof. Never replaces a frame bound at admission.
+sg::Verdict NoteReplayEntry(const sg::Call& call) {
+    detail::AttemptBind(call.object, call.function, AttemptParamsMatch(call), call.stack);
+    return sg::Verdict::Run;
 }
 
-// The native fire, game thread. True iff the verb's body committed (FireOnce): callers gate
-// the broadcast and the replayed set on it, since a refused host fire must not make clients
-// replay an event the authority never executed, and a refused replay must not permanently
-// consume the row. quietFail silences the per-call refusal warn for a queue's spaced
-// retries -- the first refusal is loud and the row's retry line is said once, in NoteAttempt.
-bool NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring& specialName,
-                bool quietFail = false) {
+void NoteReplayCommit(const sg::Call& call) { detail::AttemptCommit(call.stack); }
+
+// The observer's three states. Dead: the name watch settled without going live -- the gate's
+// dead-for-good mark -- so a dispatch can never be proven. Pending: resolving or unheld gate.
+enum class ObserverState { Pending, Live, Dead };
+
+ObserverState ObserverStateOf(FireKind kind) {
+    const wchar_t* name = kind == FireKind::SpecialEvent ? kRunSpecialEvent : kRunEvent;
+    const bool live = sg::NameWatchLive(name, kTagEventFire);
+    if (!live && sg::NameWatchSettled(name, kTagEventFire)) return ObserverState::Dead;
+    return live && sg::IsEnabled() ? ObserverState::Live : ObserverState::Pending;
+}
+
+// A client replay requires the observer; a solo or dev fire takes the dispatch's word.
+bool FireObservable(FireKind kind) { return ObserverStateOf(kind) == ObserverState::Live; }
+
+FireOutcome FireOnce(void* eventer, ue_wrap::ParamFrame& f, const R::FName& expectedEvent,
+                     bool observable) {
+    ReplayScope scope(eventer, f.function(), expectedEvent.ComparisonIndex, expectedEvent.Number);
+    const bool dispatched = ue_wrap::Call(eventer, f);
+    return ClassifyFireOutcome(dispatched, scope.attempt.stack != nullptr,
+                               scope.attempt.committed, observable);
+}
+
+// The native fire, game thread. Returns the dispatch's FireOutcome (FireOnce); a faulted
+// dispatch is not re-run wholesale. quietFail silences the per-call warn for queue retries.
+FireOutcome NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring& specialName,
+                       bool requireObservation, bool quietFail = false) {
     void* eventer = EventerOf(ue_wrap::world_singleton::Gamemode());
     if (!eventer) {
         UE_LOGW("event_fire: no live trigger_eventer -- native fire dropped ('%ls')", eventName.c_str());
-        return false;
+        return FireOutcome::NotAttempted;
     }
     const char* verb = kind == FireKind::SpecialEvent ? "runSpecialEvent" : "runEvent";
     void* fn = kind == FireKind::SpecialEvent ? g_runSpecialEventFn : g_runEventFn;
-    if (!fn) { UE_LOGW("event_fire: %s unresolved", verb); return false; }
+    if (!fn) { UE_LOGW("event_fire: %s unresolved", verb); return FireOutcome::NotAttempted; }
     ue_wrap::ParamFrame f(fn);
-    if (!f.valid()) return false;
-    // A Set that missed its parameter leaves a half-written frame the body reads garbage from:
-    // the dispatch must not run on it.
+    if (!f.valid()) return FireOutcome::NotAttempted;
+    // A missed Set leaves a half-written frame the body reads garbage from: do not dispatch.
+    const R::FName ev = ue_wrap::fname_utils::StringToFName(eventName);
     bool filled;
     if (kind == FireKind::SpecialEvent) {
-        filled = f.Set<R::FName>(L"eventName1", ue_wrap::fname_utils::StringToFName(eventName));
+        filled = f.Set<R::FName>(L"eventName1", ev);
     } else {
-        filled = f.Set<R::FName>(L"event", ue_wrap::fname_utils::StringToFName(eventName)) &&
+        filled = f.Set<R::FName>(L"event", ev) &&
                  f.Set<R::FName>(L"special", ue_wrap::fname_utils::StringToFName(specialName));
     }
     if (!filled) {
         UE_LOGW("event_fire: %s('%ls') param frame would not fill -- dispatch dropped",
                 verb, eventName.c_str());
-        return false;
+        return FireOutcome::NotAttempted;
     }
-    const FireOutcome out = FireOnce(eventer, f, FireObservable(kind));
+    const FireOutcome out = FireOnce(eventer, f, ev, requireObservation || FireObservable(kind));
     if (out == FireOutcome::Committed) {
         if (kind == FireKind::SpecialEvent)
             UE_LOGI("event_fire: runSpecialEvent('%ls') dispatched", eventName.c_str());
         else
             UE_LOGI("event_fire: runEvent('%ls', special='%ls') dispatched",
                     eventName.c_str(), specialName.c_str());
-        return true;
+        return out;
     }
     if (!quietFail) {
-        if (out == FireOutcome::Cancelled)
+        if (out == FireOutcome::Unknown)
+            UE_LOGE("event_fire: %s('%ls') dispatch faulted or ran unobserved -- effects "
+                    "UNKNOWN; not retried", verb, eventName.c_str());
+        else
             UE_LOGW("event_fire: %s('%ls') dispatch returned but the body was CANCELLED at the "
                     "script gate -- counted as refused", verb, eventName.c_str());
-        else
-            UE_LOGW("event_fire: %s('%ls') dispatch FAILED", verb, eventName.c_str());
     }
-    return false;
+    return out;
 }
 
 void Broadcast(FireKind kind, const std::string& name) {
@@ -298,7 +306,7 @@ void Broadcast(FireKind kind, const std::string& name) {
 // announce a fire that did not run; a client replay's own call early-outs on the role gate.
 void OnRunEventPost(const sg::Call& call) {
     // Reached only when the scoped call's body really ran: the replay's commit proof.
-    if (call.object == t_replayObject && call.function == t_replayFunction) t_replayCommitted = true;
+    NoteReplayCommit(call);
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
     if (!ResolvePass() || call.function != g_runEventFn) return;
@@ -318,7 +326,7 @@ void OnRunEventPost(const sg::Call& call) {
 // and the game's cheat menu reach it the same way and emit through here exactly once.
 void OnRunSpecialEventPost(const sg::Call& call) {
     // Reached only when the scoped call's body really ran: the replay's commit proof.
-    if (call.object == t_replayObject && call.function == t_replayFunction) t_replayCommitted = true;
+    NoteReplayCommit(call);
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
     if (!ResolvePass() || call.function != g_runSpecialEventFn) return;
@@ -348,21 +356,39 @@ bool InClientPassEvents(const std::string& name) {
     return false;
 }
 
-// The replay step's result, game thread: Done pops the row (dispatched or deliberately
-// skipped), NotReady waits it uncounted (the eventer is simply not up yet), Failed counts a
-// real dispatch refusal against the row's retry bound, PermFailed drops the row outright --
-// the event classes can never resolve on this build, so no dispatch is even possible.
-enum class ReplayStep { Done, NotReady, Failed, PermFailed };
+// The replay step's result, game thread: Done pops the row, NotReady waits it uncounted,
+// Failed counts a real refusal against the row's retry bound. The terminal drops, logged once
+// by DropIfTerminal: PermFailed -- the event classes can never resolve; ObserverDead -- the
+// verb's watch settled dead in the gate; UnsafeFault -- the dispatch faulted or ran unseen.
+enum class ReplayStep { Done, NotReady, Failed, PermFailed, ObserverDead, UnsafeFault };
+
+// A terminal step drops the row outright and says why once, here.
+bool DropIfTerminal(ReplayStep step, const PendingFire& pf) {
+    if (step == ReplayStep::PermFailed)
+        UE_LOGE("event_fire: replay of '%s' DROPPED -- the event classes never resolved "
+                "(permanent failure); the row could never dispatch", pf.name.c_str());
+    else if (step == ReplayStep::ObserverDead)
+        UE_LOGE("event_fire: replay of '%s' DROPPED -- its %s watch is dead in the script gate "
+                "(settled, never live); the row's outputs are lost this session", pf.name.c_str(),
+                pf.kind == FireKind::SpecialEvent ? "runSpecialEvent" : "runEvent");
+    else if (step == ReplayStep::UnsafeFault)
+        UE_LOGE("event_fire: replay of '%s' DROPPED -- the dispatch faulted or ran unobserved "
+                "(effects unknown); a whole-body retry could re-apply what ran", pf.name.c_str());
+    else
+        return false;
+    return true;
+}
 
 // The client replay executor, game thread.
 ReplayStep TryReplay(const PendingFire& pf) {
     if (!ResolvePass() || !EventerOf(ue_wrap::world_singleton::Gamemode()))
         return g_resolveFailed ? ReplayStep::PermFailed : ReplayStep::NotReady;
-    // The first ready Gameplay eventer binds the queue to its world; an unbound join-window
-    // queue keeps waiting rather than inheriting a menu/preLoad generation.
-    if (g_boundGen == 0 && ue_wrap::world_identity::CurrentWorldKind() ==
-                           ue_wrap::world_identity::WorldKind::Gameplay)
-        g_boundGen = ue_wrap::world_identity::Generation();
+    // A replay dispatches only into the CURRENT gameplay world: while it is Unknown or
+    // another, the singleton lookup can still answer the eventer of the world being left
+    // (the cached ref fails open on a null current world).
+    if (ue_wrap::world_identity::CurrentWorldKind() != ue_wrap::world_identity::WorldKind::Gameplay)
+        return ReplayStep::NotReady;
+    if (g_boundGen == 0) g_boundGen = ue_wrap::world_identity::Generation();
     // Dedupe applies to one-shot scheduled rows only (the game's own passEvents semantics);
     // specials (graffiti, pranks the menu re-fires) are repeatable by design.
     if (pf.kind == FireKind::RunEvent) {
@@ -380,22 +406,29 @@ ReplayStep TryReplay(const PendingFire& pf) {
             return ReplayStep::Done;
         }
     }
-    // A client replay fires only observed: without the gate held and this verb's watch live a
-    // dispatch cannot prove the body ran, so the row waits for the observer rather than taking
-    // the dispatch's word (the unobserved path is the solo/dev fire's alone).
-    if (!FireObservable(pf.kind)) return ReplayStep::NotReady;
+    // A client replay fires only observed; a settled-dead watch can never go live: drop.
+    const ObserverState obs = ObserverStateOf(pf.kind);
+    if (obs == ObserverState::Dead) return ReplayStep::ObserverDead;
+    if (obs != ObserverState::Live) return ReplayStep::NotReady;
     const std::wstring w(pf.name.begin(), pf.name.end());
     UE_LOGI("event_fire: client REPLAY %s '%s'%s",
             pf.kind == FireKind::SpecialEvent ? "runSpecialEvent" : "runEvent", pf.name.c_str(),
             pf.activeOverride ? " (in-flight active-override)" : "");
     // The special is always None: the only native special is the prank roll, whose chosen case
     // the host's runSpecialEvent watch sends on its own. A refused dispatch is NOT a consume:
-    // the row stays queued and retries on a bound (NoteAttempt); the repeated refusals stay
-    // quiet so the once-per-row line stands out.
-    if (NativeFire(pf.kind, w, L"None", /*quietFail=*/pf.failedDispatches > 0)) {
+    // the row retries on a bound (NoteAttempt). A faulted or unobserved dispatch is not a
+    // refusal either: its effects are unknown, so the row drops (UnsafeFault), not retries.
+    const FireOutcome out = NativeFire(pf.kind, w, L"None", /*requireObservation=*/true,
+                                       /*quietFail=*/pf.failedDispatches > 0);
+    if (out == FireOutcome::Committed) {
         g_replays.fetch_add(1, std::memory_order_relaxed);
         if (pf.kind == FireKind::RunEvent) g_replayed.insert(pf.name);
         return ReplayStep::Done;
+    }
+    if (out == FireOutcome::Unknown) {
+        // The wire has no occurrence identity, so a duplicate gets no second unsafe attempt.
+        if (pf.kind == FireKind::RunEvent) g_replayed.insert(pf.name);
+        return ReplayStep::UnsafeFault;
     }
     return ReplayStep::Failed;
 }
@@ -448,9 +481,7 @@ void DrainPending() {
             g_pending.pop_front();
             continue;
         }
-        if (step == ReplayStep::PermFailed) {
-            UE_LOGE("event_fire: replay of '%s' DROPPED -- the event classes never resolved "
-                    "(permanent failure); the row could never dispatch", front.name.c_str());
+        if (DropIfTerminal(step, front)) {
             g_pending.pop_front();
             continue;
         }
@@ -506,11 +537,12 @@ void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
     // Called every pump tick by the install fanout, which is also the retry until the cycle class
     // loads and until the gate has resolved the watch's name.
+    // The watches' observe-only PRE binds the attempt to its frame, what the commit matches.
     if (!g_watchInstalled)
-        g_watchInstalled = sg::WatchName(kRunEvent, kTagEventFire, nullptr, &OnRunEventPost);
+        g_watchInstalled = sg::WatchName(kRunEvent, kTagEventFire, &NoteReplayEntry, &OnRunEventPost);
     if (!g_specialWatchInstalled)
         g_specialWatchInstalled =
-            sg::WatchName(kRunSpecialEvent, kTagEventFire, nullptr, &OnRunSpecialEventPost);
+            sg::WatchName(kRunSpecialEvent, kTagEventFire, &NoteReplayEntry, &OnRunSpecialEventPost);
     if ((g_watchInstalled && !g_watchLive) || (g_specialWatchInstalled && !g_specialWatchLive))
         sg::ResolvePendingNames();
     if (!g_watchLive && sg::NameWatchLive(kRunEvent, kTagEventFire)) {
@@ -591,7 +623,7 @@ bool HostFire(FireKind kind, const std::wstring& eventName, const std::wstring& 
         // No send of its own: the runEvent/runSpecialEvent watches see this reflected call like
         // any other host fire and emit it once (a dev fire is the 'dev-call' origin). A refused
         // dispatch commits nothing, so nothing reaches the wire.
-        NativeFire(kind, ev, sp);
+        NativeFire(kind, ev, sp, /*requireObservation=*/cur && cur->connected());
     });
     return true;
 }
@@ -626,11 +658,7 @@ void OnReliable(const coop::net::EventFirePayload& payload) {
     if (g_pending.empty()) {
         step = TryReplay(pf);
         if (step == ReplayStep::Done) return;
-        if (step == ReplayStep::PermFailed) {
-            UE_LOGE("event_fire: '%s' dropped -- the event classes never resolved (permanent "
-                    "failure); it could never dispatch", name.c_str());
-            return;
-        }
+        if (DropIfTerminal(step, pf)) return;
         NoteAttempt(pf, step);  // the queue must remember the try: it paces the retry
     }
     // One-shot rows dedupe at queue time too (a scheduler re-fire of a dev-fired row during the
@@ -646,7 +674,8 @@ void OnReliable(const coop::net::EventFirePayload& payload) {
         return;
     }
     UE_LOGI("event_fire: queued '%s' (%zu pending; %s)", name.c_str(), g_pending.size() + 1,
-            step == ReplayStep::Failed ? "first dispatch refused" : "eventer not up yet");
+            step == ReplayStep::Failed ? "first dispatch refused"
+                                       : "world, eventer or observer not up yet");
     g_pending.push_back(std::move(pf));
 }
 
@@ -670,16 +699,12 @@ void ReplayInFlightRow(const std::string& rowName) {
     if (g_pending.empty()) {
         const ReplayStep step = TryReplay(pf);
         if (step == ReplayStep::Done) return;
-        if (step == ReplayStep::PermFailed) {
-            UE_LOGE("event_fire: in-flight '%s' dropped -- the event classes never resolved "
-                    "(permanent failure); it could never dispatch", rowName.c_str());
-            return;
-        }
+        if (DropIfTerminal(step, pf)) return;
         NoteAttempt(pf, step);  // the queue must remember the try: it paces the retry
     }
-    // The eventer is not up yet. If the row is already queued (a fire copy landed in the pre-world
-    // window), upgrade it in place: two entries would double-dispatch, and the plain copy alone
-    // could history-skip the in-flight replay.
+    // The world, eventer or observer is not up yet. If the row is already queued (a fire copy
+    // landed in the pre-world window), upgrade it in place: two entries would double-dispatch,
+    // and the plain copy alone could history-skip the in-flight replay.
     for (auto& q : g_pending) {
         if (q.kind == FireKind::RunEvent && q.name == rowName) {
             q.activeOverride = true;
@@ -731,8 +756,12 @@ void OnDisconnect() {
     g_session.store(nullptr, std::memory_order_release);
 }
 
-bool InReplayScope(void* object, void* function) {
-    return t_replayObject && t_replayObject == object && t_replayFunction == function;
+bool InReplayScope(const ue_wrap::script_gate::Call& call) {
+    // Admission is the gate's own call, not a pair: the exact object/function, the attempt's
+    // name argument in this invocation's params, and its live frame -- then the grant is
+    // spent and that frame becomes the attempt's bound identity.
+    return detail::AttemptAdmit(call.object, call.function, AttemptParamsMatch(call),
+                                call.stack) != nullptr;
 }
 
 unsigned ReplayCount() { return g_replays.load(std::memory_order_relaxed); }

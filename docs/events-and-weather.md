@@ -104,7 +104,11 @@ no lane carries are replayed through the same native verb; a random prank forwar
 rolled case as a `runSpecialEvent` fire, so the client replays the same outcome rather than
 rolling a different one. A replay is skipped when the client's own passed
 list already carries the row, unless the host says the event is in flight, and a replay the
-eventer refuses stays queued and retries on a bound instead of being eaten. The developer menu's
+eventer refuses stays queued and retries on a bound instead of being eaten. A dispatch fault
+or missing invocation observation drops the replay without retrying unknown effects. Admission
+checks the expected event argument and grants one invocation; completion belongs to that
+invocation's frame. A settled-dead watch is terminal. `[?]` Nested calls, fault handling and
+late join still need runtime testing. The developer menu's
 event trigger dispatches through the same host path, so a forced event broadcasts like a
 scheduled one.
 
