@@ -108,111 +108,6 @@ struct RawArray {
     int32_t Max;
 };
 
-// The replay policy, the dupe matrix: every row's concrete output and which lane already
-// carries it. The default is no replay. Replay only rows whose effect is a deterministic
-// level, save or cosmetic flip that no existing lane delivers; replaying a lane-covered row
-// would double-deliver. Keyed by name only: the few names living in both dispatchers have
-// the same verdict either way, and the replay call still uses the received dispatch kind.
-const char* const kReplayRows[] = {
-    // Story and save flips (level-placed triggers; no lane):
-    "treehouse_0", "treehouse_1", "treehouse_2", "treehouse_3", "treehouse_4", "treehouse_5",
-    "break_RomeoSierra", "break_Victor", "break_Victor2",
-    // Force-object appends (a save array the client's own dish scan reads; no lane):
-    "looker_0-1", "looker_1-1", "looker_2-1", "looker_3-1", "looker_4-1",
-    "arirSignal", "arirSpk", "picSignal", "peace",
-    "arirSat_0", "arirSat_1", "arirSat_2", "piramid_sig",
-    // Cosmetic or sound with no lane (the solar row's lights-dark converges with the light lane,
-    // the same resulting state, echo-suppressed by its last-known prime):
-    "solar", "call0",
-    // Trigger-box scare arms, per-viewer scares by design; arming both sides is the correct coop
-    // semantics (each player gets the scare on their own overlap):
-    "toeStab", "falseEnter", "mann", "vent", "crys", "fakeGrays", "susArir",
-    // Graffiti decal specials (a grime decal spawn; no lane):
-    "arirGraff_0", "arirGraff_1", "arirGraff_2", "arirGraff_3",
-    "arirGraff_4", "arirGraff_5", "arirGraff_6",
-};
-
-struct NoReplayRow { const char* name; const char* lane; };
-const NoReplayRow kNoReplayRows[] = {
-    // Outputs already ride a lane (a replay is a double delivery):
-    { "starRain", "event_cue lane (cue 0)" },
-    { "arirFollower", "npc lane" },
-    // The swarm's wisps ride the npc lane (the source-gated catch in npc_world_enum); a replay
-    // would arm the client's own swarm trigger and double-spawn client-local creatures on top of
-    // the mirrors:
-    { "wisps", "npc lane (EX-catch; event-swarm wisp_C mirrored)" },
-    // The pyramid's path is host-random (wander and chase timers), so a replay armed the client's
-    // own trigger box and a client walk-in spawned a divergent client-local pyramid with
-    // unmirrored wisps. The arrival comes by mirror: the world-actor pose stream, npc-lane wisps
-    // and the pyramid sync's brain suppression and gather relay.
-    { "piramid", "piramid mirror lane (WA pose + piramid_sync brain/gather)" },
-    // The ship: the trigger-box arm's overlap spawns the ship and the alarm lamp (and possibly
-    // NPC leaves); replaying the arm would spawn them client-local. Host-only until the ship gets
-    // a lane:
-    { "arirShip", "actor spawn on armed overlap (no lane)" },
-    // The obelisk's graph is not a bare flag flip: obelisk_C spawns prop_C/prop_obelisk_C actors
-    // and punches getMainPlayer -- a replay would double-spawn the props client-local and hit the
-    // client's own player. Host-only until the scene gets a lane:
-    { "obelisk", "obelisk_C prop spawns + getMainPlayer punch (no lane)" },
-    // earthTp fires newsky_C.tp: the black hole, sky and ambience flip plus a 2D sound and
-    // emails -- no player teleport at all, and no lane carries those yet:
-    { "earthTp", "newsky_C.tp sky/blackhole flip + 2D cue + emails (no lane yet)" },
-    { "vehtp", "atv lane" },
-    // bedEvent runs trigger_bedEvent -> bedEvent_C, which moves the bed and teleports
-    // getMainPlayer on wake; the sleep lane only gates client dreams, it does not carry this:
-    { "bedEvent", "bedEvent_C bed/player transform + wake teleport (no lane)" },
-    { "picnic", "prop lane" }, { "destroyPicnic", "prop lane" },
-    { "enasus", "prop lane" }, { "enacros", "prop lane" },
-    { "cookier", "prop lane (armed prop)" }, { "paperGray", "prop lane (armed prop)" },
-    { "arirEgg", "prop lane (armed prop)" },
-    { "console", "device lanes" }, { "lightswitch", "device lanes" },
-    { "keypadGuess", "device lanes" },
-    // atvExplode writes car.trap -- a host-owned flag no lane carries (atv_condition_sync
-    // transfers neither trap nor zapped):
-    { "atvExplode", "car.trap is host-owned (no lane carries trap/zapped)" },
-    // Host-local by design:
-    { "agrav", "physics divergence (by-design host-local)" },
-    { "treehouseSleep", "per-player teleport" },
-    // Creature and save-actor spawns, host-only until allowlisted. The vent crawler is
-    // npc-allowlisted, so its no-replay reason is the mirrors:
-    { "ventCrawler", "npc lane (allowlisted)" }, { "ventKnocker", "world-actor lane (eventer EX-catch)" },
-    { "tentacleBalls", "npc lane (late allowlist; follower EX-catch)" }, { "morningGay", "world-actor lane (eventer EX-catch)" },
-    { "borgRozital", "world-actor lane (eventer EX-catch)" }, { "graysforest", "npc lane (late allowlist; controller EX-catch)" },
-    { "graystank", "creature spawn (no lane yet)" }, { "arirBuster", "creature spawn (no lane yet)" },
-    { "eggvasion", "npc lane (late allowlist; egger EX-catch)" }, { "boarwar", "creature spawn (no lane yet)" },
-    { "soltoClean", "world-actor lane (eventer EX-catch)" },
-    { "salt", "save-actor spawn (no lane)" }, { "rozitalHole", "save-actor spawn (no lane)" },
-    { "dreambase", "save-actor spawn (no lane)" },
-    { "fallbody_0", "dropper spawn (world-actor lane, eventer EX-catch)" }, { "fallbody_1", "dropper spawn (world-actor lane, eventer EX-catch)" },
-    { "fallcar_0", "dropper spawn (world-actor lane, eventer EX-catch)" },
-    // The prank layer (host-local RNG; thrown-prop outputs ride the prop lane):
-    { "food", "prank special (prop lane)" }, { "drive", "prank special (prop lane)" },
-    { "atvFuel", "prank special (prop lane)" }, { "atvFix", "prank special (prop lane)" },
-    { "poisonFood", "prank special (prop lane)" }, { "expDrive", "prank special (prop lane)" },
-    { "cookiebox", "prank special (prop lane)" }, { "trashPiles", "prank special (prop lane)" },
-    { "vaccine", "prank special (prop lane)" }, { "oil", "prank special (prop lane)" },
-    { "begos", "prank special (prop lane)" }, { "gascans", "prank special (prop lane)" },
-    { "bombBox", "prank special (prop lane)" },
-    { "rockThrow", "prank spawner (no lane)" }, { "hillRoller", "prank spawner (no lane)" },
-    { "alienJump", "prank spawner (no lane)" }, { "trashBase", "prank spawner (no lane)" },
-    { "alienSounds", "sound gap (future WorldSoundCue)" },
-};
-
-// The interaction rows: the row's entire effect is the prank special, host-local RNG.
-bool IsPrankRow(const std::string& n) {
-    return n.rfind("arirInteraction_", 0) == 0;
-}
-
-// The verdict: 1 replay, 0 known no-replay (the lane says why), -1 unknown (default no-replay).
-int ReplayVerdict(const std::string& name, const char** laneOut) {
-    for (const char* r : kReplayRows)
-        if (name == r) return 1;
-    for (const auto& nr : kNoReplayRows)
-        if (name == nr.name) { *laneOut = nr.lane; return 0; }
-    if (IsPrankRow(name)) { *laneOut = "prank special (host-local RNG)"; return 0; }
-    return -1;
-}
-
 bool MembersMissing() {
     return g_offSaveSlot < 0 || g_offEventer < 0 || g_offPassEvents < 0 || g_offAllEvents < 0 ||
            !g_runEventFn || !g_runSpecialEventFn || !g_settimeFn || g_offEventParam < 0 ||
@@ -283,11 +178,47 @@ std::string NarrowName(const R::FName& n) {
     return s;
 }
 
-// The native fire, game thread. True iff the verb actually dispatched; callers gate the
-// broadcast and the replayed set on it, since a failed host fire must not make clients replay
-// an event the authority never executed, and a failed replay must not permanently consume
-// the row. quietFail silences the per-call refusal warn for a queue's spaced retries -- the
-// first refusal is loud and the row's retry line is said once, in NoteAttempt.
+// The replay bypass, thread-local and exact: spawn_authority refuses the eventer's verbs on a
+// client, and only the call this scope marks -- that eventer object, that function -- may pass.
+// The gate's fromOurCode flag is the wider flag it replaces: every synchronous coop dispatch
+// inherits it, so any other lane reaching a verb through a reflected call would walk in under it.
+thread_local void* t_replayObject = nullptr;
+thread_local void* t_replayFunction = nullptr;
+// The scoped call's commit proof: the verb's name-watch POST runs only after the body really
+// ran -- a script-gate Cancel skips every POST -- and stamps this only for the exact pair.
+thread_local bool t_replayCommitted = false;
+
+struct ReplayScope {
+    void* prevObj;
+    void* prevFn;
+    ReplayScope(void* o, void* f) : prevObj(t_replayObject), prevFn(t_replayFunction) {
+        t_replayObject = o;
+        t_replayFunction = f;
+    }
+    ~ReplayScope() { t_replayObject = prevObj; t_replayFunction = prevFn; }
+};
+
+// One dispatch attempt's result. Call answers "no dispatch fault", which a gate Cancel ALSO
+// satisfies, so Committed -- the verb's own POST observed inside the scope -- is the only
+// success. Cancelled is a refusal: it counts on the row's retry bound exactly like a Faulted.
+enum class FireOutcome { Faulted, Cancelled, Committed };
+
+FireOutcome FireOnce(void* eventer, ue_wrap::ParamFrame& f, bool observable) {
+    t_replayCommitted = false;
+    bool dispatched;
+    {
+        const ReplayScope replay(eventer, f.function());
+        dispatched = ue_wrap::Call(eventer, f);
+    }
+    if (!dispatched) return FireOutcome::Faulted;
+    return (!observable || t_replayCommitted) ? FireOutcome::Committed : FireOutcome::Cancelled;
+}
+
+// The native fire, game thread. True iff the verb's body committed (FireOnce): callers gate
+// the broadcast and the replayed set on it, since a refused host fire must not make clients
+// replay an event the authority never executed, and a refused replay must not permanently
+// consume the row. quietFail silences the per-call refusal warn for a queue's spaced
+// retries -- the first refusal is loud and the row's retry line is said once, in NoteAttempt.
 bool NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring& specialName,
                 bool quietFail = false) {
     void* eventer = EventerOf(ue_wrap::world_singleton::Gamemode());
@@ -295,31 +226,37 @@ bool NativeFire(FireKind kind, const std::wstring& eventName, const std::wstring
         UE_LOGW("event_fire: no live trigger_eventer -- native fire dropped ('%ls')", eventName.c_str());
         return false;
     }
-    if (kind == FireKind::SpecialEvent) {
-        if (!g_runSpecialEventFn) { UE_LOGW("event_fire: runSpecialEvent unresolved"); return false; }
-        ue_wrap::ParamFrame f(g_runSpecialEventFn);
-        if (!f.valid()) return false;
-        f.Set<R::FName>(L"eventName1", ue_wrap::fname_utils::StringToFName(eventName));
-        if (ue_wrap::Call(eventer, f)) {
-            UE_LOGI("event_fire: runSpecialEvent('%ls') dispatched", eventName.c_str());
-            return true;
-        }
-        if (!quietFail)
-            UE_LOGW("event_fire: runSpecialEvent('%ls') dispatch FAILED", eventName.c_str());
-        return false;
-    }
-    if (!g_runEventFn) { UE_LOGW("event_fire: runEvent unresolved"); return false; }
-    ue_wrap::ParamFrame f(g_runEventFn);
+    const char* verb = kind == FireKind::SpecialEvent ? "runSpecialEvent" : "runEvent";
+    void* fn = kind == FireKind::SpecialEvent ? g_runSpecialEventFn : g_runEventFn;
+    if (!fn) { UE_LOGW("event_fire: %s unresolved", verb); return false; }
+    ue_wrap::ParamFrame f(fn);
     if (!f.valid()) return false;
-    f.Set<R::FName>(L"event", ue_wrap::fname_utils::StringToFName(eventName));
-    f.Set<R::FName>(L"special", ue_wrap::fname_utils::StringToFName(specialName));
-    if (ue_wrap::Call(eventer, f)) {
-        UE_LOGI("event_fire: runEvent('%ls', special='%ls') dispatched",
-                eventName.c_str(), specialName.c_str());
+    if (kind == FireKind::SpecialEvent) {
+        f.Set<R::FName>(L"eventName1", ue_wrap::fname_utils::StringToFName(eventName));
+    } else {
+        f.Set<R::FName>(L"event", ue_wrap::fname_utils::StringToFName(eventName));
+        f.Set<R::FName>(L"special", ue_wrap::fname_utils::StringToFName(specialName));
+    }
+    // The commit check needs an observer: the verb's watch live AND the gate held (a solo run
+    // or a join-window replay before the hold observes nothing, and takes the dispatch's word).
+    const bool observable = sg::IsEnabled() &&
+        (kind == FireKind::SpecialEvent ? g_specialWatchLive : g_watchLive);
+    const FireOutcome out = FireOnce(eventer, f, observable);
+    if (out == FireOutcome::Committed) {
+        if (kind == FireKind::SpecialEvent)
+            UE_LOGI("event_fire: runSpecialEvent('%ls') dispatched", eventName.c_str());
+        else
+            UE_LOGI("event_fire: runEvent('%ls', special='%ls') dispatched",
+                    eventName.c_str(), specialName.c_str());
         return true;
     }
-    if (!quietFail)
-        UE_LOGW("event_fire: runEvent('%ls') dispatch FAILED", eventName.c_str());
+    if (!quietFail) {
+        if (out == FireOutcome::Cancelled)
+            UE_LOGW("event_fire: %s('%ls') dispatch returned but the body was CANCELLED at the "
+                    "script gate -- counted as refused", verb, eventName.c_str());
+        else
+            UE_LOGW("event_fire: %s('%ls') dispatch FAILED", verb, eventName.c_str());
+    }
     return false;
 }
 
@@ -341,6 +278,8 @@ void Broadcast(FireKind kind, const std::string& name) {
 // host broadcast it, which is now this watch's job alone. POST so a cancelled body can never
 // announce a fire that did not run; a client replay's own call early-outs on the role gate.
 void OnRunEventPost(const sg::Call& call) {
+    // Reached only when the scoped call's body really ran: the replay's commit proof.
+    if (call.object == t_replayObject && call.function == t_replayFunction) t_replayCommitted = true;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
     if (!ResolvePass() || call.function != g_runEventFn) return;
@@ -359,6 +298,8 @@ void OnRunEventPost(const sg::Call& call) {
 // row's own broadcast carries only the arirInteraction name. Dev fires (reflected, no caller)
 // and the game's cheat menu reach it the same way and emit through here exactly once.
 void OnRunSpecialEventPost(const sg::Call& call) {
+    // Reached only when the scoped call's body really ran: the replay's commit proof.
+    if (call.object == t_replayObject && call.function == t_replayFunction) t_replayCommitted = true;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected() || s->role() != coop::net::Role::Host) return;
     if (!ResolvePass() || call.function != g_runSpecialEventFn) return;
@@ -689,6 +630,10 @@ void OnDisconnect() {
     g_pending.clear();
     g_replayed.clear();
     g_session.store(nullptr, std::memory_order_release);
+}
+
+bool InReplayScope(void* object, void* function) {
+    return t_replayObject && t_replayObject == object && t_replayFunction == function;
 }
 
 unsigned ReplayCount() { return g_replays.load(std::memory_order_relaxed); }

@@ -20,12 +20,13 @@
 // shape pushed one level down: on a client they exist only as host mirrors, so their AI, timers,
 // overlaps and despawn verbs are refused while the AnimBP and the pose stream stay; and the
 // bodies that mint them inside the gray controller, the balls follower, the super egger and the
-// eventer's own runEvent are refused on the client, because their BeginDeferred calls are
+// eventer's own verbs are refused on the client, because their BeginDeferred calls are
 // bytecode-internal and no spawn interceptor ever sees them.
 
 #include "coop/world/spawn_authority.h"
 
 #include "coop/net/session.h"
+#include "coop/world/event_fire_sync.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/script_gate.h"
 
@@ -49,16 +50,17 @@ bool IsActiveClientSession() {
 }
 
 // One row: the body a client must not run, named by its class and its function. The function is
-// spelled as the live header dump spells it; names compare without case. `allowOurs` marks the
-// one row our own lanes legitimately invoke on a client: the event replay
-// (event_fire_sync::TryReplay) reaches runEvent's body through a reflected Call, so that row
-// refuses native fires only. Every creature and event-spawner row stays false -- a mirror
-// materialised through our own Call must still never arm its gameplay.
+// spelled as the live header dump spells it; names compare without case. `replayBypass` marks the
+// rows the event replay legitimately invokes on a client: event_fire_sync marks its own reflected
+// Call with a thread-local scope naming the exact eventer object and UFunction, and only that
+// call passes -- the gate's fromOurCode flag is the wider flag it replaces, since every
+// synchronous coop dispatch on the thread inherits it. Every creature and event-spawner row
+// stays false -- a mirror materialised through our own Call must still never arm its gameplay.
 struct Row {
     const wchar_t* cls;
     const wchar_t* fn;
     const char* tag;
-    bool allowOurs;
+    bool replayBypass;
 };
 constexpr Row kRows[] = {
     {L"mushroomMaster_C",            L"Spawn",          "mushroomMaster.Spawn",          false},
@@ -157,11 +159,18 @@ constexpr Row kRows[] = {
 
     // The dispatcher: a client's trigger_eventer_C must never fire an event natively. The
     // scheduler is dormant (event_fire_sync zeroes allEvents) and the creature rows are held
-    // out of the replay, but a level trigger chain, a save-restore call or the dev menu can
-    // reach runEvent's body directly, and every spawn site inside is bytecode-internal --
-    // unsuppressed local creatures. Native fires only (allowOurs): the replay's reflected
-    // Call still runs the rows the wire holds for it.
-    {L"trigger_eventer_C",           L"runEvent",       "eventer.runEvent",              true},
+    // out of the replay, but a level trigger chain, a save-restore call or the game's own
+    // event and cheat menus can reach the verbs' bodies directly -- ui_cheatMenu calls
+    // runSpecialEvent outright -- and every spawn site inside is bytecode-internal, so a
+    // native special would roll its own prank and write its own scene. runEvent and
+    // runSpecialEvent pass only inside the replay's marked Call (the exact object and
+    // function); summonArirPrank is the prank roll itself and gets no bypass: the wire
+    // carries the already-rolled case, so a client's copy must never run it and shrink its
+    // local pool. A replayed runEvent never reaches it either -- the replay passes
+    // special=None, and ariralPrank is the roll's only caller path.
+    {L"trigger_eventer_C",           L"runEvent",        "eventer.runEvent",        true},
+    {L"trigger_eventer_C",           L"runSpecialEvent", "eventer.runSpecialEvent", true},
+    {L"trigger_eventer_C",           L"summonArirPrank", "eventer.summonArirPrank", false},
 };
 constexpr int kRowCount = static_cast<int>(std::size(kRows));
 constexpr int kTagBase = 0x53410000;   // 'SA', then the row
@@ -174,10 +183,15 @@ SG::Verdict OnRowPre(const SG::Call& call) {
     if (!IsActiveClientSession()) return SG::Verdict::Run;
     const int row = call.tag - kTagBase;
     if (row < 0 || row >= kRowCount) return SG::Verdict::Run;
-    // Native fires only when the row says so: the event replay reaches runEvent through our own
-    // reflected call, and a refused replay would delete the event the wire asked for. The
-    // creature rows keep allowOurs false, so a mirror born inside our own Call is still inert.
-    if (kRows[row].allowOurs && call.fromOurCode) return SG::Verdict::Run;
+    // The replay rows pass only for the replay's own call: the scope names the exact eventer
+    // object and UFunction the reflected dispatch marked, which is the narrow truth the old
+    // fromOurCode pass approximated -- and let through for every other coop call that reached
+    // the verb on the same thread. A refused replay would delete the event the wire asked for;
+    // the creature rows keep no bypass, so a mirror born inside our own Call is still inert.
+    if (kRows[row].replayBypass &&
+        coop::event_fire_sync::InReplayScope(call.object, call.function)) {
+        return SG::Verdict::Run;
+    }
     const std::uint64_t n = ++g_refused[row];
     if ((n & (n - 1)) == 0)
         UE_LOGI("spawn_authority[%s]: client-refuse %p (call #%llu)", kRows[row].tag, call.object,
