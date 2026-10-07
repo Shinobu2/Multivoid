@@ -1,18 +1,18 @@
 // coop/net/peer_identity.h -- the durable player identity: one Ed25519 keypair per install,
-// whose public key is the peer's network identity. The transport's generic identity
-// holds exactly 32 bytes, so the raw key fits it with nothing left over, and the 32-char guid
-// every store uses is derived from the key, never asserted by the peer that wants to be called
-// by it; it needs no authority, no minting and no master round trip, so it covers the direct
-// and LAN lanes too. What this module does not do: the transport binds a cert's identity string
-// and its key to nothing, so a peer can present a victim's public key as its identity while
-// signing with its own cert key and pass every check the library makes; the admission challenge
-// in coop/net/peer_admission.h, where a peer must sign with the key its identity names, is what
-// makes the identity mean anything. Sign and Verify are pure and re-entrant, touching only the
-// immutable key loaded at boot. The key file is the install's, beside the ini but never in it
-// (inis get pasted into bug reports), under a private access list of its own (this account and
-// the system, nothing inherited) re-applied at every load, since anyone holding it can be you;
-// an account that cannot own the install's file keeps its own key for that install under its
-// profile. A Steam library move carries it, and a tester's two installs are two players.
+// whose public key is the peer's network identity. The transport's generic identity holds exactly
+// 32 bytes, so the raw key fits it with nothing left over, and the 32-char guid every store uses
+// is derived from the key, never asserted by the peer that wants to be called by it; it needs no
+// authority, no minting and no master round trip, so it covers the direct and LAN lanes too. What
+// this module does not do: the transport binds a cert's identity string and its key to nothing, so
+// a peer can present a victim's public key as its identity while signing with its own cert key and
+// pass every check the library makes; the admission challenge in coop/net/peer_admission.h, where
+// a peer must sign with the key its identity names, is what makes the identity mean anything. Sign
+// and Verify are pure and re-entrant, touching only the immutable key loaded at boot. The key file
+// is the install's, beside the ini but never in it (inis get pasted into bug reports), under a
+// private access list of its own (this account and the system, nothing inherited) re-applied at
+// every load, since anyone holding it can be you; an account that cannot read the install's file
+// keeps its own key for that install beside it, and reads it there while the install has none. A
+// Steam library move carries it, and a tester's two installs are two players.
 
 #pragma once
 
@@ -31,16 +31,22 @@ inline constexpr int kSigBytes     = 64;  // Ed25519 signature
 using PubKey = std::array<uint8_t, kPubKeyBytes>;
 using Sig    = std::array<uint8_t, kSigBytes>;
 
-// Load the durable keypair, generating and persisting one on first launch; an account that
-// cannot read or write the install's file gets its own under its profile. False only when no
-// key could be established at all, in which case the session must not start, since an
-// identity-less peer cannot be admitted anywhere; a key that could not be persisted still
-// works for this session and says so in the log.
+// Load the durable keypair, generating and persisting one on first launch; an account that cannot
+// read the install's file gets its own beside it (read there too while the install has none), and a
+// folder that refuses the write leaves a temporary one. False only when no key could be established
+// at all, in which case the session must not start, since an identity-less peer cannot be admitted
+// anywhere; a key that could not be persisted still works for this session and says so in the log.
 bool Load();
 
 // Our own public key, and the 32-char lowercase-hex guid derived from it. Empty or zero
 // before a successful load.
 const PubKey& LocalPublicKey();
+
+// This install's player id: the 32 lowercase hex the guid above is, as a copy; empty before a
+// successful load. The guid is written by Load() on the boot thread (and by InstallInto only when
+// that boot load failed), so a mutex takes the write and this read; no second derivation exists, a
+// caller never hashes the public key itself. Any thread.
+std::string LocalGuid();
 
 // Our identity as the transport renders it: a prefix plus 64 lowercase hex, 68 chars. The
 // string the P2P lane rendezvouses on: the host publishes it to the master and a joiner
@@ -89,10 +95,11 @@ bool InstallInto(ISteamNetworkingSockets* sockets);
 Sig  SignBlob(const uint8_t* data, size_t len);
 bool VerifyBlob(const PubKey& pub, const uint8_t* data, size_t len, const Sig& sig);
 
-// The un-gated arithmetic and crypto selftest, run once per session start; logs an all-pass
-// line or one failure line per failing check. Deliberately impossible to switch off, for the
-// same reason the movement ledger's is: a wrong verdict here does not crash, it either locks
-// every honest player out or admits anyone, and both read as working from outside.
+// The un-gated arithmetic and crypto selftest, run once per process (a later call returns the
+// first run's verdict, silently); logs an all-pass line or one failure line per failing check.
+// Deliberately impossible to switch off, for the same reason the movement ledger's is: a wrong
+// verdict here does not crash, it either locks every honest player out or admits anyone, and
+// both read as working from outside.
 bool RunSelftest();
 
 }  // namespace coop::net::peer_identity

@@ -2,11 +2,12 @@
 
 #include "coop/dev/ragdoll_bone_overlay.h"
 
-#include "coop/dev/dev_gate.h"
+#include "coop/permissions/grants_core.h"
 #include "coop/player/players_registry.h"
 #include "coop/player/remote_player.h"
 #include "coop/config/config.h"
 #include "coop/player/puppet_drive.h"
+#include "coop/session/local_grants.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
@@ -90,7 +91,9 @@ void InitFromIni() {
 }
 
 void Update() {
-    if (!g_enabled.load(std::memory_order_acquire) || !coop::dev_gate::Allowed()) {
+    // The host's grant (coop/session/local_grants) decides; a revoke turns the overlay off.
+    if (!g_enabled.load(std::memory_order_acquire) ||
+        !coop::session::local_grants::Has(coop::permissions::grants::Projected::Overlay)) {
         if (g_publishedAnything) PublishEmpty_(nullptr);  // self-clear once on toggle-off
         return;
     }
@@ -156,7 +159,8 @@ void GetSnapshot(Snapshot& out) {
 }
 
 bool IsEnabled() {
-    return g_enabled.load(std::memory_order_acquire) && coop::dev_gate::Allowed();
+    return g_enabled.load(std::memory_order_acquire) &&
+           coop::session::local_grants::Has(coop::permissions::grants::Projected::Overlay);
 }
 
 void SetEnabled(bool on) {

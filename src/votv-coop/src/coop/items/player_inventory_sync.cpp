@@ -13,6 +13,7 @@
 #include "coop/props/prop_synth_key.h"  // RandomKeyString, the fresh key of a copied record
 #include "coop/session/player_handshake.h"
 #include "ue_wrap/actors/begin_equipment.h"  // GiveFromClass, the starter-kit probe
+#include "ue_wrap/actors/effects.h"  // ResetOnSaveObject, the host's effects out of the joiner's save
 #include "ue_wrap/engine/engine.h"      // SetSaveObjectReadyHook, the pre-materialise apply point
 #include "ue_wrap/actors/inventory.h"
 #include "ue_wrap/actors/puppet.h"  // ReadCharacterIsFalling
@@ -29,6 +30,7 @@
 #include <cstdint>
 #include <cwchar>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace coop::player_inventory_sync {
@@ -115,21 +117,11 @@ void SampleStandingPose() {
     g_standingPose = {at.X, at.Y, at.Z, rot.Yaw, true};
 }
 
-// Client: poll the carried, worn and held items at 1 Hz and stream the profile to the host. A
-// change of the items goes at once; the vitals and the pose alone go at kVitalsCadence, and are
-// not even read on a poll that will not send.
-void ClientStreamTick(coop::net::Session* s) {
-    const Clock::time_point now = Clock::now();
-    if (now - g_lastPoll < kClientPoll) return;
-    g_lastPoll = now;
-    if (!g_profileApplied) return;  // this world holds no profile of ours to report
-    ue_wrap::inventory::PlayerInventory items;
-    if (!ue_wrap::inventory::ReadAll(items)) return;  // world not up yet
-    SampleStandingPose();
-    std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(items);
-    const uint64_t itemsHash = coop::blob_chunks::Fnv64(blob);
-    if (itemsHash == g_lastItemsHash && now - g_lastSend < kVitalsCadence) return;
-
+// Client: send one built profile -- the items blob plus the vitals and the pose -- to the host.
+// True when the transport took it. The caller owns the poll and the dedup; this owns the vitals
+// read, the size ceiling, the send and the dedup state a send leaves behind.
+static bool SendProfile(coop::net::Session* s, std::vector<uint8_t> blob, uint64_t itemsHash,
+                        size_t carried, Clock::time_point now) {
     // The vitals not reading (a field the game renamed) must not stop the ITEMS from being stored:
     // the profile then goes without them and is applied with the game's defaults.
     ue_wrap::vitals::Snapshot vitals;
@@ -150,18 +142,37 @@ void ClientStreamTick(coop::net::Session* s) {
             g_oversizeHash = itemsHash;
             UE_LOGE("player_inventory[client]: the profile is %zu bytes (%zu carried), past the "
                     "%zu-byte transport ceiling -- NOT sent; the host keeps the last one that fitted",
-                    blob.size(), items.inventory.size(), coop::blob_chunks::MaxBlobBytes());
+                    blob.size(), carried, coop::blob_chunks::MaxBlobBytes());
         }
-        return;
+        return false;
     }
     if (coop::blob_chunks::SendBlob(s, coop::net::ReliableKind::PlayerInventoryBlob, ++g_sendSeq, blob)) {
         // Logged for a change of the items only: the vitals cadence is steady state, not an event.
         if (itemsHash != g_lastItemsHash)
             UE_LOGI("player_inventory[client]: streamed profile (%zu bytes, %zu carried) to host",
-                    blob.size(), items.inventory.size());
+                    blob.size(), carried);
         g_lastItemsHash = itemsHash;
         g_lastSend = now;
-    }  // else: refused -> retry next poll under a fresh seq
+        return true;
+    }
+    return false;  // refused -> retry next poll under a fresh seq
+}
+
+// Client: poll the carried, worn and held items at 1 Hz and stream the profile to the host. A
+// change of the items goes at once; the vitals and the pose alone go at kVitalsCadence, and are
+// not even read on a poll that will not send.
+void ClientStreamTick(coop::net::Session* s) {
+    const Clock::time_point now = Clock::now();
+    if (now - g_lastPoll < kClientPoll) return;
+    g_lastPoll = now;
+    if (!g_profileApplied) return;  // this world holds no profile of ours to report
+    ue_wrap::inventory::PlayerInventory items;
+    if (!ue_wrap::inventory::ReadAll(items)) return;  // world not up yet
+    SampleStandingPose();
+    std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(items);
+    const uint64_t itemsHash = coop::blob_chunks::Fnv64(blob);
+    if (itemsHash == g_lastItemsHash && now - g_lastSend < kVitalsCadence) return;
+    SendProfile(s, std::move(blob), itemsHash, items.inventory.size(), now);
 }
 
 // Host: sweep stale half-assemblies and push each newly connected joiner its per-player apply
@@ -187,13 +198,33 @@ void HostPersistTick(coop::net::Session* s) {
 
 // Client: the engine's pre-materialise hook, registered in Install. Fires on the game thread
 // with the freshly loaded save object, before the native load builds the world from it, the
-// one window to substitute this client's inventory. Fires for every load in the process, so it
-// acts only on the one the join boot armed (BeginJoinApply), once. The join boot waits for the
+// one window to substitute this client's inventory, and to reset the host's status effects out
+// of it. Fires for every load in the process, so it acts only on the one the join boot armed
+// (BeginJoinApply), once. The join boot waits for the
 // blob; if it still is not here, the host's items are emptied out of the save
 // object all the same -- they are the host's, not data of this player's that could be lost -- and
 // the stream stays shut for the session, so the profile on the host survives for the next join.
 void OnSaveObjectReady(void* saveSlotObject) {
     if (!g_joinApplyArmed.exchange(false, std::memory_order_acq_rel)) return;  // not a join's load
+    // The host's status effects are records among its world's in this save object, and a player
+    // joins without them: the game's own reset takes them out before the world is built, ahead of
+    // both branches below (the profile branch returns early).
+    // Divergence from MTA, which resets a joiner's own state at the join (Event_OnIngame ->
+    // ResetStats, reference/mtasa-blue/Client/mods/deathmatch/logic/CClientGame.cpp:3452-3515) and
+    // composes what a joiner receives per recipient on its server
+    // (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:1436-1483). Here the records
+    // are removed at the receiver: the join streams the canonical on-disk slot when the live
+    // capture fails (src/votv-coop/src/coop/save/save_transfer.cpp:370,423) and the capture
+    // serialises the host's own live save object
+    // (src/votv-coop/src/ue_wrap/engine/save_capture.cpp:178-181), which the host must keep.
+    bool gamemodeSet = false;
+    const int effectsReset = ue_wrap::effects::ResetOnSaveObject(saveSlotObject, &gamemodeSet);
+    if (effectsReset > 0)
+        UE_LOGI("player_inventory[client]: left the host's status effects out of this player's world "
+                "(%d record(s) reset; gamemode=%s)", effectsReset, gamemodeSet ? "set" : "none");
+    else if (effectsReset < 0)
+        UE_LOGW("player_inventory[client]: the game's effect reset did not run -- this player may "
+                "start with the host's effects");
     g_profileApplied = false;
     g_joinPose = {};
     g_joinPlacement = JoinStaysAtHost() ? JoinPlacement::AtHost : JoinPlacement::StartPoint;
@@ -401,6 +432,17 @@ void Tick() {
                     "(was %zu/%zu/%zu)", after.inventory.size(), after.equipment.size(),
                     after.hold.size(), inv.inventory.size(), inv.equipment.size(), inv.hold.size());
     }
+}
+
+bool SendProfileNow(coop::net::Session* s) {
+    if (!s || !s->connected() || !g_profileApplied) return false;
+    ue_wrap::inventory::PlayerInventory items;
+    if (!ue_wrap::inventory::ReadAll(items)) return false;
+    SampleStandingPose();
+    std::vector<uint8_t> blob = coop::inventory_wire::SerializeItems(items);
+    const uint64_t itemsHash = coop::blob_chunks::Fnv64(blob);
+    // No hash or cadence check: the caller has just changed the vitals the profile carries.
+    return SendProfile(s, std::move(blob), itemsHash, items.inventory.size(), Clock::now());
 }
 
 void OnReliable(const coop::net::BlobChunkPayload& p, uint8_t senderPeerSlot) {

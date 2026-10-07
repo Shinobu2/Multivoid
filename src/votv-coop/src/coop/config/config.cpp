@@ -216,8 +216,6 @@ static std::wstring IniPath() {
     return dir.empty() ? std::wstring{} : dir + L"\\multivoid.ini";
 }
 
-static std::string StripInlineComment(const std::string& v, bool wsPrecededOnly);
-
 // The seams the write TU uses (config_internal.h).
 namespace internal {
 std::mutex& IniMutex() { return g_iniMutex; }
@@ -230,9 +228,6 @@ std::string TrimEdgesStr(const std::string& s) { return TrimEdges(s); }
 bool ParseIniKeyValue(const std::string& line, std::string& key, std::string& value) {
     return ParseIniLine(line, key, value);
 }
-std::string StripInlineCommentStr(const std::string& v, bool wsPrecededOnly) {
-    return StripInlineComment(v, wsPrecededOnly);
-}
 }  // namespace internal
 
 // The occurrence rule: the authoritative line of a key is its first occurrence by
@@ -240,28 +235,58 @@ std::string StripInlineCommentStr(const std::string& v, bool wsPrecededOnly) {
 // the sweep; the layers differ only in value vocabulary. (A case-sensitive first-key string read
 // beside a first-recognised-value flag read silently swallowed garbage.)
 
-// Inline-comment stripping, in the value layer. The string layer cuts at the first ';' preceded
-// by whitespace (an interior ';' with no space before it stays, so device names round-trip); the
-// flag layer cuts unconditionally, since flag lines carry inline comments and never a legitimate
-// ';'.
-static std::string StripInlineComment(const std::string& v, bool wsPrecededOnly) {
-    for (size_t i = 0; i < v.size(); ++i) {
-        if (v[i] != ';') continue;
-        if (!wsPrecededOnly || i == 0 || v[i - 1] == ' ' || v[i - 1] == '\t')
-            return TrimEdges(v.substr(0, i));  // not-name-text: an inline ini comment
+namespace internal {
+// The ONE reader of a value's text, in the value layer. A value whose first non-blank character
+// is '"' is QUOTED, read left to right from the character after it: '\' followed by '"' or '\'
+// yields that character, '\' followed by anything else is kept with the character after it, the
+// first '"' not consumed by an escape closes the value and whatever follows it (an inline
+// comment) is ignored, and a value with no closing quote is the rest of the line, escapes
+// processed. Any other value is edge-trimmed, cut at the first ';' (the string layer: only one
+// that begins the value or follows a space or tab, so device names with an interior ';'
+// round-trip; the typed layers, wsPrecededOnly false: any ';', since their lines never carry a
+// legitimate one), and trimmed again. The typed readers cook every layer's raw, so a quoted
+// environment twin reads unquoted and an edge-spaced one trimmed: a harmless widening.
+std::string CookIniValue(const std::string& v, bool wsPrecededOnly) {
+    const std::string t = TrimEdges(v);
+    if (!t.empty() && t[0] == '"') {
+        std::string out;
+        for (size_t i = 1; i < t.size(); ++i) {
+            const char c = t[i];
+            if (c == '"') return out;
+            if (c == '\\' && i + 1 < t.size()) {
+                const char n = t[++i];
+                if (n != '"' && n != '\\') out.push_back(c);
+                out.push_back(n);
+                continue;
+            }
+            out.push_back(c);
+        }
+        return out;
     }
-    return v;
+    for (size_t i = 0; i < t.size(); ++i) {
+        if (t[i] != ';') continue;
+        if (!wsPrecededOnly || i == 0 || t[i - 1] == ' ' || t[i - 1] == '\t')
+            return TrimEdges(t.substr(0, i));  // not-name-text: an inline ini comment
+    }
+    return t;
 }
+}  // namespace internal
 
 // The one truthiness vocabulary, case-insensitive: 1, true, yes, on against 0, false, no, off.
 // Anything else, an empty value included, is garbage: 0, the caller's default applies in memory,
 // the sweep reports it, and nothing rewrites the file.
 static int FlagVerdictFromValue(const std::string& raw) {
-    std::string v = StripInlineComment(raw, /*wsPrecededOnly=*/false);
+    std::string v = internal::CookIniValue(raw, /*wsPrecededOnly=*/false);
     for (char& c : v) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
     if (v == "1" || v == "true" || v == "yes" || v == "on") return 1;
     if (v == "0" || v == "false" || v == "no" || v == "off") return -1;
     return 0;
+}
+
+int FlagVerdict(const std::string& raw) { return FlagVerdictFromValue(raw); }
+
+std::string CookValue(const std::string& raw) {
+    return internal::CookIniValue(raw, /*wsPrecededOnly=*/false);
 }
 
 // Whole-string numeric parses: "1.25abc" and "" are garbage, not 1.25 and 0 (a prefix-accepting
@@ -302,7 +327,7 @@ bool ValueValidForKey(const char* key, const std::string& rawValue, std::string*
     const config_registry::Row* row = config_registry::FindRow(key);
     if (!row) return true;
     using config_registry::Kind;
-    const std::string v = StripInlineComment(rawValue, /*wsPrecededOnly=*/false);
+    const std::string v = internal::CookIniValue(rawValue, /*wsPrecededOnly=*/false);
     char buf[128];
     switch (row->kind) {
         case Kind::Flag:
@@ -348,7 +373,7 @@ static std::string ReadIniValueAt(const std::wstring& path, const char* key,
         if (found) return;
         std::string k, v;
         if (ParseIniLine(line, k, v) && _stricmp(k.c_str(), key) == 0) {
-            result = StripInlineComment(v, /*wsPrecededOnly=*/true);
+            result = internal::CookIniValue(v, /*wsPrecededOnly=*/true);
             found = true;
         }
     }, faultOut);
@@ -367,7 +392,8 @@ std::string ReadIniValue(const char* key, const char* def, IniScan* scanOut, Ini
     return v;
 }
 
-// The P2P transport fields of `c` from env, then ini, then default, for a session configured
+// The P2P transport fields of `c` from a value set while the game runs (the runtime layer), then
+// the environment variable, then the ini value, then the default, for a session configured
 // with no master (ReadNetConfig's p2p topology); a master lobby takes its rendezvous and ICE
 // servers from the master's answer instead. The candidate policy, net.ice, is not a field: every
 // session start reads it (Session::Start, coop/net/ice_policy.h).
@@ -399,9 +425,13 @@ static void FillP2PFields(coop::net::Config& c) {
 
     // Both as the player wrote them: an empty relay prints as the master's it will be.
     UE_LOGI("config: P2P fields -- identity=<durable key> host='%s' signaling='%s' stun='%s'",
-            c.hostIdentity.c_str(),
-            c.signalingUrl.empty() ? "(the chosen master's)" : c.signalingUrl.c_str(),
-            c.stunList.c_str());
+            config_registry::ValueForLog(config_registry::FindRow("net.host_identity"),
+                                         c.hostIdentity).c_str(),
+            c.signalingUrl.empty()
+                ? "(the chosen master's)"
+                : config_registry::ValueForLog(config_registry::FindRow("net.signaling"),
+                                               c.signalingUrl).c_str(),
+            config_registry::ValueForLog(config_registry::FindRow("net.stun"), c.stunList).c_str());
 }
 
 coop::net::Config ReadNetConfig(bool& enabled) {
@@ -499,17 +529,19 @@ std::string ReadPlayerSkin() {
     std::string skin = ReadLiveIniWithScan("player_skin", st, fault);
     if (!coop::skins::IsValidSkinName(skin)) {
         skin = coop::skins::PickRandomStarterSkin();
+        const std::string shownSkin =
+            config_registry::ValueForLog(config_registry::FindRow("player_skin"), skin);
         if (st == IniScan::Unreadable) {
             g_identityNotDurable.store(true, std::memory_order_relaxed);
             UE_LOGW("config: player_skin unreadable (multivoid.ini %s) -> '%s' "
                     "SESSION-ONLY; mint gate refuses to write over an unreadable ini",
-                    IniFaultWords(fault), skin.c_str());
+                    IniFaultWords(fault), shownSkin.c_str());
         } else {
             // The log says whether the persist happened; on a locked file it does not.
             const bool persisted = WriteIniValue(config_registry::rows::player_skin, skin.c_str());
             if (!persisted) g_identityNotDurable.store(true, std::memory_order_relaxed);
             UE_LOGI("config: player_skin absent/invalid -> random starter '%s' (%s)",
-                    skin.c_str(),
+                    shownSkin.c_str(),
                     persisted ? "persisted to multivoid.ini" : "SESSION-ONLY -- ini write failed");
         }
     }
@@ -578,6 +610,9 @@ bool MasterEnabled() {
 // product semantics: one core for the live resolve and its instrument.
 namespace internal {
 
+// The default a read of the ini is given when a line's absence must be told from any real value.
+static const char* const kIniAbsent = "\x01<absent>";
+
 // The layered raw-value pick (config_internal.h). The row comes from the caller's typed handle,
 // so no lookup and no unregistered key; the census passes a row straight off the table, which is
 // the one caller that has no handle and needs none.
@@ -586,6 +621,8 @@ bool PickRawLayered(const config_registry::Row* row, std::string& raw, bool* fro
     if (fromEnvOut) *fromEnvOut = false;
     if (scanOut) *scanOut = IniScan::Ok;
     if (faultOut) *faultOut = IniFault::None;
+    if (SessionLayerGet(row, raw)) return true;
+    if (RuntimeLayerGet(row, raw)) return true;
     if (row->envVar) {
         const std::string e = ReadEnv(row->envVar);
         if (!e.empty()) {
@@ -594,11 +631,31 @@ bool PickRawLayered(const config_registry::Row* row, std::string& raw, bool* fro
             return true;
         }
     }
-    static const char* kAbsent = "\x01<absent>";
-    const std::string v = ReadIniValue(row->key, kAbsent, scanOut, faultOut);
-    if (v == kAbsent) return false;
+    const std::string v = ReadIniValue(row->key, kIniAbsent, scanOut, faultOut);
+    if (v == kIniAbsent) return false;
     raw = v;
     return true;
+}
+
+// The same layers without the session (config_internal.h), over the ini at `iniPath`. The ini is
+// read under IniMutex, as ReadIniValue reads it, and the scan's verdict is not recorded: an
+// unreadable file answers like an absent line, the default.
+void RawBelowSession(const std::wstring& iniPath, const config_registry::Row* row,
+                     std::string& raw) {
+    if (RuntimeLayerGet(row, raw)) return;
+    if (row->envVar) {
+        const std::string e = ReadEnv(row->envVar);
+        if (!e.empty()) {
+            raw = e;
+            return;
+        }
+    }
+    std::string v;
+    {
+        std::lock_guard<std::mutex> lk(g_iniMutex);
+        v = ReadIniValueAt(iniPath, row->key, kIniAbsent, nullptr, nullptr);
+    }
+    raw = (v == kIniAbsent) ? DefaultText(*row) : v;
 }
 
 bool FlagFromRaw(const config_registry::Row* row, bool have, const std::string& raw) {
@@ -609,7 +666,7 @@ bool FlagFromRaw(const config_registry::Row* row, bool have, const std::string& 
 long IntFromRaw(const config_registry::Row* row, bool have, const std::string& raw) {
     if (!have) return row->defI;
     long v = 0;
-    if (!ParseWholeLong(StripInlineComment(raw, false), v)) return row->defI;
+    if (!ParseWholeLong(CookIniValue(raw, false), v)) return row->defI;
     if (v < static_cast<long>(row->lo) || v > static_cast<long>(row->hi))
         return row->defI;  // out of range is garbage: the default, and the sweep reports it
     return v;
@@ -617,14 +674,14 @@ long IntFromRaw(const config_registry::Row* row, bool have, const std::string& r
 float FloatFromRaw(const config_registry::Row* row, bool have, const std::string& raw) {
     if (!have) return row->defF;
     double v = 0;
-    if (!ParseWholeDouble(StripInlineComment(raw, false), v)) return row->defF;
+    if (!ParseWholeDouble(CookIniValue(raw, false), v)) return row->defF;
     if (v < row->lo || v > row->hi) return row->defF;
     return static_cast<float>(v);
 }
 std::string EnumFromRaw(const config_registry::Row* row, bool have, const std::string& raw) {
     if (!have) return row->defS;
     std::string canonical;
-    if (EnumTokenMatch(row, StripInlineComment(raw, false), canonical)) return canonical;
+    if (EnumTokenMatch(row, CookIniValue(raw, false), canonical)) return canonical;
     return row->defS;
 }
 
@@ -730,6 +787,13 @@ std::string ResolveString(const config_registry::StringRow& h) {
     std::string raw;
     if (!internal::PickRawLayered(h.row, raw)) return h.row->defS;
     return raw;
+}
+
+// The answering layer's own text, not a canonical print: a client resolves the same bytes through
+// the same reader as the host, so the two agree on the value.
+std::string EffectiveText(const config_registry::Row& row) {
+    std::string raw;
+    return internal::PickRawLayered(&row, raw) ? raw : internal::DefaultText(row);
 }
 
 }  // namespace coop::config

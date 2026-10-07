@@ -71,8 +71,9 @@ bool HasAny();
 // The VISIBILITY AXIS is owned HERE, in the nameplate domain; the wire layer (player_handshake)
 // parses Join, PlayerJoined and NameplateChange and stores into this module, exactly as skins store
 // into RemotePlayer::ApplySkin. The whole store is ATOMIC and any-thread: writers span the game
-// thread (the wire handlers), the render thread (the F1 checkbox request path) and the bringup
-// thread (the session-start reset through player_handshake::Reset on the TimelineThread).
+// thread (the wire handlers and the `nameplate` row's subscriber) and the bringup thread (the
+// session-start reset through player_handshake::Reset on the TimelineThread); the render thread
+// (the F1 checkbox) only reads.
 
 // Boot-time init from multivoid.ini nameplate= (harness, before the pump ticks).
 void SetInitialLocalVisible(bool visible);
@@ -80,9 +81,8 @@ void SetInitialLocalVisible(bool visible);
 // The local pref. Any thread (atomic) -- the F1 checkbox reads it.
 bool LocalVisible();
 
-// UI entry (render thread): persist to multivoid.ini, apply locally, announce
-// to the session (host: broadcast; client: to host for rebroadcast).
-void RequestLocalVisible(bool visible);
+// Follow the `nameplate` row: once, at boot.
+void SubscribeRow();
 
 // Wire store: peer `slot` announced its pref. Update() skips hidden slots from
 // the next snapshot on. Any thread (atomic slot flags).

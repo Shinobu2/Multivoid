@@ -9,12 +9,16 @@
 #include "coop/config/config.h"           // Resolve* for the rows below
 #include "coop/config/config_registry.h"  // rows: the fake-link knobs, the connect cap
 #include "coop/net/connect_history.h"
+#include "coop/net/endpoint_log.h"
 #include "coop/net/ice_policy.h"         // what the player's net.ice refuses
 #include "coop/net/master_slots.h"       // an empty relay is the chosen master's
 #include "coop/net/peer_admission.h"
 #include "coop/net/peer_identity.h"
+#include "coop/net/session_serial.h"
 #include "coop/player/nickname_arbiter.h"
+#include "coop/session/player_handshake.h"
 #include "coop/text/case_fold.h"
+#include "coop/text/name_filter.h"
 #include "coop/text/repertoire.h"
 #include "coop/text/novelty_ledger.h"
 #include "coop/text/utf8_codec.h"
@@ -170,6 +174,9 @@ bool Session::Start(const Config& cfg, Refusal* why) {
         std::random_device rd;
         do { ownEpoch_ = rd(); } while (ownEpoch_ == 0);
     }
+    // This start's serial, before running_ is set: what the process keeps per session (the local
+    // grants) is stamped with it, and a running session's serial is already current.
+    coop::net::session_serial::Next();
     // The per-slot occupancy generations: a reused Session must not open with slots that look
     // occupied. The counter is not reset, so generations stay unique across cycles and a stale
     // captured token can never alias a fresh occupant.
@@ -204,6 +211,10 @@ bool Session::Start(const Config& cfg, Refusal* why) {
     static const bool kNickArbiterOk = coop::nickname_arbiter::RunNicknameArbiterSelftest();
     (void)kNickArbiterOk;
 
+    // The nickname's own trims, beside the arbiter that folds it.
+    static const bool kNickSanitizerOk = coop::player_handshake::RunNicknameSanitizerSelftest();
+    (void)kNickSanitizerOk;
+
     // The UTF-8 codec's self-test: its interesting cases are an ill-formed byte sequence a peer
     // would have to send deliberately, and a cap landing mid-character.
     static const bool kCodecOk = coop::text::RunUtf8CodecSelftest();
@@ -214,6 +225,11 @@ bool Session::Start(const Config& cfg, Refusal* why) {
     // disjoint) and the membership facts the fold depends on.
     static const bool kRepertoireOk = coop::text::RunRepertoireSelftest();
     (void)kRepertoireOk;
+
+    // The name filter's self-test beside the table it reads: a wrong verdict here is a nickname
+    // that splits a log line, which no drill sees.
+    static const bool kNameFilterOk = coop::text::RunNameFilterSelftest();
+    (void)kNameFilterOk;
 
     // The case table beside it, generated in the same run. Its rows are positive: a generated table
     // that arrives empty folds nothing, and "no two names collided" is also what a healthy lobby
@@ -258,6 +274,10 @@ bool Session::Start(const Config& cfg, Refusal* why) {
         return false;
     }
 
+    // Nothing a previous session queued for the net thread carries across: its frees were run by
+    // Stop, and a close it marked is moot.
+    { std::lock_guard<std::mutex> lk(teardownMutex_); pendingFrees_.clear(); }
+    aggregateDue_.store(false);
     state_.store(ConnState::Handshaking);
     for (auto& r : rttMsBySlot_) r.store(-1, std::memory_order_relaxed);  // per-slot RTT reset
     running_.store(true);
@@ -301,13 +321,15 @@ bool Session::StartLanDirect() {
     } else {  // Client
         SteamNetworkingIPAddr addr{};
         if (!addr.ParseString(cfg_.peerIp.c_str())) {
-            UE_LOGE("net: client peer IP '%s' did not parse", cfg_.peerIp.c_str());
+            UE_LOGE("net: client peer IP '%s' did not parse",
+                    ue_wrap::log::Addr(cfg_.peerIp).c_str());
             return false;
         }
         addr.m_port = cfg_.port;
         const HSteamNetConnection hConn = sockets->ConnectByIPAddress(addr, 0, nullptr);
         if (hConn == k_HSteamNetConnection_Invalid) {
-            UE_LOGE("net: ConnectByIPAddress(%s:%u) failed", cfg_.peerIp.c_str(), cfg_.port);
+            UE_LOGE("net: ConnectByIPAddress(%s:%u) failed",
+                    ue_wrap::log::Addr(cfg_.peerIp).c_str(), cfg_.port);
             return false;
         }
         // GEN: none -- a client never mints an occupancy generation. Slot 0 is the host; the
@@ -316,7 +338,7 @@ bool Session::StartLanDirect() {
         peerConns_[0].store(hConn);
         linkStage_.store(static_cast<uint8_t>(LinkStage::Dialing), std::memory_order_release);
         UE_LOGI("net: client dialed %s:%u (hConn=0x%08x slot=0)",
-                cfg_.peerIp.c_str(), cfg_.port, static_cast<unsigned>(hConn));
+                ue_wrap::log::Addr(cfg_.peerIp).c_str(), cfg_.port, static_cast<unsigned>(hConn));
     }
     return true;
 }
@@ -370,7 +392,8 @@ bool Session::StartP2P(bool relayOnly) {
     }
     signaling_ = SignalingClient::Create(cfg_.signalingUrl, cfg_.signalingToken, sockets);
     if (!signaling_) {
-        UE_LOGE("net: failed to create signaling client for '%s'", cfg_.signalingUrl.c_str());
+        UE_LOGE("net: failed to create signaling client for '%s'",
+                endpoint_log::LogEndpoint(cfg_.signalingUrl).c_str());
         return false;
     }
 
@@ -396,7 +419,8 @@ bool Session::StartP2P(bool relayOnly) {
         hPollGroup_.store(hPoll);
         UE_LOGI("net: P2P host listening as '%s' via signaling %s "
                 "(hListen=0x%08x hPoll=0x%08x), capacity=%d clients",
-                peer_identity::LocalIdentityString().c_str(), cfg_.signalingUrl.c_str(),
+                peer_identity::LocalIdentityString().c_str(),
+                endpoint_log::LogEndpoint(cfg_.signalingUrl).c_str(),
                 static_cast<unsigned>(hListen), static_cast<unsigned>(hPoll),
                 kMaxPeers - 1);
     } else {  // Client
@@ -444,19 +468,33 @@ bool Session::StartP2P(bool relayOnly) {
         peerConns_[0].store(hConn);
         linkStage_.store(static_cast<uint8_t>(LinkStage::Dialing), std::memory_order_release);
         UE_LOGI("net: P2P client dialing '%s' via signaling %s (hConn=0x%08x slot=0)",
-                cfg_.hostIdentity.c_str(), cfg_.signalingUrl.c_str(),
+                cfg_.hostIdentity.c_str(),
+                endpoint_log::LogEndpoint(cfg_.signalingUrl).c_str(),
                 static_cast<unsigned>(hConn));
     }
     return true;
 }
 
+void Session::SetStopListener(void (*onStopped)()) {
+    void (*expected)() = nullptr;
+    if (!stopListener_.compare_exchange_strong(expected, onStopped) && expected != onStopped)
+        UE_LOGE("session: a second stop listener was refused -- one owner");
+}
+
 void Session::Stop() {
     if (!running_.exchange(false)) return;
+    // Told once per stopped session, after running() reads false and before the teardown below.
+    if (void (*onStopped)() = stopListener_.load()) onStopped();
     // The linger flush needs RunCallbacks pumping, so connections are closed after the net thread
     // is joined and the callbacks pumped by hand: signal exit and join, close every peer with
     // linger, pump for about 200 ms so GNS flushes the queued reliable data, then destroy the poll
     // group and the listen socket.
     if (thread_.joinable()) thread_.join();
+    netThreadId_.store(std::thread::id{});
+
+    // The slots an off-thread kick queued and the loop's last pass never reached are freed here,
+    // after the join, before the slot loop below empties every slot.
+    RunPendingFrees();
 
     // After the join, never before: the client's admission state dies with the session (a stale
     // proved flag would let the next connection's slot assignment through unchallenged), and
@@ -479,6 +517,16 @@ void Session::Stop() {
 
     auto* sockets = SteamNetworkingSockets();
     if (sockets) {
+        // The band dies with the session: a handle left in it would hold a band entry into the next
+        // session, whose sweep would then close it as an identity that never proved. The net thread
+        // has joined and the accept edges refuse once running_ is false, so nothing parks after
+        // this and the band and peer_admission's host state have no other writer.
+        for (int i = 0; i < kMaxPending; ++i) {
+            const uint32_t h = pendingConns_[i].exchange(0);
+            pendingSinceMs_[i].store(0, std::memory_order_release);
+            peer_admission::HostForgetPending(i);
+            if (h != 0) EndPendingSocket(h, EndReason::HostStopped, "session stop");
+        }
         for (int i = 0; i < kMaxPeers; ++i) {
             // GEN: clear -- session teardown empties every slot. A Session sits stopped between
             // Stop and the next Start, and a generation left live across that window would read
@@ -500,10 +548,12 @@ void Session::Stop() {
             }
         }
         for (int i = 0; i < 20; ++i) {
-            sockets->RunCallbacks();
             // P2P: closing a connection may need a final rendezvous signal, so the signaling
             // transport is polled through the linger window too. Null on the direct transport.
+            // Polled before RunCallbacks, as the net thread does: an offer the last poll delivers
+            // is dispatched, refused and logged in the same iteration.
             if (signaling_) signaling_->Poll();
+            sockets->RunCallbacks();
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         const uint32_t hPoll = hPollGroup_.exchange(0);

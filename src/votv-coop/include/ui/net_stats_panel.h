@@ -15,9 +15,12 @@
 
 namespace ui::net_stats_panel {
 
-// The persisted pref (lazy ini read on first call). Render-thread safe.
+// The ui.netstats row's resolved value (lazy read on first call). Render-thread safe. A change
+// is a config SetValue; the subscriber applies it.
 bool Enabled();
-void SetEnabled(bool on);  // + persist multivoid.ini ui.netstats
+
+// Follow the `ui.netstats` row: once, at boot.
+void SubscribeRow();
 
 // The passive overlay window (render thread, inside the ImGui frame). No-op unless
 // Enabled(). Driven from imgui_overlay beside ui::hud::Render.

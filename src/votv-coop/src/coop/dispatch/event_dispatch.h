@@ -37,8 +37,8 @@ bool HandleEntityEvent(net::Session& session,
 
 // Keyed device-state family: the mirrored state of doors, lights, lockers, containers, appliances,
 // keypads, power, the ATV, drones, turbines, cleanliness and grime, plus the per-device claim,
-// sleep, email, inventory and voice rows. `localPlayer` threads into the KerfurConvert client apply
-// (prop teardown and materialize).
+// sleep, email, inventory and voice rows, and the host's server-scope settings. `localPlayer`
+// threads into the KerfurConvert client apply (prop teardown and materialize).
 bool HandleStateEvent(net::Session& session,
                       const net::Session::ReliableMessage& msg,
                       void* localPlayer);

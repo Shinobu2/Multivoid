@@ -348,7 +348,7 @@ void RunProbe() {
         return;
     }
 
-    const std::string arm = rejoin ? ("REJOIN -> " + addr)
+    const std::string arm = rejoin ? ("REJOIN -> " + ue_wrap::log::Addr(addr))
                                    : (slot.empty() ? std::string("SOLO <fresh new game>")
                                                    : ("SOLO save '" + slot + "'"));
     UE_LOGI("reloadchurn: === RE-LOAD CHURN probe START (cycles=%d dwell=%ds menu=%ds arm=%s) ===",
@@ -452,7 +452,7 @@ void RunProbe() {
             // state.
             const bool accepted = coop::session_manager::ConnectDirect(addr);
             UE_LOGI("reloadchurn: cycle %d ConnectDirect('%s') accepted=%d",
-                    c, addr.c_str(), accepted ? 1 : 0);
+                    c, ue_wrap::log::Addr(addr).c_str(), accepted ? 1 : 0);
             // Census repeatedly through the join, each flushed: the fatal LoadMap runs on the game
             // thread inside the join, so the best evidence is the last census that reached disk.
             for (int i = 0; i < 30; ++i) {

@@ -8,6 +8,11 @@
 #include "harness/pump.h"
 #include "harness/world_boot.h"
 
+#include "coop/atomic_file/atomic_file.h"
+#include "coop/bug_report/report_core.h"
+#include "coop/build_trust/build_trust.h"
+#include "coop/commands/commands_selftest.h"
+#include "coop/comms/chat_sync.h"
 #include "coop/config/config.h"
 #include "coop/creatures/npc_sync.h"
 #include "coop/dev/dev_gate.h"
@@ -30,11 +35,14 @@
 #include "coop/net/peer_admission.h"
 #include "coop/net/peer_identity.h"
 #include "coop/net/stream_slot.h"
+#include "coop/permissions/permission_host.h"
+#include "coop/permissions/permissions_selftest.h"
 #include "coop/player/movement_ledger.h"
 #include "coop/player/players_registry.h"
 #include "coop/player/puppet_drive.h"
 #include "coop/player/remote_player.h"
 #include "coop/player/roster.h"
+#include "coop/player/stat_orders_wire.h"
 #include "coop/props/container_park.h"
 #include "coop/props/container_write_policy.h"
 #include "coop/props/prop_lifecycle.h"
@@ -43,12 +51,15 @@
 #include "coop/save/save_transfer.h"
 #include "coop/session/join_beacon.h"
 #include "coop/session/join_progress.h"
+#include "coop/session/local_grants.h"
 #include "coop/session/net_pump.h"
 #include "coop/session/player_handshake.h"
 #include "coop/session/rig_ready.h"
+#include "coop/session/server_settings_sync.h"
 #include "coop/text/utf8_codec.h"
 #include "coop/session/session_manager.h"
 #include "coop/session/shutdown.h"
+#include "coop/server_profile/server_profile.h"
 #include "coop/session/subsystems.h"
 #include "coop/session/teleport_client.h"
 #include "coop/world/spawn_authority.h"
@@ -85,10 +96,10 @@ namespace cfg = coop::config;
 // The single networking session; off until a scenario or a menu action starts it.
 coop::net::Session g_session;
 
-// The host's accept predicate (Session::SetAcceptFilter): a plain function, so it converts to the
-// function pointer; read on the net thread, touching only ban_list's own mutexed state.
-bool BanAcceptFilter(const char* remoteIp, char* whyOut, int whyLen) {
-    return !coop::ban_list::IsBanned(remoteIp, whyOut, whyLen);
+// The host's ban predicate (Session::SetBanCheck): a plain function, so it converts to the
+// session's pointer type.
+bool BanCheck(const char* playerId, const char* address, char* whyOut, int whyLen) {
+    return coop::ban_list::IsBanned(playerId, address, whyOut, whyLen);
 }
 
 
@@ -149,7 +160,7 @@ void SpawnSecondPlayerWhenReady() {
 }
 
 // Bring up a session on g_session: reset the per-session edge state, wire every subsystem,
-// (host) back the save up and install the LanDirect ban filter, then Start. The one path for
+// (host) back the save up and load the ban list on every topology, then Start. The one path for
 // "start a coop session", from the env boot and from a browser action; on the TimelineThread,
 // since Start spawns the net thread and the save backup is a blocking copy. Returns Start()'s
 // success, which the browser-join path uses to Fail the join when no connect edge will arrive.
@@ -193,14 +204,34 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // And the per-source history behind the connection cap and the password-guess bound: a count
     // that refuses, a refusal that lifts, a window that slides, a full table that refuses nobody.
     coop::net::connect_history::RunSelftest();
+    // And the commands' line splitter, target resolver, registry and dispatcher: a resolver that
+    // picks the wrong player kicks the wrong player, and a wrong pick reads as working until then.
+    coop::commands::RunSelftest();
+    // And the bug report's redactor, form check and the printed forms it rests on: a redactor that
+    // misses a shape leaves a stranger's address in a file a player sends, and nothing else notices.
+    coop::bug_report::RunSelftest();
+    // And the order / query wire an admin's commands will ride: a length or a float taken on trust
+    // faults the host on a client's bytes, and a token table that answers the wrong slot answers an
+    // order nobody sent.
+    coop::stat_orders::RunSelftest();
+    // And the build's own type: a parser that accepts a bent line, or a verifier that trusts an
+    // unknown key, makes a fork read as official.
+    coop::build_trust::RunSelftest();
     // And the newest-wins latch every received stream keeps: no LAN run reorders a datagram, so the
     // batch that arrives behind one already taken is refused here, on pinned sequences.
     coop::net::stream_slot::RunSelftest();
+    // And the chat line's one shaping, which decides what the whole lobby records: a line of only
+    // separators, a space between two of them, a cap landing mid-character -- none of which a typed
+    // drill line reaches.
+    coop::chat_sync::RunChatLineSelftest();
     // And the lobby password inside it: if the salt were ignored, every locked lobby would open to
     // one table, and the only visible difference is that joins keep succeeding. The negatives are
     // the test: one password under two host keys must not collide, an empty password must refuse to
     // derive, a tag must not verify against another nonce.
     coop::net::lobby_password::RunSelftest();
+    // And the permission model: a resolution that answers wrong reads as working until a player is
+    // refused or let in.
+    coop::permissions::RunSelftest();
     // And the container arbitration's own arithmetic: the base that is refused, the host change in
     // flight, and the sequence a third peer walks into -- which no two-peer run can reach, because
     // the peer that is judged against a stale baseline is the one that learned the world from a
@@ -209,9 +240,25 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     // And the pen beside it, whose cap has never fired in a run: every park a measured join
     // produced was host-authored, and those are deliberately not capped.
     coop::props::container_park::RunSelftest();
+    // And the server id rule: a nickname or a hand-typed name never names a folder outside
+    // multivoid_servers, and a wrong rule writes somewhere else without crashing.
+    coop::server_profile::RunSelftest();
+    // And the ban file's codec, the address rule and the address index: a record read wrong is a
+    // player let in or a file never rewritten, and neither shows until someone rejoins.
+    coop::ban_list::RunSelftest();
+    // And the one file writer: a write that is not whole is a lost ini, ban or key.
+    coop::atomic_file::RunSelftest();
     // Reset net_pump's edge detectors, so a Stop/Start on one process carries no stale "was
     // connected" or "was holding" entries into the new session.
     coop::net_pump::OnSessionStart();
+    // The hosted server's folder (coop/server_profile), known before the session layer is filled:
+    // the stores a server owns are written under it.
+    // The folder it returns goes to the stores a server owns, which keep it for their writes.
+    const std::wstring serverDir = (netCfg.role == coop::net::Role::Host)
+        ? coop::server_profile::EnsureHosted(coop::session_manager::Nickname())
+        : std::wstring{};
+    // The config's session layer begins with the session, before the transport can deliver a row.
+    coop::server_settings_sync::OnSessionStart(netCfg.role == coop::net::Role::Host);
     coop::prop_lifecycle::SetSession(&g_session);
     coop::npc_sync::SetSession(&g_session);
     coop::prop_snapshot::SetSession(&g_session);
@@ -219,7 +266,10 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
     coop::dev::restore_vitals::SetSession(&g_session);
     coop::teleport_client::SetSession(&g_session);
     coop::dev::force_weather::SetSession(&g_session);
-    coop::dev_gate::SetSession(&g_session);  // the strict CLIENT lockout for every dev feature
+    // The two dev answers: dev_gate is AUTHORITY (the host alone writes the shared world),
+    // local_grants the host's grant of each local dev feature to this machine.
+    coop::dev_gate::SetSession(&g_session);
+    coop::session::local_grants::Install(&g_session);
     coop::moderation::SetSession(&g_session);
     // The per-player inventory subsystem installs pre-world, here, not through the world-gated
     // subsystems::Install: its receiver buffers the host's pushed blob during the menu-mode
@@ -234,20 +284,25 @@ bool StartCoopSession(const coop::net::Config& netCfg, coop::net::Refusal* why) 
         // Snapshot the canonical save before coop injects state (host only; clients are
         // save-blocked); synchronous, so it completes before Start.
         coop::save_guard::BackupSaveOnSessionStart();
-        // The seen-players registry, host bookkeeping on any topology (on P2P the IP may stay
-        // empty).
+        // The seen-players registry, host bookkeeping on any topology (on a relayed or unknown
+        // path a record keeps the address it last had, and none if it never had one).
         coop::seen_players::Load();
-        // LanDirect only: the IP-keyed ban filter fails closed on P2P (the Connecting edge has no
-        // remote address, and a public IP is the wrong key there); P2P bans are identity-based.
-        if (netCfg.topology == coop::net::Topology::LanDirect) {
-            coop::ban_list::Load();
-            g_session.SetAcceptFilter(&BanAcceptFilter);
-        }
+        // The ban list, on every topology: read from the hosted server's folder, and asked at the
+        // identity proof, which both transports pass.
+        coop::ban_list::Load(serverDir);
+        g_session.SetBanCheck(&BanCheck);
+        // The server's permission store, read here and published to the game thread before
+        // Start spawns the net thread, so every check a client's line causes sees it.
+        coop::permissions::host::OnHostStart(
+            serverDir, coop::server_profile::IdForHosting(coop::session_manager::Nickname()).id);
     }
     // The client's connecting state is not raised here but by the browser connect actions, so the
     // loading screen is browser-join only; the env and autotest client boot reaches this function
     // directly and shows nothing.
     const bool ok = g_session.Start(netCfg, why);
+    // A session that never ran never stops, so the stop listener will not end its layer; a Start
+    // refused because a session already runs must not end that one's.
+    if (!ok && !g_session.running()) coop::server_settings_sync::OnSessionEnd();
     UE_LOGI("harness: ==== COOP SESSION START (%s / %s)%s ====",
             netCfg.role == coop::net::Role::Host ? "host" : "client",
             netCfg.topology == coop::net::Topology::P2P ? "p2p" : "lan-direct",

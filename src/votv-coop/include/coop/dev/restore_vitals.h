@@ -29,7 +29,7 @@ void Restore();
 // meter is `sleep` (low sleep sets mainPlayer.isExhausted), so this writes only saveSlot.sleep
 // and leaves food and health alone. LOCAL ONLY, no broadcast: the vitals display stream
 // (PoseSnapshot sleepFrac) already mirrors the low value to peers' nameplates, so setting the
-// tester's own value is the right scope. Host-only through dev_gate. Safe off the game thread --
+// tester's own value is the right scope. The host's grant decides (coop/session/local_grants). Safe off the game thread --
 // the write is posted to it.
 void SetStaminaLow();
 

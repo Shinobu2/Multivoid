@@ -7,9 +7,13 @@
 // re-bake the font atlas every frame. ui::style::MaybeRescale() polls the client rect each
 // frame and performs the atlas/style rebuild when ConsumeRebuild() fires.
 //
-// All state is render-thread-only (the Present detour thread), like the rest of the overlay.
+// The scale data is render-thread-only (the Present detour thread), like the rest of the overlay.
+// The exception is two atomics: the row-changed flag (the row's subscriber stores it on the game
+// thread) and the apply counter (RowApplies reads it from any thread).
 
 #pragma once
+
+#include <cstdint>
 
 namespace ui::scale {
 
@@ -25,10 +29,21 @@ void NoteViewport(float width, float height);
 float Ui();
 
 // The player's "UI size" preference (multivoid.ini ui.scale, default 1.25). Multiplies the
-// resolution factor; the F1 > Cosmetics > Interface slider drives it live.
+// resolution factor; the F1 > Cosmetics > Interface slider sets the ui.scale row and the render
+// thread applies it (ApplyRowIfChanged).
 float UserScale();
-void  SetUserScale(float s);   // clamps to the ui.scale registry row's [lo, hi]
 void  LoadUserPrefOnce();      // read ui.scale from the ini (bring-up, latched)
+
+// Follow the `ui.scale` row: once, at boot.
+void SubscribeRow();
+
+// Render thread, once per frame: when the row changed since the last frame (one atomic exchange),
+// re-resolve it and apply.
+void ApplyRowIfChanged();
+
+// How many times the row was applied since boot; any thread. The settings drill's readiness.
+uint32_t RowApplies();
+
 // The pref clamp range -- owned by the ui.scale registry row (arc 2); the F1
 // slider consumes these so the slider and the clamp can never diverge.
 float UserScaleMin();
@@ -37,8 +52,8 @@ float UserScaleMax();
 // Scale a 1080p-authored pixel constant to the live resolution.
 inline float S(float px) { return px * Ui(); }
 
-// A consumer other than the viewport (the F1 font-family switch) wants the
-// atlas/style rebuilt on the next frame.
+// A consumer other than the viewport (ui::fonts::ApplyRowsIfChanged) wants the atlas/style
+// rebuilt; it runs just before the per-frame ConsumeRebuild read, so the rebuild is that same frame.
 void RequestRebuild();
 
 // True exactly once after NoteViewport/RequestRebuild flagged a change; the

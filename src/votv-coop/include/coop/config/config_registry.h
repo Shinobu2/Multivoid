@@ -16,6 +16,7 @@
 
 #include <cstddef>
 #include <string>
+#include <string_view>
 
 namespace coop::config_registry {
 
@@ -90,8 +91,10 @@ const Row* Rows(size_t& count);
 
 // The first row whose key equals `key` case-insensitively, or null. For the schema's own
 // machinery only (the unknown-key sweep, the writer and the panel classify keys discovered
-// in the file, inherently by string); its result feeds no read API, since typed handles
-// cannot be built from it outside the registry TU.
+// in the file, inherently by string), for the one receiver of a row named on the wire by
+// its key, and for a server setting a person names (`/set`), as Source finds a cvar by name
+// (one walk per received message or typed command, which is a person's act: cold). Its result
+// feeds no typed Resolve, since typed handles cannot be built from it outside the registry TU.
 const Row* FindRow(const char* key);
 
 // True if `key` is a registry key (case-insensitive). The unknown-key report is the
@@ -109,13 +112,62 @@ const char* RetiredKeyNote(const char* key);
 
 // True if this key's VALUE is a credential and must never reach a log. Named rows, not a guess at
 // the spelling: a substring rule reads `perf_probe_bypass` and `roster_token_selftest` as secrets
-// and would hide two dev settings a drill has to be able to confirm. One predicate for every
-// writer of a value -- the effective-config census and the ini persist log both ask it, so the
-// tree cannot redact in one place and print in the other. CredentialKeys hands out the same list
-// so a caller can check every name still resolves to a row; a rename that misses this array
-// unredacts a password, so the staleness is worth one pass at boot.
+// and would hide two dev settings a drill has to be able to confirm. One predicate: ValueForLog
+// asks it, and every config printer prints through ValueForLog, so the tree cannot redact in one
+// place and print in the other. CredentialKeys hands out the same list so a caller can check
+// every name still resolves to a row; a rename that misses this array unredacts a password, so
+// the staleness is worth one pass at boot.
 bool IsCredentialKey(const char* key);
 const char* const* CredentialKeys(size_t& count);
+
+// A row's scope, whether its readers follow a set, and whether it names an address, declared with
+// the row by CFG_ROWFLAGS in the row list: kRowServer = it belongs to the server being hosted;
+// kRowReplicated = its session value is sent to every client (Source's FCVAR_REPLICATED,
+// iconvar.h:55-62); replicated implies server.
+// A replicated row is never a credential, and its key and its default fit the wire (static_asserts
+// in config_registry.cpp); a value longer than kServerSettingTextMax is refused by SetValue at run
+// time. kRowLive = every reader of the row follows a set (subscribed, or re-resolving at each use):
+// a pane draws it without "Takes effect at the next session" (a server row) or "... next launch"
+// (a local row). kRowAddress = its value can name a peer or a server: ValueForLog marks it unless
+// it equals the row's compiled default. kRowNotify = a change of its value is announced to every
+// player (Source's FCVAR_NOTIFY); a notify row is replicated, labelled, never a credential, never an
+// address row, and its kind is Flag, Int, Float or Enum.
+enum RowFlag : unsigned {
+    kRowServer = 1u << 0,
+    kRowReplicated = 1u << 1,
+    kRowLive = 1u << 2,
+    kRowAddress = 1u << 3,
+    kRowNotify = 1u << 4,
+};
+
+// The limits of a replicated row, the registry's facts so that this file needs no other header.
+// A replicated row's key, at most (bytes): the wire's own key limit.
+inline constexpr size_t kServerSettingKeyMax = 24;
+// A replicated row's value, at most (bytes): what a `/set <key> <value>` line can carry after the
+// word, the key and the space (command_sync.cpp pins the sum), which is less than the wire's value
+// limit; the smaller bound rules.
+inline constexpr size_t kServerSettingTextMax = 174;
+
+// The flags of `row` (a pointer into the row table; null or any other pointer: 0), and the
+// questions asked of them. Reads of one constexpr array, no walk.
+unsigned RowFlags(const Row* row);
+bool IsServerScope(const Row* row);
+bool IsReplicated(const Row* row);
+bool IsLive(const Row* row);
+bool IsAddressRow(const Row* row);
+bool IsNotify(const Row* row);
+
+// THE printed form of a config value, for every log line, ini line and report that quotes one: a
+// null row (an unknown key) is "<not shown>"; an identity or credential row "<set>"; an address
+// row as written when it equals the row's compiled default, else marked (ue_wrap::log::Addr);
+// any other row the value. Pure; any thread. This log is pasted into bug reports.
+std::string ValueForLog(const Row* row, std::string_view value);
+
+// A plain-English name for a row a generated pane draws; the row's desc is its tooltip. A row
+// without one is never drawn by a pane. Null for a row with no label, for null, and for any pointer
+// not in the table. Declared with the row by CFG_LABEL in the row list; a walk of a handful of
+// entries, cold.
+const char* RowLabel(const Row* row);
 
 // The typed handles.
 
@@ -156,8 +208,8 @@ struct StringRow {
     constexpr StringRow(const Row* r, detail::RegistryCtorKey) : row(r) {}
 };
 // Identity rows have no read handle (the mint machinery reads them internally, in
-// config.cpp); this handle exists for the write door only, so the mint persist and the skin
-// picker go through the same typed write as every other product write.
+// config.cpp); this handle exists for the write door only (WriteIniValue), so the mint persist and
+// the skin picker go through a typed write, while a readable row's write is SetValue.
 struct IdentityRow {
     const Row* row;
     constexpr IdentityRow(const Row* r, detail::RegistryCtorKey) : row(r) {}
@@ -176,7 +228,11 @@ namespace rows {
 #define CFG_STRING(ident, key, section, defS, envVar, seeded, desc) extern const StringRow ident;
 #define CFG_IDENTITY(ident, key, section, desc) extern const IdentityRow ident;
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) extern const EnumRow ident;
+#define CFG_ROWFLAGS(ident, flags)
+#define CFG_LABEL(ident, text)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_LABEL
+#undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
 #undef CFG_FLOAT
@@ -215,7 +271,11 @@ inline constexpr int kFontRoleDefaultFamily[] = {
 #define CFG_STRING(ident, key, section, defS, envVar, seeded, desc)
 #define CFG_IDENTITY(ident, key, section, desc)
 #define CFG_FONTROLE(ident, key, suffix, defFam, desc) defFam,
+#define CFG_ROWFLAGS(ident, flags)
+#define CFG_LABEL(ident, text)
 #include "coop/config/config_registry_rows.inc"
+#undef CFG_LABEL
+#undef CFG_ROWFLAGS
 #undef CFG_FLAG
 #undef CFG_INT
 #undef CFG_FLOAT

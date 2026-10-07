@@ -3,7 +3,11 @@
 #include "coop/dev/prop_birth_key_probe.h"
 
 #include "coop/config/config.h"
+#include "coop/net/session.h"
+#include "ue_wrap/actors/prop.h"
 #include "ue_wrap/core/log.h"
+#include "ue_wrap/core/reflection.h"
+#include "ue_wrap/engine/world_identity.h"
 
 #include <chrono>
 #include <map>
@@ -13,7 +17,10 @@
 namespace coop::dev::prop_birth_key_probe {
 namespace {
 
-// All state client game-thread-only (the finish-spawn post-hook and the drain both are). No mutex.
+namespace R = ue_wrap::reflection;
+
+// All state game-thread-only (the finish-spawn post-hook, the destroy post-hook and the drain all
+// are), both roles. No mutex.
 constexpr int    kTriesBuckets  = 10;   // 0..8 drain ticks, plus an overflow bucket
 constexpr size_t kLiveCap       = 4096; // backstop on the per-actor side table
 constexpr int    kPerExitLines  = 6;    // event lines per exit before the tally carries it alone
@@ -28,6 +35,34 @@ struct Entry {
     bool         containerExtract = false;
 };
 std::unordered_map<void*, Entry> g_live;  // enqueued, not yet drained
+
+// Every keyed-prop birth seen, with the class and the key as read at the birth: the DESTROY line's
+// side table. A world's teardown does not pass K2_DestroyActor, so nothing erases the entries of a
+// dead world; NoteBirth clears the table at the cap instead.
+struct Born {
+    std::wstring cls;
+    std::wstring key;
+};
+std::unordered_map<void*, Born> g_born;
+
+// The DESTROY lines, bounded per world and per destroying class: a save's load files every container's
+// items through spawn-then-destroy (`propInventory_C`, ~1700 in one second on the rig's host), and one
+// WARN each flooded the log the probe exists to keep readable. The first kDestroyLinesPerCaller print
+// (above a carried inventory's size, so the pause-quit drill's menu-world transport prints whole); the
+// first one over the cap prints a `capped` line at once, and the total prints when the next world's
+// first destroy arrives.
+constexpr unsigned kDestroyLinesPerCaller = 64;
+std::map<std::wstring, unsigned> g_destroyByCaller;  // this world's destroys, by the destroying class
+void* g_destroyWorld = nullptr;                       // the world those counts belong to
+
+void FlushDestroySummary() {
+    for (const auto& [by, n] : g_destroyByCaller) {
+        if (n > kDestroyLinesPerCaller)
+            UE_LOGW("prop_birth_key_probe: DESTROY summary world=%p by '%ls': %u destroyed, the first %u printed",
+                    g_destroyWorld, by.c_str(), n, kDestroyLinesPerCaller);
+    }
+    g_destroyByCaller.clear();
+}
 
 int g_enqueued     = 0;
 int g_keyAtSeam    = 0;   // ... of which the Key read back with no waiting
@@ -63,8 +98,42 @@ void NoteEnqueue(void* actor, const std::wstring& cls, const std::wstring& seamK
     if (g_live.size() < kLiveCap)
         g_live[actor] = Entry{cls, present ? seamKey : std::wstring(), containerExtract};
     UE_LOGW("prop_birth_key_probe: ENQUEUE actor=%p cls='%ls' key-at-seam='%ls' container-extract=%d "
-            "caller='%ls'", actor, cls.c_str(), present ? seamKey.c_str() : L"<none>",
-            containerExtract ? 1 : 0, caller.c_str());
+            "caller='%ls' world=%p (current %p)",
+            actor, cls.c_str(), present ? seamKey.c_str() : L"<none>", containerExtract ? 1 : 0,
+            caller.c_str(), ue_wrap::world_identity::WorldOf(actor), ue_wrap::world_identity::CurrentWorld());
+    g_dirty = true;
+}
+
+void NoteBirth(void* actor) {
+    if (!IsEnabled() || !actor) return;
+    // The newest births are the ones a drill reads, so a full table starts over.
+    if (g_born.size() >= kLiveCap) g_born.clear();
+    // Assignment, so a reused address carries the newest birth.
+    g_born[actor] = Born{R::ClassNameOf(actor), ue_wrap::prop::GetInteractableKeyString(actor)};
+}
+
+void NoteDestroy(void* actor, void* caller, const coop::net::Session* s) {
+    if (!IsEnabled() || !actor) return;
+    const auto it = g_born.find(actor);
+    if (it == g_born.end()) return;
+    const std::wstring by = caller ? R::ClassNameOf(caller) : std::wstring(L"<native>");
+    const char* state = !s ? "none" : s->connected() ? "connected" : s->running() ? "joining" : "stopped";
+    void* const world = ue_wrap::world_identity::WorldOf(actor);
+    if (world != g_destroyWorld) {
+        FlushDestroySummary();
+        g_destroyWorld = world;
+    }
+    const unsigned n = ++g_destroyByCaller[by];
+    if (n == kDestroyLinesPerCaller + 1) {
+        UE_LOGW("prop_birth_key_probe: DESTROY lines capped world=%p by '%ls' at %u -- the rest are counted",
+                world, by.c_str(), kDestroyLinesPerCaller);
+    }
+    if (n <= kDestroyLinesPerCaller) {
+        UE_LOGW("prop_birth_key_probe: DESTROY actor=%p cls='%ls' key='%ls' by '%ls' session=%s world=%p (current %p)",
+                actor, it->second.cls.c_str(), it->second.key.c_str(), by.c_str(), state, world,
+                ue_wrap::world_identity::CurrentWorld());
+    }
+    g_born.erase(it);
     g_dirty = true;
 }
 

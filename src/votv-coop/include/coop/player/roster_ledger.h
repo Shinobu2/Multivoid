@@ -42,6 +42,7 @@ struct Row {
     std::string guid;                // per-player inventory identity (host-side)
     std::string skin;                // body-skin name; empty = the native body
     bool        joinAnnounced = false;  // their "joined the game" line already fired
+    bool        otherBuild = false;     // host: admitted under net.allow_other_builds (another build)
 
     // The two connection facts, host-measured and host-published (see RefreshLinkFacts). In the
     // Row rather than a PerSlotState because the Row is what the roster row serialises: a
@@ -122,6 +123,7 @@ void EnsureRowZeroSeeded(const coop::net::Session& session, const std::wstring& 
 
 void SetNick(int slot, std::wstring nick);
 void SetGuid(int slot, std::string guid);
+void SetOtherBuild(int slot);
 void SetSkin(int slot, std::string skin);
 void SetJoinAnnounced(int slot, bool announced);
 void SetLinkFacts(int slot, coop::net::LinkKind kind, int16_t pingMs);

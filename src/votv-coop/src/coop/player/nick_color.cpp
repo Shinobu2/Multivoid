@@ -4,7 +4,6 @@
 #include "coop/player/players_registry.h"
 #include "coop/session/player_handshake.h"
 #include "coop/config/config.h"
-#include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 
 #include <array>
@@ -16,8 +15,8 @@ namespace coop::nick_color {
 namespace {
 
 // Per-slot packed colors (0 = default) + the local pref. ALL atomic: written by
-// game-thread wire handlers, the render-thread F1 picker path and the
-// bringup-thread session-start reset.
+// game-thread wire handlers and the row's subscriber, and by the bringup-thread
+// session-start reset.
 std::atomic<coop::net::Session*> g_session{nullptr};
 std::atomic<uint32_t>            g_local{0};
 std::array<std::atomic<uint32_t>, coop::players::kMaxPeers> g_bySlot{};
@@ -28,32 +27,18 @@ std::array<std::atomic<uint32_t>, coop::players::kMaxPeers> g_bySlot{};
 // from the per-tick subsystem installer). 0xFF = unknown (no session).
 std::atomic<uint8_t> g_localSlot{0xFF};
 
-void PersistLocal(uint32_t packed) {
-    // WriteIniValue is thread-safe (atomic swap) -- callable from the render
-    // thread, same as the nameplate pref. Empty value = "no custom color".
-    if (!IsCustom(packed)) {
-        coop::config::WriteIniValue(coop::config_registry::rows::nick_color, "");
-        return;
-    }
-    char v[8];
-    std::snprintf(v, sizeof(v), "%02X%02X%02X", R(packed), G(packed), B(packed));
-    coop::config::WriteIniValue(coop::config_registry::rows::nick_color, v);
-}
-
-}  // namespace
-
-void SetInitialLocalFromIniHex(const std::string& hex) {
-    // The persisted nick colour, raw from multivoid.ini. "unset" (the key is
-    // ABSENT, so a new identity) = custom WHITE; an explicitly EMPTY value = the
-    // per-surface defaults; a 6-digit RRGGBB hex = that colour, and a malformed one
-    // falls back to the defaults.
+// The `nick_color` row's text, as the row stores it. "unset" (the key ABSENT:
+// a new identity, or a reset) = custom WHITE; an explicitly EMPTY value = the
+// per-surface defaults; a 6-digit RRGGBB hex = that colour, and a malformed one
+// falls back to the defaults.
+uint32_t PackedFromIniText(const std::string& text) {
     uint32_t packed = 0;
-    if (hex == "unset") {
+    if (text == "unset") {
         packed = Pack(255, 255, 255);
-    } else if (hex.size() == 6) {
+    } else if (text.size() == 6) {
         unsigned rgb = 0;
         bool ok = true;
-        for (char c : hex) {
+        for (char c : text) {
             rgb <<= 4;
             if (c >= '0' && c <= '9')      rgb |= static_cast<unsigned>(c - '0');
             else if (c >= 'a' && c <= 'f') rgb |= static_cast<unsigned>(c - 'a' + 10);
@@ -65,7 +50,44 @@ void SetInitialLocalFromIniHex(const std::string& hex) {
                           static_cast<uint8_t>(rgb >> 8),
                           static_cast<uint8_t>(rgb));
     }
-    SetInitialLocal(packed);
+    return packed;
+}
+
+// The `nick_color` row changed (a pane's SetValue, a ResetValue, a review keep-line): re-resolve
+// it, apply it locally and announce it to the session (host: broadcast; client: to host for
+// rebroadcast). Game thread -- the config notifier runs every subscriber there.
+void OnNickColorRowChanged() {
+    const uint32_t packed =
+        PackedFromIniText(coop::config::ResolveString(::coop::config_registry::rows::nick_color));
+    g_local.store(packed, std::memory_order_relaxed);
+    const uint8_t selfSlot = coop::players::Registry::Get().LocalPeerId();
+    if (selfSlot < coop::players::kMaxPeers)
+        g_bySlot[selfSlot].store(packed, std::memory_order_relaxed);
+    UE_LOGI("nick_color: local nick color -> %s (row applied; announcing)",
+            IsCustom(packed) ? "CUSTOM" : "DEFAULT");
+    if (coop::net::Session* s = g_session.load(std::memory_order_acquire))
+        coop::player_handshake::AnnounceLocalNickColor(*s, packed);
+    // Transient: this player's own UI confirmation, not the lobby's record.
+    coop::chat_feed::Push(IsCustom(packed) ? L"Nickname color: applied (synced to other players)"
+                                           : L"Nickname color: reset to default",
+                          coop::chat_feed::Keep::Transient);
+}
+
+}  // namespace
+
+std::string IniTextFor(uint32_t packed) {
+    if (!IsCustom(packed)) return std::string();
+    char v[8];
+    std::snprintf(v, sizeof(v), "%02X%02X%02X", R(packed), G(packed), B(packed));
+    return std::string(v);
+}
+
+void SubscribeRow() {
+    coop::config::Subscribe(::coop::config_registry::rows::nick_color, &OnNickColorRowChanged);
+}
+
+void SetInitialLocalFromIniHex(const std::string& hex) {
+    SetInitialLocal(PackedFromIniText(hex));
 }
 
 void SetInitialLocal(uint32_t packed) {
@@ -74,26 +96,6 @@ void SetInitialLocal(uint32_t packed) {
 
 uint32_t LocalPacked() {
     return g_local.load(std::memory_order_relaxed);
-}
-
-void RequestLocal(uint32_t packed) {
-    // Render thread (the F1 picker). Persist NOW; state + announce hop to the
-    // game thread -- the RequestSkin/RequestLocalVisible discipline.
-    PersistLocal(packed);
-    ue_wrap::game_thread::Post([packed] {
-        g_local.store(packed, std::memory_order_relaxed);
-        const uint8_t selfSlot = coop::players::Registry::Get().LocalPeerId();
-        if (selfSlot < coop::players::kMaxPeers)
-            g_bySlot[selfSlot].store(packed, std::memory_order_relaxed);
-        UE_LOGI("nick_color: local nick color -> %s (persisted; announcing)",
-                IsCustom(packed) ? "CUSTOM" : "DEFAULT");
-        if (coop::net::Session* s = g_session.load(std::memory_order_acquire))
-            coop::player_handshake::AnnounceLocalNickColor(*s, packed);
-        // Transient: this player's own UI confirmation, not the lobby's record.
-        coop::chat_feed::Push(IsCustom(packed) ? L"Nickname color: applied (synced to other players)"
-                                               : L"Nickname color: reset to default",
-                              coop::chat_feed::Keep::Transient);
-    });
 }
 
 void StoreForSlot(int slot, uint32_t packed) {

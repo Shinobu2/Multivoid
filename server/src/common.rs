@@ -144,6 +144,20 @@ pub fn identity_shape_ok(id: &str) -> bool {
     hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
+/// The shape of the build claim a host announces: its binary's SHA-256 (64 lowercase hex), the id of
+/// the key that signed it (0 = unsigned, else 1..=255) and the signature (128 lowercase hex, empty
+/// only for key 0). Shape only: the master records a claim and verifies nothing.
+pub fn build_claim_shape_ok(sha: &str, key: i64, sig: &str) -> bool {
+    if hex_to_bytes::<32>(sha).is_none() {
+        return false;
+    }
+    match key {
+        0 => sig.is_empty(),
+        1..=255 => hex_to_bytes::<64>(sig).is_some(),
+        _ => false,
+    }
+}
+
 /// Decode an EXACTLY-`N`-byte lowercase-hex string. Returns `None` on any wrong
 /// length, odd length, or non-hex byte -- there is no partial success, because
 /// every caller here is deciding whether to trust a remote peer and a

@@ -3,7 +3,6 @@
 #include "ue_wrap/core/paths.h"
 
 #include <windows.h>
-#include <shlobj.h>   // SHGetKnownFolderPath
 
 namespace ue_wrap::paths {
 
@@ -16,19 +15,19 @@ std::wstring ExeDir() {
     return sep == std::wstring::npos ? std::wstring{} : p.substr(0, sep);
 }
 
-std::wstring ProfileDir() {
-    PWSTR base = nullptr;
-    const HRESULT hr = ::SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE, nullptr, &base);
-    if (FAILED(hr) || !base) {
-        if (base) ::CoTaskMemFree(base);
-        return {};
-    }
-    std::wstring dir(base);
-    ::CoTaskMemFree(base);
-    dir += L"\\Multivoid";
-    if (!::CreateDirectoryW(dir.c_str(), nullptr) && ::GetLastError() != ERROR_ALREADY_EXISTS)
-        return {};
-    return dir;
+std::wstring Ue4ssModulePath() {
+    const HMODULE h = ::GetModuleHandleW(L"UE4SS.dll");
+    if (!h) return {};
+    wchar_t path[MAX_PATH] = {};
+    const DWORD n = ::GetModuleFileNameW(h, path, MAX_PATH);
+    if (n == 0 || n >= MAX_PATH) return {};
+    return path;
+}
+
+std::wstring Ue4ssDir() {
+    const std::wstring p = Ue4ssModulePath();
+    const size_t sep = p.find_last_of(L"\\/");
+    return sep == std::wstring::npos ? std::wstring{} : p.substr(0, sep);
 }
 
 }  // namespace ue_wrap::paths

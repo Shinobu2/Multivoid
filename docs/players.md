@@ -212,14 +212,45 @@ nickname, skin, colour, and how they are connected, which the
 host measures from the connection and publishes so every board shows the same value. A departure
 is a row transition, which is how a lost disconnect and a fast replacement heal the same way.
 
-Kick and ban are host-only actions on the player list (`coop/moderation/`). A ban records the
-address, the nickname and the reason in a file next to the mod, is applied at the connection's
-accept filter before a seat is spent, and survives host restarts; the host also keeps a
-seen-players file for the administration panel. Bans are keyed by address, not by identity.
+Kick and ban act only inside a running hosted session (`coop/moderation/`). A ban records the
+player's id, and their address when the host saw their own (not a relay's), with the nickname
+and the reason, in the hosted server's folder. Both are checked right after the identity proof,
+before a seat is spent, on every transport, and the ban survives host restarts; the host also
+keeps a seen-players file for the administration panel. A nickname is never a ban
+key: anyone can type any name.
 The kicked or banned player lands at the menu with a modal saying which, under a stable code
-([join.md](join.md) lists them). Beside the ban list, the same accept edge caps how many
+([join.md](join.md) lists them). Beside the ban check, the accept edge caps how many
 connections one address may open in a window (four per thirty seconds by default, a host
 setting), the shape of MTA's join-flood protection (`coop/net/connect_history`).
+
+The host's moderation is a set of commands -- `/kick`, `/ban`, `/banid`, `/unban`, `/tphere` --
+which the player list and the Administration panel now run for the host. A friend can be given
+`/kick`, `/ban`, `/banid` or `/unban` by a line in the server's permission files
+(`multivoid_servers\<server>\permissions\users\<their player id>.json`, LuckPerms' format, e.g.
+`{"permissions": ["multivoid.kick"]}`; a player's id shows when you hover their name in the player
+list or the Administration panel); `/tphere` stays the host's until a command can name where to
+teleport. The host can deny itself a command the same way, in a file named by its own id (hover
+your own row in the player list). A player whose permission file sets `multivoid.kick.exempt` (or
+`.ban.exempt`) cannot be kicked or banned by a friend, only by the host.
+
+The same files can be edited in game with `/mv`, in LuckPerms' `/lp` shape: `/mv user <who> permission set
+<node> [true|false]`, `/mv user <who> parent add <group>`, `/mv group <name> permission set ...`, `/mv creategroup
+<name>`, `/mv user <who> info`, `/mv listgroups`, and `/mv reload` after editing a file by hand; `/help` lists them
+all. The host can run every one; a friend runs the ones the host granted (`multivoid.mv.user.permission.set` and its
+siblings; editing a player who is not online also needs that node's `.offline`), and no friend can take one of the mod's permissions away from the host. Each change is written to the files at once. Every admin action that changes something -- a kick, a ban or unban, a teleport, a
+server setting changed, a permission edited -- is recorded in `permissions\actions.jsonl` in the server's folder; a
+player holding `multivoid.admin.log` is told of every permission change.
+A command rewrites the one file it changes in its own layout, so keep notes elsewhere, not as extra keys in a
+permission file.
+
+The host's server settings -- today the voice range, `voice.distance_cm`, in centimetres, and
+"Allow other builds", `net.allow_other_builds`, which admits players on another Multivoid build
+([join.md](join.md)) -- change with
+`/set <setting> <value>` and go back to their default with `/reset <setting>`; every peer follows
+at once. When a server setting such as the voice range changes, every player's chat says so. F1's
+`Administration > Server settings` draws each of them and runs those same lines. A
+friend given `multivoid.set` in the permission files can change them too: their line runs on the
+host. A setting that holds a password is never set or shown by command.
 
 ## Who owns what
 
@@ -234,7 +265,7 @@ setting), the shape of MTA's join-flood protection (`coop/net/connect_history`).
 | death and revive | that peer | the native chain; the run-ending travel refused by its author |
 | sleep | each peer reports; the host tallies, accelerates and ends | |
 | inventory | that peer; the host stores it | never on the wire as gameplay |
-| roster, kick, ban | the host | rows asserted as state; a ban at the accept filter |
+| roster, kick, ban | the host | rows asserted as state; a ban by id and address at the identity proof |
 
 ## Wire messages
 
@@ -267,7 +298,7 @@ dead peer through the ragdoll bit of its next pose.
 | After a revive the player can drift horizontally from the base gate, metres over seconds; the cause is unmeasured | `[V]` `harness/autotest/death_state_probe.cpp` reads the position back |
 | Damage a puppet takes on another machine is dropped by design; only the victim's own contacts count | `[V]` `coop/player/player_damage` |
 | A third-party bundle pak cannot be discovered: bundle membership is a fixed table | `[V]` `coop/player/skin_registry` |
-| Bans are by address, so a banned player with a new address is a new player | `[V]` `coop/moderation/ban_list` |
+| A ban is by player id and, on a direct link, by address: a banned player with a new identity key who comes from a new address or through a relay is a new player, and an address ban refuses whoever shares that address | `[V]` `coop/moderation/ban_list` |
 | The connection cap is by address too, so players behind one router share it; over a relayed internet route it counts by the identity a peer proves, so a peer that rotates its identity there gets a fresh count each time | `[V]` `coop/net/connect_history` on the direct lane; `[RD]` on the internet lane, from the transport's source |
 
 ## Code map

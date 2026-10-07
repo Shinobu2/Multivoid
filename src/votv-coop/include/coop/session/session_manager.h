@@ -31,15 +31,16 @@ std::string HostStatus();
 void SetHostStatus(const std::string& status);
 
 // Our own announced lobby id, empty when not hosting an announced lobby. The browser filters
-// this row out and JoinLobby refuses it, so a host never connects to itself. Set on announce,
-// cleared by EndHostedLobby. Thread-safe.
+// this row out and JoinLobby refuses it, so a host never connects to itself. Read from the
+// announcer, which holds the lobby it announced, re-announcements included. Thread-safe.
 std::string OwnLobbyId();
 
 // The local display nickname, seeded from config at boot and overwritten by the browser,
 // applied at the next session start, so the browser value wins over the config default.
-// Thread-safe.
+// Thread-safe. SetNickname strips the name's edge spaces and tabs; an empty or all-space name
+// keeps the last good one and returns false.
 std::string Nickname();
-void SetNickname(const std::string& nick);
+bool SetNickname(const std::string& nick);
 
 // The password for the next join, from the prompt the player filled in; consumed by whichever
 // join lane starts and never written to the ini, since it is a secret lent for somebody else's
@@ -108,10 +109,10 @@ struct SaveChoice {
 // on net.port on every interface, reached as-is on the same network or through a forwarded
 // port, and when unlisted nothing leaves the machine (IsMasterFree). There is no LAN-only
 // choice: an accept filter refusing non-private remotes did the router's job, and the password
-// and the admission challenge are the controls on every lane. `password` and `masterUrl` are what
-// the window showed, passed rather than re-read: an ini round trip can come back different (a
-// read-only file, an overriding env var, trimmed whitespace) and open the session behind a lit
-// padlock, and the announce, whose master is then the lobby's relay, must go where it said.
+// and the admission challenge are the controls on every lane. `password` is the secret the caller
+// holds (the native window its field, the fallback picker the stored row), dropped unless `locked`
+// and passed because a re-read is ini file I/O the net thread must not do. `masterUrl` is what the
+// window showed: the announce, whose master is then the lobby's relay, must go where it said.
 bool HostWithSave(const SaveChoice& choice, const std::string& name, bool locked,
                   const std::string& password, int playersMax, const std::string& masterUrl,
                   coop::session::HostMode mode = {});

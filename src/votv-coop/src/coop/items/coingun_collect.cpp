@@ -16,6 +16,7 @@
 #include "coop/element/registry.h"
 #include "coop/net/protocol.h"
 #include "coop/player/players_registry.h"   // IsLocal, IsPuppet: who tripped the coin
+#include "coop/player/roster_ledger.h"   // PerSlotState: throttles that leave with their sender
 #include "coop/net/session.h"
 #include "coop/world/world_actor_sync.h"
 
@@ -272,7 +273,7 @@ void OnCoinCollect(const uint8_t* payload, int len, uint8_t senderSlot, void* lo
     // spawned by the host's own sell and announced with this exact eid, so an id outside the host's
     // band cannot name a coin.
     if (!coop::element::Registry::IsAllowedHostAllocatedEid(p.elementId)) {
-        static uint32_t sBad[coop::players::kMaxPeers] = {};
+        static coop::roster_ledger::PerSlotState<uint32_t> sBad;
         const uint32_t n = ++sBad[senderSlot < coop::players::kMaxPeers ? senderSlot : 0u];
         if (n <= 5 || (n <= 100 && n % 10 == 0) || n % 100 == 0)
             UE_LOGW("coingun[host]: CoinCollect #%u from slot=%u names eid=0x%08x, which is not in "
@@ -402,7 +403,7 @@ void OnCoinCollect(const uint8_t* payload, int len, uint8_t senderSlot, void* lo
     // the mirror comes back; the stale-row guard in world_actor_mirror lets that announce land on a
     // row whose actor the client already killed. Throttled per slot, since the announce carries
     // every world actor.
-    static std::unordered_map<uint8_t, long long> s_lastRepairMs;
+    static coop::roster_ledger::PerSlotState<long long> s_lastRepairMs;
     const long long nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
     auto& last = s_lastRepairMs[senderSlot];

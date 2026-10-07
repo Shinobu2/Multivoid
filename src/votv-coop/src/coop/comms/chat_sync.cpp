@@ -2,6 +2,7 @@
 
 #include "coop/comms/chat_sync.h"
 
+#include "coop/text/name_filter.h"
 #include "coop/text/novelty_ledger.h"
 #include "coop/text/utf8_codec.h"
 
@@ -10,6 +11,7 @@
 #include "coop/comms/chat_log.h"
 #include "coop/comms/chat_nick_color.h"
 #include "coop/config/config.h"
+#include "coop/config/config_registry.h"
 #include "coop/net/protocol.h"
 #include "coop/net/session.h"
 #include "coop/session/player_handshake.h"
@@ -20,6 +22,8 @@
 #include <atomic>
 #include <cstring>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace coop::chat_sync {
 namespace {
@@ -94,6 +98,15 @@ bool IsHost() {
     return s && s->role() == coop::net::Role::Host;
 }
 
+// The dev injection, the must-fail control for the join seed. Read once: with the environment
+// variable unset, every read scans the ini on disk under the config mutex, and the seed runs at
+// every join on the game thread.
+bool SeedSuppressed() {
+    static const bool v =
+        coop::config::ResolveFlag(::coop::config_registry::rows::chat_seed_suppress);
+    return v;
+}
+
 // Render one committed row into this peer's feed; seeded rows land retained.
 void ApplyRow(uint8_t slot, const std::string& nick, uint32_t custom,
               const std::string& text, uint32_t lineSeq, bool seeded) {
@@ -111,11 +124,11 @@ void ApplyRow(uint8_t slot, const std::string& nick, uint32_t custom,
     // rather than by a flag at the far end: replaying a joiner's whole history through it would
     // put bubbles over peers for conversations that happened before that player existed.
     if (!seeded) coop::chat_bubbles::OnChatLine(slot, text.c_str());
-    // The lane's only order observable: a drill cannot read a sort key off a screenshot, and "the
-    // lines appeared" is not "they appeared in the order the lobby said them", which is the half a
-    // seed interleaving with live traffic breaks. One line per applied row.
-    UE_LOGI("chat: applied line %u seeded=%d \"%.40s\"", lineSeq, seeded ? 1 : 0,
-            line.c_str());
+    // One log line per applied row: the lobby's sequence number, whether the row came from the
+    // join seed, and the byte length of the rendered line. It carries no text: a log is not where
+    // a player's chat belongs.
+    UE_LOGI("chat: applied line %u seeded=%d textBytes=%zu", lineSeq, seeded ? 1 : 0,
+            line.size());
 }
 
 void SendSpeaker(coop::net::Session& s, int toSlot, uint16_t speakerId, uint8_t slot,
@@ -142,10 +155,28 @@ void SendLine(coop::net::Session& s, int toSlot, uint32_t lineSeq, uint16_t spea
     s.SendReliableToSlot(toSlot, coop::net::ReliableKind::ChatLine, &lp, sizeof(lp));
 }
 
-// Host: commit `text` as spoken by `slot`, broadcast it, and render it locally.
-void AuthorAndBroadcast(uint8_t slot, const std::string& text) {
+// Host: commit `raw` as spoken by `slot`, broadcast it, and render it locally.
+//
+// THE ONE GATE for the lobby's record: the host's own line (QueueSend) and a client's (OnReliable)
+// both arrive here raw, and nothing is committed that did not pass ShapeChatLine. A line it
+// refuses is refused here: no row, no lineSeq, no broadcast.
+void AuthorAndBroadcast(uint8_t slot, const std::string& raw) {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->running()) return;
+
+    std::string text;
+    if (!ShapeChatLine(raw, &text)) {
+        // Refusal path only: which of ShapeChatLine's two refusals it was, named in the log so a
+        // drill can tell them apart.
+        std::wstring decoded;
+        if (!coop::text::FromUtf8Strict(raw.data(), raw.size(), &decoded))
+            UE_LOGW("chat: refused a line from slot %u (%zu byte(s)) -- ill-formed UTF-8",
+                    static_cast<unsigned>(slot), raw.size());
+        else
+            UE_LOGI("chat: refused a line from slot %u (%zu byte(s)) -- nothing left after "
+                    "sanitising and trimming", static_cast<unsigned>(slot), raw.size());
+        return;
+    }
 
     // The nick is resolved once, here, and travels with the row forever: resolving at render time
     // on each peer answers who is in that slot now, and slots recycle, so a resident and a joiner
@@ -171,6 +202,70 @@ void AuthorAndBroadcast(uint8_t slot, const std::string& text) {
 
 }  // namespace
 
+// The steps, in this order: decode strictly (SanitizeUtf8 requires well-formed input: dropping a
+// byte from an ill-formed run can splice its neighbours into a separator), SANITIZE, then TRIM and
+// cap. Trim comes after sanitize so a space between two dropped separators is edge whitespace and
+// not text; trimmed first, it would survive as a one-space row every peer and later joiner renders.
+bool ShapeChatLine(std::string_view raw, std::string* out) {
+    out->clear();
+    std::wstring decoded;
+    if (!coop::text::FromUtf8Strict(raw.data(), raw.size(), &decoded)) return false;
+    std::string text = TrimAndCap(coop::text::SanitizeUtf8(raw.data(), raw.size()));
+    if (text.empty()) return false;
+    *out = std::move(text);
+    return true;
+}
+
+bool RunChatLineSelftest() {
+    int pass = 0, total = 0;
+    auto check = [&](bool ok, const char* what) {
+        ++total;
+        if (ok) { ++pass; return; }
+        UE_LOGE("chat-line selftest FAIL: %s", what);
+    };
+    const size_t cap = sizeof(coop::net::ChatMessagePayload{}.text);
+    std::string out;
+    auto refused = [&](const std::string& in) { return !ShapeChatLine(in, &out) && out.empty(); };
+    auto shaped = [&](const std::string& in, const std::string& want) {
+        return ShapeChatLine(in, &out) && out == want;
+    };
+
+    check(cap == 203, "the payload cap is 203 bytes");
+    check(refused("\xE2\x80\xA8"), "a line of only U+2028 is refused");
+    check(refused("\x7F"), "a line of only DEL is refused");
+    check(refused("\xE2\x80\xA8 \xE2\x80\xA8"),
+          "U+2028, a space and U+2028 leave nothing: the space is edge whitespace");
+    check(shaped("  hi  ", "hi"), "edge whitespace is trimmed");
+    check(shaped("a\xE2\x80\xA8" "b", "ab"), "U+2028 inside a line is dropped");
+    check(shaped("a\xC2\x85" "b", "ab"), "U+0085 inside a line is dropped");
+    check(shaped("a\tb", "a\tb"), "an inner TAB is kept");
+    check(refused(std::string("\xE2\x80\x01\xA8", 4)),
+          "an ill-formed sequence is refused whole, not repaired into U+2028");
+    {
+        const std::string longLine(300, 'x');
+        check(ShapeChatLine(longLine, &out) && out.size() == cap && out == longLine.substr(0, cap),
+              "a 300-byte ASCII line is capped to the payload's bytes");
+    }
+    {
+        // 202 ASCII bytes then sixteen 3-byte characters (U+20AC): 250 bytes, ending in a 3-byte
+        // character, and the first of them spans bytes 202..204, across the 203-byte cap.
+        std::string straddle(202, 'x');
+        for (int i = 0; i < 16; ++i) straddle += "\xE2\x82\xAC";
+        std::wstring wide;
+        const bool ok = ShapeChatLine(straddle, &out);
+        check(straddle.size() == 250 && ok && out.size() <= cap && out == std::string(202, 'x') &&
+              coop::text::FromUtf8Strict(out.data(), out.size(), &wide),
+              "a character straddling the cap is cut whole, leaving well-formed UTF-8");
+    }
+
+    if (pass == total) {
+        UE_LOGI("chat-line selftest: ALL PASS (%d checks)", total);
+        return true;
+    }
+    UE_LOGE("chat-line selftest: %d/%d checks passed", pass, total);
+    return false;
+}
+
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
 }
@@ -186,20 +281,22 @@ bool SessionActive() {
 }
 
 void QueueSend(const std::string& utf8Text) {
-    const std::string text = TrimAndCap(utf8Text);
-    if (text.empty()) return;
     // Hop to the game thread: the send, the record and the feed are all game-thread paths, and
     // the input bar submits on the render thread.
-    GT::Post([text] {
+    GT::Post([utf8Text] {
         auto* s = g_session.load(std::memory_order_acquire);
         if (!s || !s->running()) return;  // session died between type + send
         if (s->role() == coop::net::Role::Host) {
             // The host is the authority and commits its own line immediately: a host alone in its
             // lobby has nobody to send to, and the line still belongs in the record so the next
-            // joiner is seeded with it.
-            AuthorAndBroadcast(0, text);
+            // joiner is seeded with it. The line goes in raw; the commit point shapes it.
+            AuthorAndBroadcast(0, utf8Text);
             return;
         }
+        // The client shapes only what it puts on the wire: an empty intent is not sent and the
+        // payload holds a bounded number of bytes. What the lobby records is the host's gate's.
+        const std::string text = TrimAndCap(utf8Text);
+        if (text.empty()) return;
         // A client sends an intent and waits for the host's authored row. No local echo: the row it
         // will receive is the one with a position in the order, and a second copy now would need
         // reconciling later.
@@ -249,8 +346,7 @@ void OnReliable(const coop::net::ChatMessagePayload& payload, uint8_t senderPeer
                 static_cast<unsigned>(n));
         return;
     }
-    AuthorAndBroadcast(senderPeerSlot,
-                       coop::text::SanitizeUtf8(payload.text, n));
+    AuthorAndBroadcast(senderPeerSlot, std::string(payload.text, n));
 }
 
 void OnChatSpeaker(const coop::net::ChatSpeakerPayload& payload) {
@@ -270,7 +366,12 @@ void OnChatSpeaker(const coop::net::ChatSpeakerPayload& payload) {
     sp.valid    = true;
     sp.slot     = payload.slot;
     sp.nickArgb = payload.nickArgb;
-    sp.nick     = coop::text::SanitizeUtf8(payload.nick, n);
+    // A speaker's name is a NAME: the name filter, not the chat text's list. `Admissible` already
+    // refused an ill-formed nick, so the strict decode succeeds here.
+    std::wstring wide;
+    sp.nick     = coop::text::FromUtf8Strict(payload.nick, n, &wide)
+                      ? coop::text::ToUtf8(coop::text::FilterNameChars(wide))
+                      : std::string();
 }
 
 void OnChatLine(const coop::net::ChatLinePayload& payload) {
@@ -332,10 +433,10 @@ void QueueConnectBroadcastForSlot(int slot) {
     // rows, and a gate that only opens when there was history to send stays shut for the first
     // conversation.
     g_seeded[slot] = true;
-    // The dev injection, the must-fail control for the join seed: the slot is opened for live
-    // traffic but the history is never sent, precisely the empty-history-with-no-error failure the
-    // contiguous range was introduced to prevent.
-    if (coop::config::ReadEnv("VOTVCOOP_CHAT_SEED_SUPPRESS") == "1") {
+    // With the dev injection set, the slot is opened for live traffic but the history is never
+    // sent, precisely the empty-history-with-no-error failure the contiguous range was
+    // introduced to prevent.
+    if (SeedSuppressed()) {
         UE_LOGW("chat: [dev] connect-seed SUPPRESSED for slot %d (%d line(s) withheld)",
                 slot, coop::chat_log::Count());
         return;

@@ -443,14 +443,12 @@ void DoHost() {
     // Persisted before the attempt, so the next session opens with the lock as the host left it
     // whether this start succeeds or not. The password is written only when there is one: an
     // unconditional write would let an open host erase the remembered password.
-    if (IsLocked()) cfg::WriteIniValue(::coop::config_registry::rows::net_lobby_password, pw.c_str());
-    cfg::WriteIniValue(::coop::config_registry::rows::net_lobby_locked, IsLocked() ? "1" : "0");
+    if (IsLocked()) cfg::SetValue(::coop::config_registry::rows::net_lobby_password, pw.c_str());
+    cfg::SetValue(::coop::config_registry::rows::net_lobby_locked, IsLocked() ? "1" : "0");
 
-    // The string, not the row just written: a failed write, an env var outranking the file, or
-    // trimmed whitespace would read back empty and host open under a lit padlock. The hide gate is
-    // stated here, where the value is formed (HostWithSave honours it on DIRECT only). The name
-    // comes from the field, never the autofill, sanitised and byte-capped at this boundary (it goes
-    // to the master and every browser); a blank falls back to the autofill.
+    // The hide gate is stated here, where the value is formed (HostWithSave honours it on DIRECT
+    // only). The name comes from the field, never the autofill, sanitised and byte-capped at this
+    // boundary (it goes to the master and every browser); a blank falls back to the autofill.
     std::string serverName = coop::text::CapUtf8Bytes(
         coop::text::SanitizeUtf8(TF::Text(g_nameField).data(), TF::Text(g_nameField).size()),
         static_cast<size_t>(kNameMaxBytes));

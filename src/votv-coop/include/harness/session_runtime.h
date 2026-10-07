@@ -27,7 +27,7 @@ namespace harness::session_runtime {
 coop::net::Session& Session();
 
 // Bring up a coop session: reset per-session edge state, wire every sync
-// subsystem, (host) back up the save + install the LanDirect ban filter, then
+// subsystem, (host) back up the save + load the ban list on every topology, then
 // Start. ONE code path for "start a coop session" (RULE 2) -- called by the
 // env-configured boot (play scenario) AND the browser drain in RunPlayLoop.
 // TimelineThread only. Returns Start()'s success; `why`, when given, gets Start()'s reason on a

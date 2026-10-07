@@ -47,7 +47,7 @@ void Tick(const coop::net::Session& session) {
         std::to_string(coop::config::ResolveInt(::coop::config_registry::rows::net_port));
     const bool accepted = coop::session_manager::ConnectDirect(addr);
     UE_LOGI("rehost_rejoin: [C] the rig's trigger -- dialing %s again (dial #%d, accepted=%d)",
-            addr.c_str(), ++g_dials, accepted ? 1 : 0);
+            ue_wrap::log::Addr(addr).c_str(), ++g_dials, accepted ? 1 : 0);
 }
 
 }  // namespace coop::dev::rehost_rejoin

@@ -2,6 +2,8 @@
 
 #include "coop/moderation/seen_players.h"
 
+#include "coop/atomic_file/atomic_file.h"
+#include "coop/moderation/moderation.h"    // EnforceableAddress
 #include "coop/net/session.h"
 #include "coop/player/players_registry.h"  // kMaxPeers
 #include "coop/text/utf8_codec.h"
@@ -64,15 +66,25 @@ void WriteFileLocked() {
         UE_LOGW("seen_players: module dir unresolved -- registry not persisted");
         return;
     }
-    std::ofstream f(path, std::ios::trunc);
-    if (!f) {
-        UE_LOGW("seen_players: cannot open '%ls' for write -- registry not persisted",
-                path.c_str());
-        return;
+    std::string text =
+        "# VOTV coop seen-players registry -- one player per line: guid|nick|lastSeenUnix|ip\n";
+    for (const auto& [guid, rec] : g_records) {
+        text += guid;
+        text += '|';
+        text += rec.nick;
+        text += '|';
+        text += std::to_string(rec.lastSeenUnix);
+        text += '|';
+        text += rec.ip;
+        text += '\n';
     }
-    f << "# VOTV coop seen-players registry -- one player per line: guid|nick|lastSeenUnix|ip\n";
-    for (const auto& [guid, rec] : g_records)
-        f << guid << '|' << rec.nick << '|' << rec.lastSeenUnix << '|' << rec.ip << '\n';
+    // Cached: written under g_mutex on the game thread at each join and leave, so a flush would
+    // block a frame for a record of who was seen.
+    const atomic_file::Result r =
+        atomic_file::Write(path, text, atomic_file::Mode::Replace, atomic_file::Sync::Cached);
+    if (!r.ok())
+        UE_LOGW("seen_players: could not write '%ls' (%s) -- registry not persisted", path.c_str(),
+                atomic_file::Describe(r).c_str());
 }
 
 void FillEntryLocked(const std::string& guid, const Record& rec, Entry& e) {
@@ -145,18 +157,20 @@ void TouchOnJoin(coop::net::Session& session, int peerSlot) {
     const std::string nick = coop::text::ToUtf8(
         coop::player_handshake::NicknameForSlot(peerSlot));
 
-    char ip[64] = {};
-    session.GetPeerAddress(peerSlot, ip, sizeof(ip));
+    // Only an address a ban could enforce is kept: a relay's, loopback or an unknown path's is
+    // empty, so an offline ban never keys on it.
+    const std::string ip =
+        coop::moderation::EnforceableAddress(session, peerSlot, session.peerGenerationForSlot(peerSlot));
 
     std::lock_guard<std::mutex> lk(g_mutex);
     Record& rec = g_records[guid];
     rec.nick = CleanField(nick.c_str());
-    if (ip[0]) rec.ip = CleanField(ip);  // keep the previous IP if unresolvable now
+    if (!ip.empty()) rec.ip = CleanField(ip.c_str());  // keep the previous address if none now
     rec.lastSeenUnix = static_cast<long long>(::time(nullptr));
     g_onlineGuidBySlot[peerSlot] = guid;
     WriteFileLocked();
     UE_LOGI("seen_players: slot %d registered (nick='%s' ip=%s) -- %zu known",
-            peerSlot, rec.nick.c_str(), rec.ip.empty() ? "?" : rec.ip.c_str(),
+            peerSlot, rec.nick.c_str(), rec.ip.empty() ? "?" : ue_wrap::log::Addr(rec.ip).c_str(),
             g_records.size());
 }
 

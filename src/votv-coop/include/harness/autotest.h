@@ -82,7 +82,10 @@ DWORD WINAPI FlashlightTestThread(LPVOID arg);
 // The config-corpus selftest (harness/autotest/autotest_config.cpp), solo and role-agnostic, no
 // session: the real ini lexer over the VOTVCOOP_CONFIG_CORPUS_DIR corpus (both value layers, one
 // verdict line per file and key) plus the tri-state controls (a missing file is Absent, an injected
-// mid-stream failure Unreadable). Env VOTVCOOP_RUN_CONFIG_SELFTEST=1.
+// mid-stream failure Unreadable) and the runtime layer (SetValue on a scratch ini: resolve, ini,
+// environment, refusal, normalisation, subscriber thread, 6b the refusal inside a subscriber, 8
+// the keep-line over a duplicated key; checks 6 and 8 each drain the game thread). Env
+// VOTVCOOP_RUN_CONFIG_SELFTEST=1.
 void RunConfigSelftest();
 DWORD WINAPI ConfigSelftestThread(LPVOID arg);
 

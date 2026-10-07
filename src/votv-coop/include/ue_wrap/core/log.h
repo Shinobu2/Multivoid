@@ -12,6 +12,9 @@
 
 #pragma once
 
+#include <string>
+#include <string_view>
+
 namespace ue_wrap::log {
 
 enum class Level { Info, Warn, Error };
@@ -40,6 +43,29 @@ void SetSink(Sink sink);
 // verdict line, or a boot milestone you want tailable at once. Do NOT call on a hot path: this
 // is a synchronous disk sync, and avoiding per-line flushing is the whole point of the buffer.
 void Flush();
+
+// The full paths of the live log and of the file the previous run's log was kept as (the live
+// name with `.prev.log` for `.log`, `.prev` appended otherwise). The rig names its logs by the
+// VOTVCOOP_LOG environment value, so no reader may hardcode `multivoid.log`: it asks here. Opens
+// the log first, so the answer is the real one. Any thread.
+std::wstring CurrentPath();
+std::wstring PreviousPath();
+
+// The address mark. A log line that prints a peer's address, a typed dial text, or an endpoint
+// that is not the project's own wraps the value in Addr(): it writes kAddrOpen + value +
+// kAddrClose, so the bug-report redactor finds the span by its delimiters, since an address has
+// no shape a scanner can tell from a version string. kLogFormatLine is line 2 of every log; bump
+// the number when what is marked changes, so a report never trusts an older log's marks.
+inline constexpr char kAddrOpen[] = "\xE2\x9F\xA8" "addr:";  // U+27E8 + "addr:"
+inline constexpr char kAddrClose[] = "\xE2\x9F\xA9";          // U+27E9
+inline constexpr char kLogFormatLine[] = "log format 1";
+// MTA and Source print a peer's address raw in the server's own log (CGame.cpp:1411,
+// EventLog.cpp:73), and MTA's client log, uploaded with a crash (CCrashDumpWriter.cpp:2450), holds
+// the server it dialled (CConnectManager.cpp:157). Ours holds every peer's address and leaves in
+// a report, so the site marks it.
+// Pure, any thread, no lock, no log call. The value's own U+27E8 / U+27E9, CR and LF become
+// '?', so a value cannot end its own mark or its line. Used as Addr(x).c_str() in a varargs.
+std::string Addr(std::string_view value);
 
 }  // namespace ue_wrap::log
 

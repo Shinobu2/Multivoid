@@ -2,7 +2,7 @@
 // roster_token_selftest=1`, HOST only).
 //
 // It covers the claim an idle smoke cannot reach: a moderation token captured from the person who
-// WAS in a slot must be refused once someone else holds that seat, or a permanent IP ban lands on a
+// WAS in a slot must be refused once someone else holds that seat, or a permanent ban lands on a
 // stranger who merely inherited it. The only honest way to observe that is to let a slot actually
 // change hands and then fire the real action with the real stale token.
 //
@@ -28,8 +28,8 @@ namespace coop::dev::roster_token_selftest {
 // accepted before the game thread has reconciled is already rejected. POSITIVE: the same call with
 // the successor's LIVE generation must be ACCEPTED, without which the negative proves nothing,
 // since a check that refuses everything would pass a negative-only drill. REAL PATH:
-// moderation::BanPlayer(stale) must log its ABORT and write no ban row -- asserting the two
-// primitives alone would test this file's copy of the rule rather than the rule.
+// moderation::BanPlayer(stale) must return Gone, log its ABORT and write no ban row -- asserting
+// the two primitives alone would test this file's copy of the rule rather than the rule.
 void Install(coop::net::Session* session);
 
 }  // namespace coop::dev::roster_token_selftest

@@ -123,7 +123,7 @@ bool Build(void* parent) {
     g_strip = strip;
     Paint(true);
     UE_LOGI("server_browser_tabs: %zu master tab(s) built, %s chosen", g_tabs.size(),
-            slots::Selected().label.c_str());
+            slots::LogLabel(slots::Selected()).c_str());
     return true;
 }
 

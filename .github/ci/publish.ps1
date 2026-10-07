@@ -1,8 +1,8 @@
 # publish.ps1 -- the draft-first publish step (design D3), executed by
 # release-core's publish job after the judge said PUBLISH. It runs on a checkout
-# of the TAG with only .github/ci/*.ps1 overlaid from main: the
-# release CONTENT and identity belong to the commit being released, the
-# refuse-to-publish PREDICATES belong to main and nowhere else.
+# of the TAG with only .github/ci/*.ps1 and release_sign.py overlaid from main:
+# the release CONTENT and identity belong to the commit being released, the
+# refuse-to-publish PREDICATES and the signer belong to main and nowhere else.
 # Draft -> assets -> sha256 re-download verify -> flip (prerelease
 # for -dev) -> read-back asserts (prerelease shape; releases/latest tri-state
 # with labeled vacuity). Re-runs delete stale DRAFTS only; live releases are
@@ -45,7 +45,7 @@ if ($payload.Count -ne 1) { throw "expected exactly one main.dll in $ArtifactDir
 # `'0.9.0n b151' != '0.9.0n b150'`.
 #
 # release-core.yml now checks out the TAG here and overlays only the *.ps1
-# predicates from main, so this comparison holds by construction and fails
+# predicates and the release signer from main, so this comparison holds by construction and fails
 # exactly when it should: when the tree being packaged is not the one the tag
 # names.
 $tagPair = "$($tag.Game) b$($tag.N)"
@@ -59,9 +59,10 @@ if ($treePair -cne $tagPair) { throw "main-checkout identity '$treePair' != tag 
 
 # package.ps1 throws on any failure (ErrorActionPreference=Stop propagates);
 # its internal Test-PackageZip already ran on the written file.
-# -Release: this is the real artifact, so a missing pak is a HARD refusal rather
-# than a log line. See package.ps1's -Release for why the two lanes had to be told
-# apart -- the header described the difference and nothing enforced it.
+# -Release: this is the real artifact, so a missing pak or a missing signature is a
+# HARD refusal rather than a log line. See package.ps1's -Release for why the two
+# lanes had to be told apart -- the header described the difference and nothing
+# enforced it.
 & (Join-Path $PSScriptRoot 'package.ps1') -PayloadDll $payload[0].FullName -Release
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $zipName  = Get-PackageZipName -Version (ConvertTo-PackageVersion -GameTarget $treeTarget -Proto $treeProto)

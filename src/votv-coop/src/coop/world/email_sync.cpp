@@ -604,18 +604,19 @@ void Tick() {
         for (size_t i = 0; i < g_shadow.size(); ++i) {
             ShadowRow& srow = g_shadow[i];
             if (srow.sent) continue;
+            // No world-ready receiver is vacuous success: every absent peer gets this row through
+            // the save and the seed, and retrying across a future ready edge delivered a row the
+            // joiner had already loaded from its save. Asked before the send, so a broadcast
+            // nobody could receive is not sent; a peer lost between this check and the send is
+            // still refused once (a net-thread disconnect), and the next poll counts the row as
+            // sent.
+            if (!s->AnyWorldReadyPeer()) { srow.sent = true; continue; }
             UE::Row r;
             if (!UE::ReadRow(static_cast<int32_t>(i), r)) {
                 srow.sent = true;  // unreadable: skip past it (prime parity)
                 continue;
             }
-            if (!SendRow(s, r)) {
-                // Refused with zero world-ready receivers is vacuous success: every absent peer
-                // gets this row through the save and the seed, and retrying across a future ready
-                // edge delivered a row the joiner had already loaded from its save.
-                if (!s->AnyWorldReadyPeer()) { srow.sent = true; continue; }
-                break;  // channel refused with a live audience: retry next poll
-            }
+            if (!SendRow(s, r)) break;  // refused with a live audience: retry next poll
             srow.sent = true;
         }
     }

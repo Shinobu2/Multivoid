@@ -3,13 +3,12 @@
 #include "coop/player/flashlight_click_sound.h"
 
 #include "coop/player/players_registry.h"
+#include "coop/player/roster_ledger.h"
 #include "ue_wrap/core/call.h"
 #include "ue_wrap/engine/engine.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/sdk_profile.h"
-
-#include <array>
 
 namespace coop::flashlight_click_sound {
 namespace {
@@ -26,11 +25,9 @@ namespace R = ue_wrap::reflection;
 //
 // ApplyToPuppet (the only caller) runs on the game thread via GT::Post
 // so plain int is safe -- no atomic needed.
-std::array<int, coop::players::kMaxPeers> g_lastAppliedStateByPeer = []{
-    std::array<int, coop::players::kMaxPeers> a{};
-    a.fill(-1);
-    return a;
-}();
+// Reset when the slot's occupant changes (PerSlotState), so a newcomer starts with no apply.
+struct LastApplied { int state = -1; };
+coop::roster_ledger::PerSlotState<LastApplied> g_lastAppliedStateByPeer;
 
 }  // namespace
 
@@ -43,8 +40,8 @@ void PlayIfStateChanged(void* puppetActor, uint8_t peerSlot, bool newState) {
     const int curState = newState ? 1 : 0;
     bool stateChanged = false;
     if (peerSlot < coop::players::kMaxPeers) {
-        stateChanged = (g_lastAppliedStateByPeer[peerSlot] != curState);
-        g_lastAppliedStateByPeer[peerSlot] = curState;
+        stateChanged = (g_lastAppliedStateByPeer[peerSlot].state != curState);
+        g_lastAppliedStateByPeer[peerSlot].state = curState;
     } else {
         // Out-of-range peer slot (defensive). Treat every apply as a state
         // change so we still click; the array is sized to the central

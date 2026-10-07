@@ -2,173 +2,344 @@
 
 #include "coop/moderation/ban_list.h"
 
+#include "coop/atomic_file/atomic_file.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/paths.h"
 
-#include <windows.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <mutex>
-#include <string>
-#include <unordered_map>
 
 namespace fs = std::filesystem;
 
 namespace coop::ban_list {
 namespace {
 
-struct Record {
-    std::string nick;
-    std::string reason;
-    long long   bannedUnix = 0;
+// The WRITE mutex (outer): the disk write, the folder and the read-only mark. The SET mutex
+// (inner): the set and its address index. Anything taking both takes the write mutex first.
+std::mutex g_writeMutex;
+std::wstring g_serverDir;              // guarded by g_writeMutex
+std::atomic<bool> g_readOnly{false};   // written under g_writeMutex
+
+std::mutex g_setMutex;
+std::vector<Entry> g_set;              // guarded by g_setMutex
+AddressIndex g_index;                  // guarded by g_setMutex
+
+// 32 hex digits, either case.
+bool IsHex32(std::string_view s) {
+    if (s.size() != 32) return false;
+    for (char c : s)
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) return false;
+    return true;
+}
+
+bool IsLowerHex32(std::string_view s) {
+    if (!IsHex32(s)) return false;
+    for (char c : s)
+        if (c >= 'A' && c <= 'F') return false;
+    return true;
+}
+
+// Copy `s` into a fixed field, cut on a UTF-8 boundary below the field's capacity.
+template <size_t N>
+void SetField(char (&dst)[N], const std::string& s) {
+    const std::string cut = coop::text::CapUtf8Bytes(s, N - 1);
+    std::memcpy(dst, cut.data(), cut.size());
+    dst[cut.size()] = '\0';
+}
+
+Entry* FindById(std::vector<Entry>& set, std::string_view id) {
+    for (auto& e : set)
+        if (id == e.id) return &e;
+    return nullptr;
+}
+
+// The first eight characters of an id for a log line (the id may not be NUL-terminated).
+struct ShortId {
+    char text[9] = {};
+    explicit ShortId(std::string_view id) {
+        std::memcpy(text, id.data(), std::min<size_t>(id.size(), 8));
+    }
 };
 
-std::mutex g_mutex;
-std::unordered_map<std::string, Record> g_bans;  // keyed by IP; guarded by g_mutex
-
-// Banlist lives beside the game exe -- the same Binaries\Win64 directory as
-// multivoid.ini / multivoid.log (ue_wrap::paths::ExeDir, the install-dir
-// anchor). Each game copy keeps
-// its OWN banlist; the host copy's file is the canonical one (clients never
-// load it). File name follows the multivoid-* convention.
-fs::path BanlistPath() {
-    const std::wstring dir = ue_wrap::paths::ExeDir();
-    if (dir.empty()) return {};
-    return fs::path(dir) / L"multivoid-banlist.txt";
+// The pieces of ParseBans, one per field kind. Each returns false when the field is present and
+// of the wrong type; an absent field leaves `out` as it was.
+bool ReadString(const nlohmann::json& rec, const char* key, std::string* out) {
+    const auto it = rec.find(key);
+    if (it == rec.end()) return true;
+    if (!it->is_string()) return false;
+    *out = it->get<std::string>();
+    return true;
 }
 
-// Rewrite the whole file from the in-memory set. Caller holds g_mutex. The file
-// is small (a banlist, not a log), so a full rewrite on each Add is simplest and
-// keeps disk == memory exactly (no append-only drift / dup lines). Best-effort:
-// a write failure warns but leaves the in-memory ban in force for the session.
-void WriteFileLocked() {
-    const fs::path path = BanlistPath();
-    if (path.empty()) {
-        UE_LOGW("ban_list: LOCALAPPDATA unresolved -- ban not persisted (in-memory only)");
+// Write the whole set to bans.json. Caller holds g_writeMutex and NOT g_setMutex: the set was
+// copied under it and released, so the copy order is the write order and admission never waits on
+// the disk. Memory-only (no folder) and read-only stores write nothing.
+void WriteFile(const std::vector<Entry>& copy) {
+    if (g_readOnly.load(std::memory_order_acquire)) {
+        UE_LOGW("ban_list: the file is read-only this session -- this change holds until the host stops");
         return;
     }
-    std::error_code ec;
-    fs::create_directories(path.parent_path(), ec);  // ok if it already exists
-    std::ofstream f(path, std::ios::trunc);
-    if (!f) {
-        UE_LOGW("ban_list: cannot open '%ls' for write -- ban not persisted", path.c_str());
-        return;
-    }
-    f << "# VOTV coop banlist -- one ban per line: ip|nick|unixtime|reason\n";
-    for (const auto& [ip, rec] : g_bans) {
-        f << ip << '|' << rec.nick << '|' << rec.bannedUnix << '|' << rec.reason << '\n';
-    }
-}
-
-// Field sanitizer for the pipe-separated format: separators/line breaks must
-// never appear inside a stored field (reason is admin-typed free text).
-std::string CleanField(const char* s) {
-    std::string out = s ? s : "";
-    for (char& c : out)
-        if (c == '|' || c == '\n' || c == '\r') c = '_';
-    return out;
+    if (g_serverDir.empty()) return;
+    const fs::path path = fs::path(g_serverDir) / L"bans.json";
+    const std::string text = SerializeBans(copy);
+    const atomic_file::Result r =
+        atomic_file::Write(path, text, atomic_file::Mode::Replace, atomic_file::Sync::ToDisk);
+    if (!r.ok())
+        UE_LOGE("ban_list: could not write %ls (%s) -- the ban holds for this session only",
+                path.c_str(), atomic_file::Describe(r).c_str());
 }
 
 }  // namespace
 
-void Load() {
-    std::lock_guard<std::mutex> lk(g_mutex);
-    g_bans.clear();
-    const fs::path path = BanlistPath();
-    if (path.empty()) return;
-    std::error_code ec;
-    if (!fs::exists(path, ec)) {
-        UE_LOGI("ban_list: no banlist file yet (%ls) -- starting empty", path.c_str());
-        return;
-    }
-    std::ifstream f(path);
-    if (!f) {
-        UE_LOGW("ban_list: cannot open '%ls' for read", path.c_str());
-        return;
-    }
-    std::string line;
-    while (std::getline(f, line)) {
-        if (line.empty() || line[0] == '#') continue;
-        // Parse "ip|nick|unixtime|reason". Be lenient: nick/reason may be empty
-        // (pre-reason files have 3 fields); a missing time defaults to 0. Only
-        // the IP (field 0) is required.
-        const size_t p1 = line.find('|');
-        const std::string ip = line.substr(0, p1);
-        if (ip.empty()) continue;
-        std::string nick, reason;
-        long long when = 0;
-        if (p1 != std::string::npos) {
-            const size_t p2 = line.find('|', p1 + 1);
-            nick = line.substr(p1 + 1, (p2 == std::string::npos) ? std::string::npos : p2 - (p1 + 1));
-            if (p2 != std::string::npos) {
-                const size_t p3 = line.find('|', p2 + 1);
-                const std::string t = line.substr(
-                    p2 + 1, (p3 == std::string::npos) ? std::string::npos : p3 - (p2 + 1));
-                if (!t.empty()) { try { when = std::stoll(t); } catch (...) { when = 0; } }
-                if (p3 != std::string::npos) reason = line.substr(p3 + 1);
+bool IsBannableAddress(std::string_view a) {
+    if (a.empty() || a == "::" || a == "0.0.0.0") return false;
+    if (a == "::1" || a.substr(0, 4) == "127.") return false;
+    return true;
+}
+
+AddressIndex BuildAddressIndex(const std::vector<Entry>& set) {
+    AddressIndex index;
+    for (const auto& e : set)
+        if (IsBannableAddress(e.address)) index.emplace(e.address, e.id);
+    return index;
+}
+
+const std::string* LookupAddress(const AddressIndex& index, std::string_view address) {
+    if (!IsBannableAddress(address)) return nullptr;
+    const auto it = index.find(std::string(address));
+    return it == index.end() ? nullptr : &it->second;
+}
+
+bool ParseBans(std::string_view json, std::vector<Entry>* out, std::vector<std::string>* problems,
+               int* skipped) {
+    using Json = nlohmann::json;
+    out->clear();
+    problems->clear();
+    *skipped = 0;
+    const Json root = Json::parse(json.begin(), json.end(), nullptr, false);
+    if (root.is_discarded() || !root.is_object()) return false;
+    const auto bans = root.find("bans");
+    if (bans == root.end() || !bans->is_array()) return false;
+
+    int n = -1;
+    for (const Json& rec : *bans) {
+        ++n;
+        auto skip = [&](const char* field) {
+            ++*skipped;
+            problems->push_back("record " + std::to_string(n) + " skipped (" + field + ")");
+        };
+        if (!rec.is_object()) { skip("record"); continue; }
+
+        std::string id, name, address, reason;
+        long long since = 0;
+        {
+            const auto it = rec.find("id");
+            if (it == rec.end() || !it->is_string() || !IsHex32(it->get_ref<const std::string&>())) {
+                skip("id");
+                continue;
+            }
+            id = it->get<std::string>();
+            for (char& c : id)
+                if (c >= 'A' && c <= 'F') c = static_cast<char>(c - 'A' + 'a');
+        }
+        if (!ReadString(rec, "name", &name)) { skip("name"); continue; }
+        if (!ReadString(rec, "address", &address)) { skip("address"); continue; }
+        if (!ReadString(rec, "reason", &reason)) { skip("reason"); continue; }
+        {
+            const auto it = rec.find("since");
+            if (it != rec.end()) {
+                if (!it->is_number_integer()) { skip("since"); continue; }
+                since = it->get<long long>();
             }
         }
-        g_bans[ip] = Record{ nick, reason, when };
+
+        Entry e;
+        SetField(e.id, id);
+        SetField(e.nick, name);
+        SetField(e.address, address);
+        SetField(e.reason, reason);
+        e.bannedUnix = since;
+        if (Entry* prior = FindById(*out, id)) {
+            problems->push_back("record " + std::to_string(n) + " repeats an id");
+            *prior = e;
+        } else {
+            out->push_back(e);
+        }
     }
-    UE_LOGI("ban_list: loaded %zu banned IP(s) from %ls", g_bans.size(), path.c_str());
+    return true;
 }
 
-bool IsBanned(const char* ip, char* reasonOut, int reasonLen) {
+std::string SerializeBans(const std::vector<Entry>& in) {
+    using Json = nlohmann::ordered_json;
+    Json arr = Json::array();
+    for (const auto& e : in) {
+        Json rec = Json::object();
+        rec["id"] = std::string(e.id);
+        rec["name"] = std::string(e.nick);
+        rec["address"] = std::string(e.address);
+        rec["reason"] = std::string(e.reason);
+        rec["since"] = e.bannedUnix;
+        arr.push_back(std::move(rec));
+    }
+    Json root = Json::object();
+    root["bans"] = std::move(arr);
+    return root.dump(2, ' ', false, Json::error_handler_t::replace);
+}
+
+void Load(const std::wstring& serverDir) {
+    std::lock_guard<std::mutex> w(g_writeMutex);
+    g_serverDir = serverDir;
+    g_readOnly.store(false, std::memory_order_release);
+
+    const std::wstring exeDir = ue_wrap::paths::ExeDir();
+    if (!exeDir.empty()) {
+        const fs::path legacy = fs::path(exeDir) / L"multivoid-banlist.txt";
+        std::error_code ec;
+        if (fs::exists(legacy, ec))
+            UE_LOGI("ban_list: legacy path detected -- ignoring %ls", legacy.c_str());
+    }
+
+    std::vector<Entry> loaded;
+    if (!serverDir.empty()) {
+        const fs::path path = fs::path(serverDir) / L"bans.json";
+        std::error_code ec;
+        const bool exists = fs::exists(path, ec);
+        if (!ec && exists) {
+            std::string text;
+            bool readable = false;
+            {
+                std::ifstream f(path, std::ios::binary);
+                if (f) {
+                    text.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+                    readable = !f.bad();
+                }
+            }
+            std::vector<std::string> problems;
+            int skipped = 0;
+            if (!readable || !ParseBans(text, &loaded, &problems, &skipped)) {
+                loaded.clear();
+                g_readOnly.store(true, std::memory_order_release);
+                UE_LOGE("ban_list: %ls is unreadable -- no bans are enforced, and the file is not "
+                        "rewritten this session", path.c_str());
+            } else {
+                for (const auto& p : problems) UE_LOGW("ban_list: %ls: %s", path.c_str(), p.c_str());
+                if (skipped > 0) {
+                    g_readOnly.store(true, std::memory_order_release);
+                    UE_LOGE("ban_list: %ls has records this build cannot read -- the bans it could "
+                            "read are enforced, and the file is not rewritten this session",
+                            path.c_str());
+                }
+                UE_LOGI("ban_list: loaded %zu ban(s) from %ls", loaded.size(), path.c_str());
+            }
+        } else if (ec) {
+            g_readOnly.store(true, std::memory_order_release);
+            UE_LOGE("ban_list: %ls is unreadable -- no bans are enforced, and the file is not "
+                    "rewritten this session", path.c_str());
+        }
+    }
+
+    std::lock_guard<std::mutex> s(g_setMutex);
+    g_set = std::move(loaded);
+    g_index = BuildAddressIndex(g_set);
+}
+
+bool IsReadOnly() { return g_readOnly.load(std::memory_order_acquire); }
+
+bool IsBanned(std::string_view playerId, std::string_view address, char* reasonOut, int reasonLen) {
     if (reasonOut && reasonLen > 0) reasonOut[0] = '\0';
-    if (!ip || !ip[0]) return false;
-    std::lock_guard<std::mutex> lk(g_mutex);
-    const auto it = g_bans.find(ip);
-    if (it == g_bans.end()) return false;
-    if (reasonOut && reasonLen > 0)
-        std::snprintf(reasonOut, static_cast<size_t>(reasonLen), "%s", it->second.reason.c_str());
-    return true;
-}
-
-void Add(const char* ip, const char* nick, const char* reason) {
-    if (!ip || !ip[0]) {
-        UE_LOGW("ban_list: Add called with empty IP -- ignored");
-        return;
+    const char* key = nullptr;
+    {
+        std::lock_guard<std::mutex> s(g_setMutex);
+        const Entry* hit = FindById(g_set, playerId);
+        if (hit) {
+            key = "id";
+        } else if (const std::string* id = LookupAddress(g_index, address)) {
+            hit = FindById(g_set, *id);
+            if (hit) key = "address";
+        }
+        if (!hit) return false;
+        if (reasonOut && reasonLen > 0)
+            std::snprintf(reasonOut, static_cast<size_t>(reasonLen), "%s", hit->reason);
     }
-    std::lock_guard<std::mutex> lk(g_mutex);
-    Record rec;
-    rec.nick = CleanField(nick);
-    rec.reason = CleanField(reason);
-    rec.bannedUnix = static_cast<long long>(::time(nullptr));
-    g_bans[ip] = rec;
-    WriteFileLocked();
-    UE_LOGI("ban_list: banned IP %s (nick='%s' reason='%s') -- %zu total",
-            ip, rec.nick.c_str(), rec.reason.c_str(), g_bans.size());
+    UE_LOGI("ban_list: refused %s... by %s", ShortId(playerId).text, key);
+    return true;
 }
 
-bool Remove(const char* ip) {
-    if (!ip || !ip[0]) return false;
-    std::lock_guard<std::mutex> lk(g_mutex);
-    const auto it = g_bans.find(ip);
-    if (it == g_bans.end()) return false;
-    UE_LOGI("ban_list: unbanned IP %s (nick='%s') -- %zu remain",
-            ip, it->second.nick.c_str(), g_bans.size() - 1);
-    g_bans.erase(it);
-    WriteFileLocked();
+bool Add(const char* playerId, const char* nick, const char* address, const char* reason) {
+    if (!playerId || !IsLowerHex32(playerId)) {
+        UE_LOGW("ban_list: refused a ban for a malformed id");
+        return false;
+    }
+    Entry e;
+    SetField(e.id, playerId);
+    SetField(e.nick, nick ? nick : "");
+    if (address && IsBannableAddress(address)) SetField(e.address, address);
+    SetField(e.reason, reason ? reason : "");
+    e.bannedUnix = static_cast<long long>(::time(nullptr));
+
+    std::lock_guard<std::mutex> w(g_writeMutex);
+    std::vector<Entry> copy;
+    {
+        std::lock_guard<std::mutex> s(g_setMutex);
+        if (Entry* prior = FindById(g_set, playerId)) *prior = e;
+        else g_set.push_back(e);
+        g_index = BuildAddressIndex(g_set);
+        copy = g_set;
+    }
+    WriteFile(copy);
     return true;
+}
+
+bool Remove(const char* playerId) {
+    if (!playerId || !playerId[0]) return false;
+    std::lock_guard<std::mutex> w(g_writeMutex);
+    std::vector<Entry> copy;
+    bool removed = false;
+    size_t remaining = 0;
+    {
+        std::lock_guard<std::mutex> s(g_setMutex);
+        const auto it = std::find_if(g_set.begin(), g_set.end(),
+                                     [&](const Entry& e) { return std::string_view(playerId) == e.id; });
+        if (it != g_set.end()) {
+            g_set.erase(it);
+            g_index = BuildAddressIndex(g_set);
+            copy = g_set;
+            removed = true;
+            remaining = g_set.size();
+        }
+    }
+    if (!removed) return false;
+    UE_LOGI("ban_list: unbanned %.8s... -- %zu remain", playerId, remaining);
+    WriteFile(copy);
+    return true;
+}
+
+std::vector<std::string> IdsWithPrefix(std::string_view hexPrefix) {
+    std::string prefix(hexPrefix);
+    for (char& c : prefix)
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + ('a' - 'A'));
+    std::vector<std::string> out;
+    std::lock_guard<std::mutex> s(g_setMutex);
+    for (const Entry& e : g_set)
+        if (std::string_view(e.id).substr(0, prefix.size()) == prefix) out.emplace_back(e.id);
+    return out;
 }
 
 void GetSnapshot(std::vector<Entry>& out) {
-    out.clear();
-    std::lock_guard<std::mutex> lk(g_mutex);
-    out.reserve(g_bans.size());
-    for (const auto& [ip, rec] : g_bans) {
-        Entry e;
-        std::snprintf(e.ip, sizeof(e.ip), "%s", ip.c_str());
-        std::snprintf(e.nick, sizeof(e.nick), "%s", rec.nick.c_str());
-        std::snprintf(e.reason, sizeof(e.reason), "%s", rec.reason.c_str());
-        e.bannedUnix = rec.bannedUnix;
-        out.push_back(e);
+    {
+        std::lock_guard<std::mutex> s(g_setMutex);
+        out = g_set;
     }
-    std::sort(out.begin(), out.end(), [](const Entry& a, const Entry& b) {
+    std::stable_sort(out.begin(), out.end(), [](const Entry& a, const Entry& b) {
         return a.bannedUnix > b.bannedUnix;  // most recent ban first
     });
 }

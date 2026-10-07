@@ -1,15 +1,18 @@
 // coop/session/teleport_client.h -- teleport connected clients to the host's pose.
 //
-// A shipped moderation verb, not a dev toy: the F1 admin scoreboard brings one client to the host
-// through TeleportSlotToHost (moderation.cpp), event_feed applies the wire packet on the receiving
+// A shipped moderation verb, not a dev toy: /tphere (the scoreboard's Teleport runs it) brings one
+// client to the host through TeleportSlotToHostWithToken (moderation.cpp), event_feed applies the wire packet on the receiving
 // side, and the F1 dev-menu button broadcasts to everyone. A JOIN does not use the wire verb -- a
 // joiner places itself (net_pump, through ApplyLocally below), and a host teleport at world-ready
 // overwrote that placement, since world-ready arrives after the client has already spawned.
 //
 // Direction: HOST -> CLIENT only. The action self-gates on Session::Role::Host and no-ops on a
-// client. It mirrors MTA's `!tphere` chat command as a menu button.
+// client. It mirrors MTA's `!tphere` chat command: /tphere is the command, and the scoreboard's
+// Teleport button submits that line.
 
 #pragma once
+
+#include <cstdint>
 
 namespace coop::net { class Session; }
 
@@ -25,12 +28,14 @@ void SetSession(coop::net::Session* session);
 // posted to it).
 void TeleportClientsToHost();
 
-// Host action menu (player-list scoreboard): teleport ONE specific client (the
-// peer at `peerSlot`, 1..kMaxPeers-1) to the host's pose. Same snapshot as
-// TeleportClientsToHost but a single-target SendReliableToSlot instead of a
-// broadcast, so only the clicked client moves. HOST-only; no-ops on a client or
-// for an out-of-range slot. Safe to call off the game thread.
-void TeleportSlotToHost(int peerSlot);
+// The /tphere command: teleport ONE specific client (the peer at `peerSlot`,
+// 1..kMaxPeers-1) to the host's pose, only while `generation` is still that slot's
+// occupancy generation, so a successor admitted into the seat is never moved. GAME
+// THREAD. The pose is read now and sent by a queued task that checks the generation
+// again. Returns false, sending nothing, when this is not the host, the slot is out
+// of range, the generation is not the slot's, or the host's pose cannot be read; the
+// caller tells a changed seat from the rest by reading the slot's generation again.
+bool TeleportSlotToHostWithToken(int peerSlot, uint32_t generation);
 
 // Receiver: apply the teleport on the local mainPlayer (K2_TeleportTo).
 // Called from event_feed.cpp on incoming ReliableKind::TeleportClient AND

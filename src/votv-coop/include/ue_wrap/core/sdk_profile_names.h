@@ -413,6 +413,9 @@ inline constexpr const wchar_t* TextBlockSetColorFn = L"SetColorAndOpacity";  //
 // ui_menu_C fields for the inject, resolved by FindPropertyOffset (recook-robust).
 inline constexpr const wchar_t* UiMenuButtonStartProp = L"button_start";      // UButton* @ +0x2E0 (NEW GAME). The inject derives its parent VerticalBox from this button's slot and clones its FButtonStyle, tints and VBox slot layout (engine_widget.cpp); the four brushes carry no ResourceObject, so no texture loads. The label style is not cloned (null at some inject timings) but set to measured constants.
 inline constexpr const wchar_t* MainPlayerEscapeFn = L"InpActEvt_Escape_K2Node_InputKeyEvent_0";  // engine input event that opens the pause menu (ProcessEvent-dispatched, same class as the flashlight InpActEvt_* we already observe)
+// ui_menu_C's click handler of its "Main menu" button: its ubergraph block runs lib_C::loadLevel("menu")
+// unless an event is active or the camera is out of bounds.
+inline constexpr const wchar_t* PauseMenuQuitClickFn = L"BndEvt__button_Menu_K2Node_ComponentBoundEvent_5_OnButtonClickedEvent__DelegateSignature";
 // Head-bone anchoring (USceneComponent::GetSocketLocation, world; the bones are enumerated to find
 // the head).
 inline constexpr const wchar_t* GetSocketLocationFn = L"GetSocketLocation";  // (FName)->FVector (world)

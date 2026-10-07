@@ -4,7 +4,7 @@
 > A mod that adds drop-in co-op to a single-player UE4.27 game —
 > **no original game files are modified**.
 
-[![Support on Boosty](https://img.shields.io/badge/Boosty-support%20the%20project-FF7C00?style=for-the-badge)](https://boosty.to/pelmentor/donate)
+[![Support on Boosty](https://img.shields.io/badge/Boosty-support%20the%20project-FF7C00?style=for-the-badge)](https://boosty.to/pelmentor)
 
 | | |
 |--|--|
@@ -16,7 +16,7 @@
 | **Platform** | Windows · UE4.27 · LAN + Internet |
 | **Website** | [multivoid.dev](https://multivoid.dev) |
 | **Community** | [Discord](https://discord.gg/bA6tGBvGMN) — chat about the project, ask questions, report bugs |
-| **Support** | [Boosty](https://boosty.to/pelmentor/donate) — **the mod is free and always will be**; this covers the master-server VPS and the tooling bill |
+| **Support** | [Boosty](https://boosty.to/pelmentor) — **the mod is free and always will be**; this covers the master-server VPS and the tooling bill |
 
 ---
 
@@ -53,7 +53,7 @@ with its own signatures, drives the game's own classes and functions through ref
 where reflection cannot see. No asset edits, no repacked paks.
 
 Transport is GameNetworkingSockets: 13 unreliable pose and state streams, a voice stream beside
-them, and one reliable ordered channel whose payloads are 153 message kinds. Each machine's engine
+them, and one reliable ordered channel whose payloads are 161 message kinds. Each machine's engine
 re-derives animation, physics and rendering from the streamed state. The host is authoritative for
 world state, randomness and NPC simulation; a client acts by naming an intent that the host
 performs.

@@ -1,6 +1,6 @@
 # repo-gates -- the checks on the repository's public surface, on every push.
 #
-# Four gates, each with the drill that shows it RED first (a gate nothing can
+# Each gate runs with the drill that shows it RED first (a gate nothing can
 # show failing is a gate nobody can trust):
 #   - public-leak: a leaked security coordinate in the public tree (its verbatim-overlap
 #     ratchet needs the maintainer's local trees and reports n/a here; the three line
@@ -89,6 +89,16 @@ jobs:
 
       - name: Public-prose gate
         run: python3 .github/ci/public_prose_gate.py
+
+      - name: Release signer drill
+        run: python3 -I -B .github/ci/release_sign_drill.py
+
+      - name: Release keygen drill
+        run: python3 -I -B .github/ci/release_sign_keygen_drill.py
+
+      - name: Package signature drill
+        shell: pwsh
+        run: ./.github/ci/package_signature_drill.ps1
 
       # ledger_lint reads the ledger and the public docs, so most of it needs no
       # API and no compiler -- but it ran only in the manual build (advisory

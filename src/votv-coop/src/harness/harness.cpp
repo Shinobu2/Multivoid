@@ -38,16 +38,22 @@
 #include "coop/session/session_manager.h"
 #include "coop/player/nameplate.h"
 #include "coop/player/nick_color.h"
+#include "coop/comms/peer_action_feed.h"
 #include "coop/player/roster.h"
+#include "coop/voice/voice_chat.h"
 #include "coop/net/session.h"
 #include "coop/player/puppet_drive.h"
 #include "coop/player/remote_player.h"
+#include "coop/session/server_settings_sync.h"
 #include "coop/session/shutdown.h"
 #include "ui/dev_menu.h"
 #include "ui/imgui_overlay.h"
 #include "ui/console.h"
 #include "ui/server_browser.h"
 #include "ui/multiplayer_menu.h"
+#include "ui/net_stats_panel.h"
+#include "ui/fonts.h"
+#include "ui/scale.h"
 #include "coop/dev/menu_proceed.h"
 #include "coop/dev/save_probe.h"
 #include "coop/dev/native_ui_probe.h"
@@ -146,10 +152,6 @@ DWORD WINAPI TimelineThread(LPVOID param) {
     }
     // The persisted body skin; local_body owns it and the Join reads it from there.
     coop::local_body::SetInitialSkin(cfg::ReadPlayerSkin());
-    // The persisted nameplate pref (absent = visible), read by the Join's prefs byte.
-    coop::nameplate::SetInitialLocalVisible(cfg::ResolveFlag(coop::config_registry::rows::nameplate));
-    // The persisted nick colour (ini nick_color=RRGGBB); nick_color owns the parse.
-    coop::nick_color::SetInitialLocalFromIniHex(cfg::ResolveString(coop::config_registry::rows::nick_color));
     // The boot file-versus-schema sweep, after the mints above so the post-mint file is what is
     // reviewed; it arms the settings-check panel at the main menu and never rewrites.
     coop::config_review::RunBootSweep();
@@ -335,9 +337,9 @@ DWORD WINAPI TimelineThread(LPVOID param) {
                 ::Sleep(100);
             }
             };  // runAutotestTeleport
-            // A client never teleports to a fixed checkpoint: it appears at the host's position,
-            // which the world-ready connect replay sends (net_pump,
-            // teleport_client::TeleportSlotToHost).
+            // A client never teleports to a fixed checkpoint: net_pump places it itself at its
+            // first body of the session (TakeJoinPlacement: the profile's pose, the start point,
+            // or the host's position under join_at_host).
             if (!saveTransferClient) {
                 runAutotestTeleport();
                 session_runtime::StartCoopSession(netCfg);
@@ -367,7 +369,8 @@ DWORD WINAPI TimelineThread(LPVOID param) {
                                   netCfg.peerIp.empty() ? "127.0.0.1" : netCfg.peerIp.c_str(),
                                   static_cast<unsigned>(netCfg.port));
                     if (!coop::session_manager::ConnectDirect(hostPort)) {
-                        UE_LOGW("harness: env ConnectDirect('%s') rejected", hostPort);
+                        UE_LOGW("harness: env ConnectDirect('%s') rejected",
+                                ue_wrap::log::Addr(hostPort).c_str());
                     }
                 }
             }
@@ -511,6 +514,29 @@ void Start() {
     // And the per-tick pump, for the same reason and in the same place: it is handed the session
     // rather than reaching back into the lifecycle driver that drives it.
     pump::SetSession(&session_runtime::Session());
+    // A config change's subscribers run on the game thread.
+    cfg::SetNotifier([](std::function<void()> task) { GT::Post(std::move(task)); });
+    // The persisted nameplate pref (absent = visible), read by the Join's prefs byte.
+    coop::nameplate::SetInitialLocalVisible(cfg::ResolveFlag(coop::config_registry::rows::nameplate));
+    // The persisted nick colour (ini nick_color=RRGGBB); nick_color owns the parse.
+    coop::nick_color::SetInitialLocalFromIniHex(cfg::ResolveString(coop::config_registry::rows::nick_color));
+    // The modules that follow a config row subscribe once, here, before any pane draws; the
+    // nameplate and nick-colour seeds above have read their rows, the two flag modules load theirs
+    // on first use, the scale and font modules load theirs in the overlay's bring-up, which retries
+    // on a later frame if it fails (LoadUserPrefOnce, ReadRoleFamiliesOnce), the voice module reads
+    // its rows when a session's Install opens the devices, and every later set reaches all seven
+    // through these subscriptions. The host's server-scope sender follows the replicated rows the
+    // same way, and its session handle and stop listener are bound first, because the first
+    // session start on the TimelineThread reads them.
+    coop::nameplate::SubscribeRow();
+    coop::nick_color::SubscribeRow();
+    coop::peer_action_feed::SubscribeRow();
+    ui::net_stats_panel::SubscribeRow();
+    ui::scale::SubscribeRow();
+    ui::fonts::SubscribeRows();
+    coop::voice_chat::SubscribeRows();
+    coop::server_settings_sync::BindSession(session_runtime::Session());
+    coop::server_settings_sync::SubscribeRows();
     if (!ui::imgui_overlay::Init()) {
         UE_LOGW("harness: imgui_overlay::Init failed -- F1 menu unavailable this run");
     }

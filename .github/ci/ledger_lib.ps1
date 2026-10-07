@@ -511,3 +511,51 @@ function Test-PackageZip {
     } finally { $zip.Dispose() }
     $bad
 }
+
+# The release signature, checked on the WRITTEN zip. Test-PackageZip accepts a
+# mod/dlls/main.dll.sig by name (it sits under a known route) and reads none of its bytes,
+# and a package that is not a release carries none, so this runs only where a signature is
+# required. It extracts the zip's own main.dll and .sig and hands both to the signer's
+# `verify`, which reads the key table of the checkout the signer sits in. -TrustTestKey
+# admits the public test key for a drill; the release path never passes it.
+# Returns a list of violations (empty when the signature verifies), as Test-PackageZip does.
+function Test-PackageSignature {
+    param(
+        [Parameter(Mandatory)][string]$ZipPath,
+        [switch]$TrustTestKey
+    )
+    $bad = New-Object System.Collections.Generic.List[string]
+    if (-not (Test-Path -LiteralPath $ZipPath)) { $bad.Add("zip not found: $ZipPath"); return $bad }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue
+    $dir = Join-Path ([System.IO.Path]::GetTempPath()) ('mv-pkg-sig-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    try {
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+        $dllOut = Join-Path $dir 'main.dll'
+        $sigOut = Join-Path $dir 'main.dll.sig'
+        $hasSig = $false
+        $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $ZipPath).Path)
+        try {
+            foreach ($e in $zip.Entries) {
+                $name = $e.FullName.Replace([char]92, [char]47)
+                if ($name -ceq 'mod/dlls/main.dll') {
+                    [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, $dllOut, $true)
+                } elseif ($name -ceq 'mod/dlls/main.dll.sig') {
+                    [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, $sigOut, $true)
+                    $hasSig = $true
+                }
+            }
+        } finally { $zip.Dispose() }
+        if (-not $hasSig) { $bad.Add('zip has no mod/dlls/main.dll.sig'); return $bad }
+        $py = if (Get-Command python -ErrorAction SilentlyContinue) { 'python' }
+              elseif (Get-Command python3 -ErrorAction SilentlyContinue) { 'python3' }
+              else { '' }
+        if (-not $py) { $bad.Add('main.dll.sig does not verify: neither python nor python3 is on PATH'); return $bad }
+        $pyArgs = @('-I', '-B', (Join-Path $PSScriptRoot 'release_sign.py'), 'verify', '--dll', $dllOut, '--sig', $sigOut)
+        if ($TrustTestKey) { $pyArgs += '--trust-test-key' }
+        $line = & $py @pyArgs 2>&1
+        if ($LASTEXITCODE -ne 0) { $bad.Add("main.dll.sig does not verify: $((@($line) -join ' ').Trim())") }
+    } finally {
+        Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $bad
+}

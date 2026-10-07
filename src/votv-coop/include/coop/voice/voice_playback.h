@@ -5,17 +5,17 @@
 // sorts, an overflow pops the oldest, a stop marker flushes the buffer and resets lastSeq and the
 // decoder), a gap of up to 5 frames covered by opus PLC and a wider one resetting the decoder,
 // dupes dropped, ~100 ms of prebuffer (5 frames) before a channel plays again after silence, a
-// distance gain of 1 - d/maxDist with a whisper halving the radius, a vertical fade of 1 -
-// |dz|/3200 cm, the REDUCED-mode pan in [-0.5,0.5] giving volume = clamp(1 -+ pan*1.4, 0.3, 1), and
-// talking meaning a frame decoded under 250 ms ago.
-//
+// distance gain of 1 - d/maxDist (a whisper halves the radius; the range is the session's
+// voice.distance_cm, 0 = unlimited), a vertical fade of 1 - |dz|/(range * kVerticalFadeRatio), the
+// REDUCED-mode pan in [-0.5,0.5] (volume clamp(1 -+ pan*1.4, 0.3, 1)), talking = decoded <250 ms.
 // Threading: OnFrame, TickDecode, SetListener and SetSpeaker are GAME THREAD; the miniaudio
-// callback touches only the PCM rings (SPSC -- the game thread produces, the callback consumes) and
-// the position atomics. No engine access anywhere, and no allocation after Start beyond the lazily
-// created per-slot opus decoders.
+// callback touches only the PCM rings (SPSC), the position atomics, the range atomic (distanceCm_)
+// and the row's default (DefaultRangeCm(), a constant read). No engine access anywhere, and no
+// allocation after Start beyond the lazily created per-slot opus decoders.
 
 #pragma once
 
+#include "coop/config/config_registry.h"
 #include "coop/net/protocol.h"
 #include "coop/player/players_registry.h"  // kMaxPeers
 
@@ -25,6 +25,15 @@
 #include <vector>
 
 namespace coop::voice {
+
+// The vertical fade scales with the range: 3200 cm of fade at the 4800 cm default (SVC's 32-block
+// fade over its 48-block range).
+constexpr float kVerticalFadeRatio = 3200.0f / 4800.0f;
+
+// The row's default range, read where it lives.
+inline float DefaultRangeCm() {
+    return ::coop::config_registry::rows::voice_distance_cm.row->defF;
+}
 
 struct PlaybackConfig {
     std::string device;          // output device name substring ("" = system default)
@@ -50,7 +59,9 @@ public:
     void SetListener(float x, float y, float z, float yawDeg);
     void SetSpeaker(int slot, float x, float y, float z, bool valid);
 
-    // Game thread: a peer left -- drop its channel state.
+    // Game thread: drop a channel's stream state -- when its peer left, and for every slot at Stop,
+    // which also runs at a device reopen while everyone stays. The per-person volume is not stream
+    // state: voice_chat resets it where the person leaves.
     void ResetSlot(int slot);
 
     // Icon surface (any thread). True if a frame decoded < 250 ms ago.
@@ -59,6 +70,10 @@ public:
     // Live-tunable (dev menu).
     void SetMasterVolume(float v) { masterVolume_.store(v, std::memory_order_relaxed); }
     float MasterVolume() const { return masterVolume_.load(std::memory_order_relaxed); }
+    // The proximity range (cm; 0 = unlimited): the session's voice.distance_cm, applied live by
+    // the row's subscriber; the mixer thread reads it.
+    void SetDistanceCm(float cm) { distanceCm_.store(cm, std::memory_order_relaxed); }
+    float DistanceCm() const { return distanceCm_.load(std::memory_order_relaxed); }
     void SetSlotVolume(int slot, float v);
     float SlotVolume(int slot) const;
 
@@ -102,7 +117,7 @@ private:
 
     std::atomic<float> listenerX_{0}, listenerY_{0}, listenerZ_{0}, listenerYaw_{0};
     std::atomic<float> masterVolume_{1.0f};
-    float distanceCm_ = 4800.0f;
+    std::atomic<float> distanceCm_{4800.0f};
     int jitterThreshold_ = 3;
     int prebufferFrames_ = 5;
 

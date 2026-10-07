@@ -26,9 +26,12 @@
 > deal, but it is far from finished and some game systems are untouched
 > entirely.
 >
-> If something breaks, a report genuinely helps. Say what you were doing, and
-> attach `multivoid.log` from the folder that contains the game's executable.
-> Testers who send good reports get credited, permanently.
+> If something breaks, a report genuinely helps: press F1, open Report a bug,
+> describe what you were doing and press Save report. It writes a zip file in
+> the `multivoid_reports` folder beside the game's executable; open it to see
+> what is inside, then attach it to your message. Other players' addresses,
+> player ids and your Windows user folder are replaced by placeholders. Testers
+> who send good reports get credited, permanently.
 
 Multivoid is a co-op mod for **Voices of the Void**. It does not modify any
 game files. It ships as **one zip** that every route below installs -- the
@@ -105,6 +108,8 @@ and no listing, and it is shorter than what follows.
    `WindowsNoEditor\VotV\Binaries\Win64\Mods\Multivoid`
    inside your game install -- so that the file
    `...\Mods\Multivoid\dlls\main.dll` exists.
+   That folder holds `dlls\main.dll.sig`, the release signature: without it the game reports
+   the build as unofficial.
 3. If the zip has a `pak\` folder (the player-model skins), copy its **contents**
    into `WindowsNoEditor\VotV\Content\Paks\LogicMods\multivoid`
    (create the folder if it does not exist). Without this step other players'
@@ -141,17 +146,23 @@ from the folder that contains `VotV-Win64-Shipping.exe`, then install normally.
   without it (UE4SS may remain; it does nothing on its own).
 
 For a full clean sweep, also delete the mod's runtime files next to the
-executable (all optional — they only store mod settings and logs):
+executable unless noted (all optional — they only store mod settings and logs):
 `multivoid.ini`, `multivoid.ini.example`, `multivoid.log`, `multivoid.prev.log`,
 `multivoid-loaded.txt`, `multivoid-compat-report.txt`, `multivoid-players.txt`,
-`multivoid-banlist.txt`, and the skin-pak folder
-`VotV\Content\Paks\LogicMods\multivoid` if you created one. Your identity is a separate
+`multivoid-banlist.txt` (from builds before this one, no longer read), the folder
+`multivoid_servers` (it holds your hosted server's folder), the folder `multivoid_reports`
+(your saved bug reports), the skin-pak folder
+`VotV\Content\Paks\LogicMods\multivoid` if you created one, and, from builds before this
+one, a folder `%LOCALAPPDATA%\Multivoid` (no longer read). Your identity is a separate
 file beside the executable, `multivoid_identity.key`, which only your Windows account can
-read (another account on the same PC that cannot read it keeps its own key for this
-install under `%LOCALAPPDATA%\Multivoid\installs\`). If another program is holding that
+read (another account on the same PC that cannot read it keeps its own key beside it
+(if it may write the game folder; otherwise each launch runs on a temporary identity and the
+log says so), as `multivoid_identity_<a code for that account>.key`; to move that one to another PC, rename
+it to `multivoid_identity.key`). If another program is holding that
 file when the game starts, that launch runs on a temporary identity and the log says so;
 nothing is written over the file and your inventory is back the next launch. Leave it unless
-you want a new identity: deleting it orphans the inventory hosts stored for you, and copying
+you want a new identity: deleting it (and a `multivoid_identity_<code>.key` of yours beside
+it, if any) orphans the inventory hosts stored for you, and copying
 it to another PC takes your identity with you.
 
 ## Troubleshooting

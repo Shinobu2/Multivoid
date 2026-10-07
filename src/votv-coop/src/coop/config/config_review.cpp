@@ -4,6 +4,7 @@
 
 #include "coop/config/config.h"
 #include "coop/config/config_registry.h"
+#include "config_internal.h"
 #include "ue_wrap/core/log.h"
 
 #include <atomic>
@@ -26,23 +27,10 @@ std::string LowerAscii(std::string s) {
     return s;
 }
 
-// Trim + strip a whitespace-preceded inline comment for DISPLAY (mirrors the
-// string reader's narrowing; validation goes through config::ValueValidForKey,
-// which applies the reader's own stripping).
+// A line's value as the string reader returns it, for DISPLAY (the one cooker; validation goes
+// through config::ValueValidForKey, which applies the typed readers' own cut).
 std::string DisplayValue(const std::string& v) {
-    std::string t = v;
-    const size_t b = t.find_first_not_of(" \t\r\n");
-    if (b == std::string::npos) return std::string();
-    const size_t e = t.find_last_not_of(" \t\r\n");
-    t = t.substr(b, e - b + 1);
-    for (size_t i = 0; i < t.size(); ++i)
-        if (t[i] == ';' && (i == 0 || t[i - 1] == ' ' || t[i - 1] == '\t')) {
-            t = t.substr(0, i);
-            const size_t e2 = t.find_last_not_of(" \t");
-            t = e2 == std::string::npos ? std::string() : t.substr(0, e2 + 1);
-            break;
-        }
-    return t;
+    return coop::config::internal::CookIniValue(v, true);
 }
 
 void SweepInto(std::vector<Row>& rows) {
@@ -204,15 +192,17 @@ void RunBootSweep() {
             switch (r.type) {
                 case Row::Type::Rejected:
                     UE_LOGI("config_review:   REJECTED %s='%s' from %s (%s)%s%s", r.key.c_str(),
-                            r.value.c_str(), r.origin.c_str(), r.reason.c_str(),
+                            config_registry::ValueForLog(
+                                config_registry::FindRow(r.key.c_str()), r.value).c_str(),
+                            r.origin.c_str(), r.reason.c_str(),
                             !r.overriddenBy.empty() ? " -- not in use, overridden by "
                             : r.failClosed          ? " -- fail-closed: what it governs is refused"
                                                     : "",
                             r.overriddenBy.c_str());
                     break;
                 case Row::Type::Unknown:
-                    UE_LOGI("config_review:   UNKNOWN key '%s'='%s' -- not in the registry",
-                            r.key.c_str(), r.value.c_str());
+                    UE_LOGI("config_review:   UNKNOWN key '%s' (%zu bytes) -- not in the registry",
+                            r.key.c_str(), r.value.size());
                     break;
                 case Row::Type::DuplicateDormant:
                     UE_LOGI("config_review:   DUPLICATE '%s' on %zu lines; the first wins",

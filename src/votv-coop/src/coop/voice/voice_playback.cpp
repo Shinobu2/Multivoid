@@ -19,7 +19,6 @@ constexpr int kSampleRate = 48000;
 constexpr int kFrameSamples = 960;       // 20 ms
 constexpr int kMaxPlcFrames = 5;         // SVC output_buffer_size: gap compensation cap
 constexpr int64_t kTalkTimeoutMs = 250;  // SVC TalkCache
-constexpr float kVerticalFadeCm = 3200.0f;  // SVC's 32-block vertical fade
 constexpr float kPi = 3.14159265358979f;
 
 int64_t NowMs() {
@@ -40,7 +39,7 @@ void PlaybackDataCallback(void* dev, void* out, const void* /*in*/, unsigned int
 bool Playback::Start(const PlaybackConfig& cfg) {
     if (running_) return true;
     masterVolume_.store(cfg.volume, std::memory_order_relaxed);
-    distanceCm_ = cfg.distanceCm;
+    distanceCm_.store(cfg.distanceCm, std::memory_order_relaxed);
     jitterThreshold_ = cfg.jitterThreshold;
     prebufferFrames_ = cfg.prebufferFrames;
 
@@ -104,7 +103,7 @@ bool Playback::Start(const PlaybackConfig& cfg) {
     running_ = true;
     UE_LOGI("voice_playback: output running (48 kHz stereo f32, radius %.0f cm, "
             "jitter %d, prebuffer %d)",
-            distanceCm_, jitterThreshold_, prebufferFrames_);
+            distanceCm_.load(std::memory_order_relaxed), jitterThreshold_, prebufferFrames_);
     return true;
 }
 
@@ -322,6 +321,8 @@ void Playback::MixOutput(float* out, uint32_t frameCount) {
     const float lz = listenerZ_.load(std::memory_order_relaxed);
     const float yawRad = listenerYaw_.load(std::memory_order_relaxed) * kPi / 180.0f;
     const float master = masterVolume_.load(std::memory_order_relaxed);
+    // The session's range (0 = unlimited), read once per block; never resolved here.
+    const float range = distanceCm_.load(std::memory_order_relaxed);
 
     for (int slot = 0; slot < coop::players::kMaxPeers; ++slot) {
         Channel& ch = channels_[slot];
@@ -342,15 +343,23 @@ void Playback::MixOutput(float* out, uint32_t frameCount) {
             const float dy = ch.posY.load(std::memory_order_relaxed) - ly;
             const float dz = ch.posZ.load(std::memory_order_relaxed) - lz;
             const float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-            const float maxDist =
-                ch.whispering.load(std::memory_order_relaxed) ? distanceCm_ * 0.5f
-                                                              : distanceCm_;
-            float att = maxDist > 0 ? 1.0f - dist / maxDist : 0.0f;  // AL_LINEAR_DISTANCE
-            if (att < 0) att = 0;
-            if (att > 1) att = 1;
-            // Vertical fade (SVC: 1 - |dy_up| / 32 blocks).
-            float vfade = 1.0f - std::fabs(dz) / kVerticalFadeCm;
-            if (vfade < 0) vfade = 0;
+            // The range, four cases. range > 0, speaking: maxDist = range, the vertical fade
+            // spans range * kVerticalFadeRatio. range > 0, whispering: maxDist = range / 2 and
+            // the same fade (a whisper halves the reach, not the fade). range == 0 (unlimited),
+            // speaking: no attenuation and no fade. range == 0, whispering: as under the row's
+            // default range, so a whisper stays local on a server with global voice.
+            const bool whispering = ch.whispering.load(std::memory_order_relaxed);
+            float att = 1.0f;    // SVC AL_LINEAR_DISTANCE: 1 - dist / maxDist
+            float vfade = 1.0f;  // SVC vertical fade: 1 - |dz| / fade
+            if (range > 0.0f || whispering) {
+                const float base = range > 0.0f ? range : DefaultRangeCm();
+                const float maxDist = whispering ? base * 0.5f : base;
+                att = 1.0f - dist / maxDist;
+                if (att < 0) att = 0;
+                if (att > 1) att = 1;
+                vfade = 1.0f - std::fabs(dz) / (base * kVerticalFadeRatio);
+                if (vfade < 0) vfade = 0;
+            }
             // SVC REDUCED-mode pan: lateral/forward in listener space (UE:
             // yaw 0 = +X, right = (-sin yaw, cos yaw)).
             const float fwd = dx * std::cos(yawRad) + dy * std::sin(yawRad);

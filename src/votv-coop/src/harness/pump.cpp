@@ -5,6 +5,7 @@
 #include "coop/comms/chat_feed.h"
 #include "coop/dev/class_lifetime_probe.h"
 #include "coop/dev/init_seam_probe.h"
+#include "coop/dev/mannequin_drill.h"
 #include "coop/dev/object_overlay.h"
 #include "coop/dev/ragdoll_bone_overlay.h"
 #include "coop/dev/function_lookup_parity.h"
@@ -90,6 +91,8 @@ void TickFrameTail() {
     coop::dev::class_lifetime_probe::Tick();
     // [dev] Every keyed Init body the script gate sees; a latched read when off.
     coop::dev::init_seam_probe::Tick();
+    // [dev] The walking mannequin's spawn sequence, in session or not; a single atomic read when idle.
+    coop::dev::mannequin_drill::TickFrame();
     TickShutdownHooks();
 }
 

@@ -1,4 +1,4 @@
-// coop/dev/prop_birth_key_probe.h -- the client place/birth seam instrumented. Read-only, dev-only.
+// coop/dev/prop_birth_key_probe.h -- the prop place/birth seam instrumented. Read-only, dev-only.
 //
 // A client's fresh keyed prop spawn is enqueued at FinishSpawningActor and drained a tick later,
 // because the game restores the save Key inside loadData, after the spawn returns. Seven drain
@@ -11,10 +11,13 @@
 // what loses props, and anything at the ceiling names the register as the loss.
 //
 // Observation only -- no admission changes with it on. Ini-gated [dev] prop_birth_key_probe=1;
-// off, every entry point is a predicate test and a return. Game thread only.
+// off, every entry point is a predicate test and a return. Game thread only. Both roles: the
+// finish-spawn hook is role-gated after the birth record, not before.
 #pragma once
 
 #include <string>
+
+namespace coop::net { class Session; }
 
 namespace coop::dev::prop_birth_key_probe {
 
@@ -27,6 +30,19 @@ bool IsEnabled();
 // there and take its saved one a statement later, and only comparing the two tells them apart.
 void NoteEnqueue(void* actor, const std::wstring& cls, const std::wstring& seamKey,
                  bool containerExtract, const std::wstring& caller);
+
+// Any keyed-prop birth while the probe is on, whatever the session's state -- what arms the
+// DESTROY line; separate from NoteEnqueue, which counts the place-detection pending vector and
+// keeps its verdict's meaning.
+void NoteBirth(void* actor);
+
+// An actor this probe saw born (NoteBirth) reached the destroy seam. `caller` is the object whose
+// script called K2_DestroyActor (null for a native destroy); `s` is the session as the destroy
+// seam holds it (null before the first boot). The line names the caller, the session's state at
+// that instant (none, connected, joining, stopped) and the world the actor belongs to beside the
+// current one, which tells a world's own teardown from a script that spawned and removed the prop.
+// Bounded per world and per caller: past 64 lines a `capped` line prints and the rest are counted.
+void NoteDestroy(void* actor, void* caller, const coop::net::Session* s);
 
 // The pending vector was full, so this spawn was never enqueued.
 void NotePendingCapHit(void* actor);

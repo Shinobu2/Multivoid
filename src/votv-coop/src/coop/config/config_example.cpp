@@ -16,7 +16,9 @@
 #include "coop/config/config.h"
 
 #include "config_internal.h"
+#include "coop/atomic_file/atomic_file.h"
 #include "coop/config/config_registry.h"
+#include "coop/config/config_selftest.h"
 #include "coop/net/protocol.h"   // kDefaultDirectAddr (the retired-value migration)
 #include "coop/version.h"
 #include "ue_wrap/core/log.h"
@@ -74,22 +76,6 @@ void EmitProse(std::vector<std::string>& out, const std::string& text, const cha
     if (line.size() > prefixLen) out.push_back(line + "\n");
 }
 
-std::string DefaultValueOf(const config_registry::Row& r) {
-    using config_registry::Kind;
-    char buf[48];
-    switch (r.kind) {
-        case Kind::Flag:  return r.defB ? "1" : "0";
-        case Kind::Int:
-            std::snprintf(buf, sizeof(buf), "%ld", r.defI);
-            return buf;
-        case Kind::Float: return internal::FormatFloat(r.defF);
-        case Kind::Enum:
-        case Kind::String: return r.defS ? r.defS : "";
-        case Kind::Identity: return "";  // minted -- the copyable line stays valueless
-    }
-    return "";
-}
-
 // " | "-spaced view of a '|'-joined token list (prose readability).
 std::string SpacedTokens(const char* tokens) {
     std::string out;
@@ -111,6 +97,9 @@ std::vector<std::string> BuildExampleLines() {
                    "settings belong in multivoid.ini (same folder). To use a setting: remove the "
                    "leading semicolon-space from its line and move it into multivoid.ini under "
                    "the same section. Flags take 1 or 0.");
+    EmitProse(out, "A text value may be quoted: \" like this \" -- inside the quotes \\\" is a "
+                   "quote, \\\\ is a backslash, a ; is part of the value, and spaces at the ends "
+                   "are kept.");
     EmitProse(out, "Most keys have a VOTVCOOP env twin that OVERRIDES the ini value; other "
                    "VOTVCOOP env variables are dev/test harness switches, not user settings.");
     size_t count = 0;
@@ -140,7 +129,7 @@ std::vector<std::string> BuildExampleLines() {
             if (r.envVar)
                 EmitProse(out, std::string("env twin: ") + r.envVar + " (env overrides the ini)",
                           "  ");
-            out.push_back(std::string("; ") + r.key + "=" + DefaultValueOf(r) + "\n");
+            out.push_back(std::string("; ") + r.key + "=" + internal::DefaultText(r) + "\n");
         }
     }
     return out;
@@ -164,12 +153,29 @@ IniScan ReadWholeFile(const std::wstring& path, std::string& bytes) {
 
 // The catalog's own float emission, shared with the effective-config census (config_internal.h):
 // a row's default and a peer's resolved value have to be the same string, or a rig comparing them
-// reads a locale as a difference.
+// reads a locale as a difference. DefaultText prints a row's default the same way for the catalog
+// and for the session layer.
 namespace internal {
 std::string FormatFloat(float v) {
     char buf[48];
     _snprintf_s_l(buf, sizeof(buf), _TRUNCATE, "%.9g", CLocale(), static_cast<double>(v));
     return buf;
+}
+
+std::string DefaultText(const config_registry::Row& r) {
+    using config_registry::Kind;
+    char buf[48];
+    switch (r.kind) {
+        case Kind::Flag:  return r.defB ? "1" : "0";
+        case Kind::Int:
+            std::snprintf(buf, sizeof(buf), "%ld", r.defI);
+            return buf;
+        case Kind::Float: return FormatFloat(r.defF);
+        case Kind::Enum:
+        case Kind::String: return r.defS ? r.defS : "";
+        case Kind::Identity: return "";  // minted -- the copyable line stays valueless
+    }
+    return "";
 }
 }  // namespace internal
 
@@ -198,9 +204,12 @@ void GenerateExampleCatalog() {
         UE_LOGI("config: settings catalog up-to-date (multivoid.ini.example, %d keys)", keys);
         return;
     }
-    if (!internal::AtomicWriteAllLines(path, lines, "ExampleCatalog")) {
+    const atomic_file::Result wr =
+        atomic_file::Write(path, fresh, atomic_file::Mode::Replace, atomic_file::Sync::Cached);
+    if (!wr.ok()) {
         g_status.store(ExampleGen::FailedWrite, std::memory_order_relaxed);
-        UE_LOGW("config: multivoid.ini.example write FAILED (disk/perms?) -- non-fatal");
+        UE_LOGW("config: multivoid.ini.example write FAILED (%s) -- non-fatal",
+                atomic_file::Describe(wr).c_str());
         return;
     }
     g_status.store(ExampleGen::Regenerated, std::memory_order_relaxed);
@@ -354,8 +363,9 @@ void MigrateRetiredIniValues() {
     const std::string cur = internal::ReadLiveIniValue(
         config_registry::rows::browser_lastdirect.row->key, kAbsent, nullptr, nullptr);
     if (cur == "127.0.0.1:7777") {
-        if (WriteIniValue(config_registry::rows::browser_lastdirect,
-                          ::coop::net::kDefaultDirectAddr)) {
+        if (internal::WriteIniKeyAtPath(
+                internal::LiveIniPath(), config_registry::rows::browser_lastdirect.row->key,
+                ::coop::net::kDefaultDirectAddr)) {
             UE_LOGI("config: migrated browser.lastdirect off the retired 127.0.0.1:7777 "
                     "(Unreal's default port, never ours) -> %s",
                     ::coop::net::kDefaultDirectAddr);

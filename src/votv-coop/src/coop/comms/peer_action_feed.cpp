@@ -27,13 +27,19 @@ void EnsureLoaded() {
     });
 }
 
+// The row's subscriber. The lazy load runs first so a call_once still resolving on another
+// thread cannot store an older read after this one.
+void OnPeerActionsRowChanged() {
+    EnsureLoaded();
+    g_enabled.store(coop::config::ResolveFlag(::coop::config_registry::rows::ui_chat_peer_actions),
+                    std::memory_order_relaxed);
+}
+
 }  // namespace
 
-void SetEnabled(bool on) {
-    EnsureLoaded();
-    g_enabled.store(on, std::memory_order_relaxed);
-    coop::config::WriteIniValue(coop::config_registry::rows::ui_chat_peer_actions,
-                                on ? "1" : "0");
+void SubscribeRow() {
+    coop::config::Subscribe(::coop::config_registry::rows::ui_chat_peer_actions,
+                            &OnPeerActionsRowChanged);
 }
 
 bool Enabled() {

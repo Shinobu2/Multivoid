@@ -142,17 +142,23 @@ void Sparkline(ImDrawList* dl, float w, float h) {
     dl->AddText(ImVec2(p0.x + S(4.f), p0.y + S(1.f)), WithAlpha(kDim, 0.75f), peak);
 }
 
+// The row's subscriber. The lazy load runs first so a call_once still resolving on another
+// thread cannot store an older read after this one.
+void OnNetStatsRowChanged() {
+    LoadPrefOnce();
+    g_enabled.store(coop::config::ResolveFlag(::coop::config_registry::rows::ui_netstats),
+                    std::memory_order_relaxed);
+}
+
 }  // namespace
+
+void SubscribeRow() {
+    coop::config::Subscribe(::coop::config_registry::rows::ui_netstats, &OnNetStatsRowChanged);
+}
 
 bool Enabled() {
     LoadPrefOnce();
     return g_enabled.load(std::memory_order_relaxed);
-}
-
-void SetEnabled(bool on) {
-    LoadPrefOnce();
-    g_enabled.store(on, std::memory_order_relaxed);
-    coop::config::WriteIniValue(coop::config_registry::rows::ui_netstats, on ? "1" : "0");
 }
 
 void Render() {
@@ -223,7 +229,8 @@ void Render() {
 
 void RenderMenuPref() {
     bool on = Enabled();
-    if (ImGui::Checkbox("Show network stats overlay", &on)) SetEnabled(on);
+    if (ImGui::Checkbox("Show network stats overlay", &on))
+        coop::config::SetValue(::coop::config_registry::rows::ui_netstats, on ? "1" : "0");
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");
     if (ImGui::IsItemHovered())

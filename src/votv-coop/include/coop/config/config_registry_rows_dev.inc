@@ -71,6 +71,34 @@ CFG_FLAG(meadow_selftest, "meadow_selftest", "dev", false, "VOTVCOOP_MEADOW_SELF
     "Autonomous selftest: the laptop signal database lane, every writer on the host and a client's row.")
 CFG_FLAG(lid_drill, "lid_drill", "dev", false, "VOTVCOOP_LID_DRILL",
     "Autonomous drill: the portable PC's lid, opened on the host and closed on the client.")
+CFG_FLAG(selftest_break_runtime_layer, "selftest_break_runtime_layer", "dev", false, "VOTVCOOP_SELFTEST_BREAK_RUNTIME_LAYER",
+    "Red arm of the runtime-layer selftest: its first SetValue is skipped, so every check that reads the value it would have set must fail.")
+CFG_FLAG(selftest_break_quoting, "selftest_break_quoting", "dev", false, "VOTVCOOP_SELFTEST_BREAK_QUOTING",
+    "Red arm of the quoting selftest: its first check writes its line unquoted, so the ;-value reads back cut and the check must fail.")
+CFG_FLAG(selftest_break_announce, "selftest_break_announce", "dev", false, "VOTVCOOP_SELFTEST_BREAK_ANNOUNCE",
+    "Red arm of the announce selftest: its changed check compares a value with itself, so it must fail.")
+CFG_FLAG(selftest_break_server_id, "selftest_break_server_id", "dev", false, "VOTVCOOP_SELFTEST_BREAK_SERVER_ID",
+    "Red arm of the server_profile selftest: its first id case expects the wrong answer, so it must fail.")
+CFG_INT(selftest_runtime_probe, "selftest_runtime_probe", "dev", 0, 0, 9, "VOTVCOOP_SELFTEST_RUNTIME_PROBE",
+    "The row the runtime-layer selftest sets and reads; nothing else reads it.")
+CFG_FLAG(selftest_break_commands, "selftest_break_commands", "dev", false, "VOTVCOOP_SELFTEST_BREAK_COMMANDS",
+    "Red arm of the commands selftest: its first line case expects the wrong word count, so it must fail.")
+CFG_FLAG(selftest_break_bug_report, "selftest_break_bug_report", "dev", false, "VOTVCOOP_SELFTEST_BREAK_BUG_REPORT",
+    "Makes the bug-report selftest fail one check on purpose (a red arm).")
+CFG_FLAG(selftest_break_atomic_file, "selftest_break_atomic_file", "dev", false, "VOTVCOOP_SELFTEST_BREAK_ATOMIC_FILE",
+    "Makes the atomic-file selftest fail one check on purpose (a red arm).")
+CFG_FLAG(selftest_break_stat_orders, "selftest_break_stat_orders", "dev", false, "VOTVCOOP_SELFTEST_BREAK_STAT_ORDERS",
+    "Makes the stat-order wire selftest fail one check on purpose (a red arm).")
+CFG_FLAG(selftest_break_build_trust, "selftest_break_build_trust", "dev", false, "VOTVCOOP_SELFTEST_BREAK_BUILD_TRUST",
+    "Makes the build-trust selftest fail one check on purpose (a red arm).")
+CFG_FLAG(build_trust_test_key, "build_trust_test_key", "dev", false, "VOTVCOOP_BUILD_TRUST_TEST_KEY",
+    "Trust the build-trust selftest's TEST key as a release key on this peer, so a rig build signed with it reads "
+    "as official here. Never set on a player's install.")
+CFG_FLAG(build_claim_foreign, "build_claim_foreign", "dev", false, "VOTVCOOP_BUILD_CLAIM_FOREIGN",
+    "Send this peer's Join with its build hash's first byte flipped, so a host reads it as another build (an arm of "
+    "the build-trust drill).")
+CFG_FLAG(selftest_break_identity, "selftest_break_identity", "dev", false, "VOTVCOOP_SELFTEST_BREAK_IDENTITY",
+    "Makes the identity selftest's key-write case fail on purpose (a red arm).")
 CFG_ENUM(subject_drill, "subject_drill", "dev", "off", "off|insert|own|carry|carryred", "VOTVCOOP_SUBJECT_DRILL",
     "Drill (BOTH peers), a remote action never takes the local player as its subject. insert: before any "
     "client's world is ready the host spawns two drives; the joined client walks to the nearer, grabs it "
@@ -133,6 +161,72 @@ CFG_FLAG(event_drill, "event_drill", "dev", false, "VOTVCOOP_EVENT_DRILL",
     "snapshot carries it) and then through the scheduler itself (the clock set to day 2 00:18), then "
     "solar, arirGraff_0 and enasus by the dev fire; the client's DONE line counts the showers and the "
     "fires it replayed. MUTATES the world (the clock, the events), so it is armed per run.")
+CFG_ENUM(command_drill, "command_drill", "dev", "off", "off|on|red|grant|grantred|hostdeny", "VOTVCOOP_COMMAND_DRILL",
+    "Commands drill: once its world is ready, this peer submits /help and an unknown command, then a "
+    "line one byte too long for a request (and, on the host, one of exactly the limit), then (a "
+    "client) six unknown commands at once, and checks the replies in order. red expects a wrong first "
+    "line, so it must fail. grant / grantred: a client runs a command and reports whether the host's "
+    "permissions allowed it (grant: one the rig's fixture grants; grantred: one it does not); hostdeny: "
+    "the host runs a command its own permission file denies it and reports the refusal.")
+CFG_ENUM(mv_drill, "mv_drill", "dev", "off", "off|on|red", "VOTVCOOP_MV_DRILL",
+    "Drill (BOTH peers): /mv end to end -- on runs the script, red expects a wrong reply at step 5.1.")
+CFG_ENUM(stats_probe, "stats_probe", "dev", "off", "off|on|red", "VOTVCOOP_STATS_PROBE",
+    "Probe (BOTH peers): every player stat read, written and restored inside one frame, and the game's "
+    "status effects added, listed and removed -- red expects a wrong Health read-back and two bloodLoss entries.")
+CFG_ENUM(stat_order_drill, "stat_order_drill", "dev", "off", "off|on|red|redjoin", "VOTVCOOP_STAT_ORDER_DRILL",
+    "Drill (the HOST): order and query a client's stats and effects and check every answer -- red expects a wrong "
+    "answer, redjoin the host's effect on the joiner.")
+CFG_ENUM(bug_report_drill, "bug_report_drill", "dev", "off", "off|on|red", "VOTVCOOP_BUG_REPORT_DRILL",
+    "The bug-report drill: plants values, saves a report, opens it and judges it (red: plants an address unmarked).")
+CFG_ENUM(grants_drill, "grants_drill", "dev", "off", "off|grant|none|hostdeny", "VOTVCOOP_GRANTS_DRILL",
+    "The local grants drill: checks this machine's dev grants against an arm's expectation.")
+CFG_ENUM(grants_drill_expect, "grants_drill_expect", "dev", "same", "same|grant|none|hostdeny",
+    "VOTVCOOP_GRANTS_DRILL_EXPECT", "Judges the grants drill against another arm's expectation (a red arm).")
+CFG_ENUM(chat_drill, "chat_drill", "dev", "off", "off|history|seed|i18n", "VOTVCOOP_CHAT_DRILL",
+    "Developer: chat checks judged in memory -- history (the host), seed (the second joiner), i18n "
+    "(every peer); each prints [CHAT-DRILL] PASS, FAIL or ABORT.")
+CFG_FLAG(chat_drill_bad_nick, "chat_drill_bad_nick", "dev", false, "VOTVCOOP_CHAT_DRILL_BAD_NICK",
+    "Developer: the chat drill announces a wrong nickname (the i18n red).")
+CFG_FLAG(chat_no_retain, "chat_no_retain", "dev", false, "VOTVCOOP_CHAT_NO_RETAIN",
+    "Developer: never keep a chat line in history (the chat drill's history red).")
+CFG_FLAG(chat_seed_suppress, "chat_seed_suppress", "dev", false, "VOTVCOOP_CHAT_SEED_SUPPRESS",
+    "Developer: send a joiner no chat history (the seed red).")
+CFG_ENUM(pause_quit_drill, "pause_quit_drill", "dev", "off", "off|client|host",
+    "VOTVCOOP_PAUSE_QUIT_DRILL",
+    "Developer: the named peer opens the pause menu and presses Main menu, as a player does, once it "
+    "is in the session; prints [PAUSE-QUIT] lines.")
+CFG_FLAG(quit_decision_red, "quit_decision_red", "dev", false, "VOTVCOOP_QUIT_DECISION_RED",
+    "Developer: the quit decision does NOT end the session (the pause-quit drill's red: the menu "
+    "world's destroys go out).")
+CFG_FLAG(wire_census, "wire_census", "dev", false, "VOTVCOOP_WIRE_CENSUS",
+    "Developer: log the wire census every second (the wirewindow probe).")
+CFG_FLAG(ban_drill, "ban_drill", "dev", false, "VOTVCOOP_BAN_DRILL",
+    "Ban drill (host only): when a client has finished joining, ban slot 1 once through the "
+    "moderation verb and report whether the ban was stored and the seat closed. It writes the "
+    "host's bans.json: run it under lane.py prove, which restores the server folders, never in a "
+    "plain smoke.")
+CFG_FLAG(ban_drill_stale_token, "ban_drill_stale_token", "dev", false, "VOTVCOOP_BAN_DRILL_STALE_TOKEN",
+    "Ban drill's red arm: aim the ban with a generation one past the slot's, so the token check "
+    "refuses it and the drill reports FAIL.")
+CFG_ENUM(settings_drill, "settings_drill", "dev", "off", "off|nameplate|nickcolor|flags|scale|font|voicemode|voicevolume|server|serverjoin|serverred|servercmd|servercmdred|servercmdspellred|red", "VOTVCOOP_SETTINGS_DRILL",
+    "Developer: a settings step after the session starts, one token per step; the server steps (server, "
+    "serverjoin, serverred, servercmd, servercmdred, servercmdspellred) exercise the host's voice range, each red by a designed failure. "
+    "nameplate: the "
+    "nameplate row to hidden (the client logs both announces). nickcolor: the nick colour to the "
+    "per-surface default. flags: the chat peer-actions flag off and the netstats flag on. "
+    "scale: ui.scale to 1.50. font: the first font role's family. "
+    "voicemode: voice.mode to activation. voicevolume: voice.volume to 0.50. "
+    "server: after the client's world is up the host sets voice.distance_cm to 6000, then resets it; "
+    "the client's log shows each value arrive. serverjoin: the host sets it before any client "
+    "connects, so the joiner's snapshot carries it, and resets after the joiner's world is up. "
+    "serverred: server with the set skipped, so the host's probe prints its FAIL line. "
+    "servercmd: the server step through /set and /reset, with a respell of the set value between them; "
+    "servercmdred: a /set the command refuses (a local row named). "
+    "servercmdspellred: as servercmd, its respell step a real change (6001), so the client announces it "
+    "where servercmd forbids it. "
+    "red: the nameplate step with its set skipped, so the probe's FAIL line prints.")
+CFG_ENUM(mannequin_drill, "mannequin_drill", "dev", "off", "off|spawn|red", "VOTVCOOP_MANNEQUIN_DRILL",
+    "Drill (BOTH peers), the walking mannequin's baseline. spawn: once the client's join is over the host spawns one native walker (it opens doors, is saved with the world and returns angry after a load; it crosses to a client as a prop mirror with a brain of its own) and both peers log what they see of it once a second, the host for 20 samples. red: the same without the spawn call, so the sampler must report that no walker appeared: the drill's control.")
 CFG_FLAG(floppy_selftest, "floppy_selftest", "dev", false, "VOTVCOOP_FLOPPY_SELFTEST",
     "Autonomous selftest: the disc-into-server media transfer -- a client insert the host tries to "
     "eject, the mirror of that, and a client insert the same client ejects. It MUTATES the world "
@@ -503,9 +597,11 @@ CFG_FLAG(rehost_rejoin, "rehost_rejoin", "dev", false, "VOTVCOOP_REHOST_REJOIN",
     "deleted and net.peer:net.port dialed through the direct connect, once per file. The rig's "
     "host-restart arm drops it when the relaunched host is up.")
 CFG_FLAG(prop_birth_key_probe, "prop_birth_key_probe", "dev", false, "VOTVCOOP_PROP_BIRTH_KEY_PROBE",
-    "Diagnostic probe (CLIENT): the place/birth seam -- how many drain ticks the save Key takes to "
-    "restore after a spawn, and which of the seven drain exits each pending spawn leaves by. Set it "
-    "on the CLIENT; the host places through a different path.")
+    "Diagnostic probe (both roles): the place/birth seam -- how many drain ticks the save Key takes "
+    "to restore after a spawn, and which of the seven drain exits each pending spawn leaves by; and "
+    "every keyed prop it saw born that a script then destroys, with the session's state at the "
+    "destroy, even with no session. The drain exits are the client's; the host places through a "
+    "different path.")
 CFG_FLAG(spawn_match_probe, "spawn_match_probe", "dev", false, nullptr,
     "Diagnostic probe: the OnSpawn fuzzy-match candidate set -- every same-class prop inside the "
     "30 cm radius with its slot, distance, own key and mirror binding, plus a watch that reports a "
@@ -650,3 +746,8 @@ CFG_FLAG(init_seam_probe, "init_seam_probe", "dev", false, "VOTVCOOP_INIT_SEAM_P
     "Probe: a script-gate watch on every Init body of a keyed prop, counted by the body's owning "
     "class, its caller, whether it runs inside another Init of the same object and whether the key "
     "is still unset; logged every 30 s and at each world change. Holds the gate; read-only.")
+CFG_FLAG(selftest_break_permissions, "selftest_break_permissions", "dev", false, "VOTVCOOP_SELFTEST_BREAK_PERMISSIONS",
+    "Red arm of the permissions selftest: its first case expects the opposite answer, so it must fail.")
+CFG_FLAG(selftest_break_action_log, "selftest_break_action_log", "dev", false, "VOTVCOOP_SELFTEST_BREAK_ACTION_LOG",
+    "Red arm of the commands selftest's action-log cases: the first acting case of each cases file expects "
+    "no record, so it must fail.")

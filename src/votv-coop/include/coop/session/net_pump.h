@@ -58,17 +58,23 @@ bool IsFleeing();
 // Game thread.
 void MaybeRequestReAnnounce(coop::net::Session& session, void* reapWorld);
 
-// The gameplay->menu RAM-balloon guard's ACTION half (detection lives in
-// registry_reaper's world scan): full coop-state teardown + the no-travel flee
-// (VOTV's own menu transition is already in flight). Idempotent via the flee
-// latch. Game thread.
-void FleeAfterNativeMenuTravel(coop::net::Session& session);
+// The session's end for a quit to the menu whose travel the game itself runs: the teardown (it
+// stops the session first, then destroys), then the no-travel flee (VOTV's own menu transition is
+// in flight or about to be). Reached from the quit decision (run_end_travel posts it as its own
+// task, before the travel runs) and from registry_reaper's world scan, which is the fallback for a
+// menu arrival that did not pass the decision. `why` names the route in the log. Idempotent via the
+// flee latch. Game thread.
+void FleeAfterNativeMenuTravel(coop::net::Session& session, const char* why);
 
 // True once THIS client has announced ClientWorldReady for the current connection (false on the
 // host, which never announces; latched false again at disconnect). The meadow lane's client send
 // gate reads it: a client line reaching the host before the ready flip would ride the join seed
 // back as a duplicate, so peer-symmetric lanes stay mute until the announce.
 bool HasAnnouncedWorldReady();
+
+// HasAnnouncedWorldReady and not waiting on a world change's re-announce (the two terms the pose
+// gate reads, without the load tail); false on the host. A client applies a host's order only then.
+bool IsWorldSettled();
 
 // Whether `obj` belongs to the world THIS client announced world-ready in: false before the announce,
 // while a world change waits for its re-announce, and for an object of any other world, so a later

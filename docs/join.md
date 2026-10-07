@@ -23,7 +23,7 @@ sends a nonce, the host answers with its own nonce and a signature over both, th
 back, and the password proof rides inside that reply (`coop/net/peer_admission`,
 `coop/net/lobby_password`). The host then assigns a slot, and that assignment is the client's
 signal to begin: there is no fourth "I am done" message. Each peer's Join carries its element id,
-nickname, skin, preferences and game target (`coop/session/player_handshake`); the host asserts
+nickname, skin, preferences, game target and build claim (`coop/session/player_handshake`); the host asserts
 who occupies each slot with roster rows, re-sent as state rather than announced as events, and a
 row whose player number is zero means the slot is empty. That is how a departure reaches a
 client: it conforms to the current row, it never observes an absence.
@@ -31,9 +31,12 @@ client: it conforms to the current row, it never observes an absence.
 The version gate runs twice here. The build number is part of every packet header, so a peer on
 another build never parses a message at all. The game target rides the Join payload and is
 compared byte for byte; on a mismatch the host kicks with a reason and the client shows why.
+The build's own hash and whether it is the official build ride the same payload: a host on the
+official build refuses another build (MV-H30), and a host on a modified build refuses the official
+one (MV-H31), unless the host allows other builds.
 
-Before any of that, at the accept edge, the host applies two policies that cost no handshake and
-no seat: the ban list, and a per-address connection cap in the shape of MTA's join-flood
+Before any of that, at the accept edge, the host applies one policy that costs no handshake and
+no seat: a per-address connection cap in the shape of MTA's join-flood
 protection, four connections per thirty seconds by default and then thirty seconds of refusal
 (`MV-H29`; the numbers are the `net.connect_cap` and `net.connect_window_s` settings, and 0
 turns the cap off). On the internet lane no address is known when a connection arrives, because
@@ -41,6 +44,11 @@ no route exists yet, so such an arrival is counted at its identity proof instead
 its route reports, or by the identity it proves when the route is relayed. A second instance of
 the same per-source history bounds password guesses at the proof, ten failures in ten minutes
 (`coop/net/connect_history`).
+
+The ban list is checked right after the identity proof, before a seat is given, as MTA checks a
+serial and an IP at join: the id the proof established, and the connection's own address when the
+path is not relayed. So a ban holds on every transport, and the refusal carries the stored
+reason (`MV-H18`).
 
 Until a client's world is up, the host sends it only a short list of engine-free kinds: the
 roster family (slot, roster rows, skin, nameplate and colour preferences), the save transfer,
@@ -296,7 +304,7 @@ sentence on its status line.
 | `MV-H15` | The host could not send its challenge |
 | `MV-H16` | The identity proof did not arrive in time |
 | `MV-H17` | The host was busy, and this connection was the slowest to prove itself |
-| `MV-H18` | Banned from this server (the ban list, at the accept filter) |
+| `MV-H18` | Banned from this server (by id or address, at the identity proof) |
 | `MV-H19` | Banned by the host |
 | `MV-H20` | Kicked by the host |
 | `MV-H21` | The server is full |
@@ -308,6 +316,8 @@ sentence on its status line.
 | `MV-H27` | The host could not accept the connection |
 | `MV-H28` | The host closed the connection with no code of its own; its words are shown |
 | `MV-H29` | Too many connections in a short time from one address, or from one proved identity over a relayed internet route; the cap is a host setting |
+| `MV-H30` | The host runs the official build and this client another one (its build hash differs); the popup says to install the official release |
+| `MV-H31` | The host runs a modified build and this client the official one |
 | `MV-T01` | No answer from the host, at the dial or later |
 | `MV-T02` | No route to the host through its firewall or router |
 | `MV-T03` | The signaling server could not reach the host |
@@ -370,7 +380,7 @@ and it is the reason the relay's own silence stays.
 |---|---|---|
 | `AuthHello`, `AuthChallenge`, `AuthProof` | both | the admission exchange, before any slot exists |
 | `AssignPeerSlot` | host to client | the slot and the host's element id; means admitted |
-| `Join` | each peer | element id, nickname, skin, preferences, game target |
+| `Join` | each peer | element id, nickname, skin, preferences, game target, build claim |
 | `RosterRow` | host to all | who occupies a slot, zero meaning empty, and the host's number for that occupancy; re-sent as state |
 | `SaveTransferRequest`, `SaveTransferBegin`, `SaveTransferChunk` | client, then host | the request; total bytes, sidecar bytes, checksum, game mode; the chunks |
 | `PlayerInventoryBlob` | both | the per-player profile, pre-world |

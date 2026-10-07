@@ -239,12 +239,11 @@ void Confirm(Kind kind) {
         return;
     }
     if (kind == Kind::ChangeName) {
-        if (value.empty()) {
+        if (!sm::SetNickname(value)) {
             SetStatus(s, "Type a name first.", kBad);
             return;
         }
-        sm::SetNickname(value);
-        coop::config::WriteIniValue(::coop::config_registry::rows::net_nick, value.c_str());
+        coop::config::SetValue(::coop::config_registry::rows::net_nick, sm::Nickname().c_str());
         UE_LOGI("browser_input_screens: nickname set from the Change name window");
         Hide("name accepted");
         SB::Open();
@@ -269,8 +268,7 @@ void Confirm(Kind kind) {
     }
     // Written only after the accept gate passed: the row means the last address actually tried and
     // accepted, so a typo cannot overwrite a known-good address.
-    coop::config::WriteIniValue(::coop::config_registry::rows::browser_lastdirect,
-                                value.c_str());
+    coop::config::SetValue(::coop::config_registry::rows::browser_lastdirect, value.c_str());
     UE_LOGI("browser_input_screens: direct connect accepted -- join_progress owns the "
             "player from here");
     Hide("connecting");

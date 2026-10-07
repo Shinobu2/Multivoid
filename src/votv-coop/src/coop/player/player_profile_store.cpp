@@ -2,6 +2,7 @@
 
 #include "coop/player/player_profile_store.h"
 
+#include "coop/atomic_file/atomic_file.h"
 #include "coop/net/blob_chunks.h"  // Fnv64, the file's integrity hash
 #include "coop/save/save_transfer.h"  // HostSlot, the world the profiles belong to
 #include "coop/session/player_handshake.h"  // IsValidGuid
@@ -217,17 +218,11 @@ bool WriteFile(const std::string& guid, const std::vector<uint8_t>& blob, const 
     json += ",\"blob\":\"";
     json += Hex(blob);
     json += "\"}\n";
-    const fs::path tmp = fs::path(file).concat(L".part");
-    {
-        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        if (!f || !(f << json)) {
-            UE_LOGE("player_profile: write failed ('%ls')", tmp.c_str());
-            return false;
-        }
-    }
-    fs::rename(tmp, file, ec);
-    if (ec) {
-        UE_LOGE("player_profile: rename('%ls') failed: %s", file.c_str(), ec.message().c_str());
+    const atomic_file::Result r =
+        atomic_file::Write(file, json, atomic_file::Mode::Replace, atomic_file::Sync::ToDisk);
+    if (!r.ok()) {
+        UE_LOGE("player_profile: write of '%ls' failed (%s)", file.c_str(),
+                atomic_file::Describe(r).c_str());
         return false;
     }
     return true;
@@ -291,11 +286,30 @@ bool FollowWrittenSlot(const std::wstring& written) {
     };
     std::unordered_set<std::wstring> names;
     for (const fs::path& file : set) {
-        fs::copy_file(file, to / file.filename(), fs::copy_options::overwrite_existing, ec);
-        if (ec) {
+        // Cached: the old slot keeps the intact set, so a power cut just after the copy can cost
+        // the new slot's copy and never the old one.
+        // A stream iterator stops at the first read error without setting badbit, so the bytes are
+        // checked against the size the file system gave before the read.
+        std::string bytes;
+        std::string why = "could not read";
+        {
+            std::error_code sizeEc;
+            const std::uintmax_t size = fs::file_size(file, sizeEc);
+            std::ifstream in(file, std::ios::binary);
+            if (in && !sizeEc) {
+                bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+                if (bytes.size() == size) why.clear();
+            }
+        }
+        if (why.empty()) {
+            const atomic_file::Result r = atomic_file::Write(
+                to / file.filename(), bytes, atomic_file::Mode::Replace, atomic_file::Sync::Cached);
+            if (!r.ok()) why = atomic_file::Describe(r);
+        }
+        if (!why.empty()) {
             UE_LOGE("player_profile: copying '%ls' beside the slot '%ls' failed (%s) -- nothing "
                     "removed there, nothing cut, everything stays for the next save", file.c_str(),
-                    written.c_str(), ec.message().c_str());
+                    written.c_str(), why.c_str());
             return false;
         }
         names.insert(folded(file));

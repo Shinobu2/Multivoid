@@ -6,6 +6,7 @@
 #include "coop/dev/event_force.h"
 #include "coop/dev/event_trigger.h"
 #include "coop/dev/force_weather.h"
+#include "coop/dev/mannequin_drill.h"
 #include "coop/dev/freecam.h"
 #include "coop/dev/object_overlay.h"
 #include "coop/dev/ragdoll_bone_overlay.h"
@@ -15,6 +16,8 @@
 #include "coop/dev/set_clock.h"
 #include "coop/dev/spawn_menu_unlock.h"
 #include "coop/dev/spawn_npc.h"
+#include "coop/permissions/grants_core.h"
+#include "coop/session/local_grants.h"
 #include "coop/session/teleport_client.h"
 #include "coop/comms/peer_action_feed.h"
 #include "coop/player/nameplate.h"
@@ -27,6 +30,8 @@
 #include "ui/world_rules_panel.h"  // F1 > World > Rules (shown to everyone)
 #include "ui/net_stats_panel.h"
 #include "ui/scale.h"
+#include "ui/bug_report_pane.h"
+#include "ui/server_settings_pane.h"
 #include "ui/skins_panel.h"
 
 #include <atomic>
@@ -54,7 +59,16 @@ struct Cat  { const char* name; std::vector<Sub> subs;  bool dev; bool host = fa
 
 // ---- feature controls (each calls a plain function its module exposes) -------
 
+// A world pane writes the shared world: host authority (coop/dev/dev_gate). A local pane touches only
+// this machine: the host's grant (coop/session/local_grants).
+constexpr const char* kHostOnlyLine = "Only the host can do this.";
+constexpr const char* kNotAllowedLine = "The host has not allowed this.";
+
 void RenderSnow() {
+    if (!coop::dev_gate::Allowed()) {
+        ImGui::TextDisabled("%s", kHostOnlyLine);
+        return;
+    }
     bool on = coop::dev::force_weather::IsSnowOn();
     // Host-authoritative: the toggle is a no-op on a client (the module gates it).
     if (ImGui::Checkbox("Snow", &on)) coop::dev::force_weather::SetSnow(on);
@@ -63,28 +77,50 @@ void RenderSnow() {
 }
 
 void RenderTeleportClients() {
+    if (!coop::dev_gate::Allowed()) {
+        ImGui::TextDisabled("%s", kHostOnlyLine);
+        return;
+    }
     if (ImGui::Button("Teleport clients to me")) coop::teleport_client::TeleportClientsToHost();
     ImGui::SameLine();
     ImGui::TextDisabled("(host only)");
 }
 
 void RenderFreecam() {
+    if (!coop::session::local_grants::Has(coop::permissions::grants::Projected::Freecam)) {
+        ImGui::TextDisabled("%s", kNotAllowedLine);
+        return;
+    }
     bool on = coop::dev::freecam::IsActive();
     if (ImGui::Checkbox("Freecam", &on)) coop::dev::freecam::SetActive(on);
     ImGui::TextDisabled("HOME also toggles - WASD move, Space/Ctrl up/down,");
-    ImGui::TextDisabled("Shift fast, wheel speed, MMB bring player");
+    ImGui::TextDisabled("Shift fast, wheel speed");
+    // The middle-click self-teleport moves the pawn in the shared world: the host's alone.
+    if (coop::dev_gate::Allowed()) ImGui::TextDisabled("MMB bring player");
 }
 
 void RenderRestoreVitals() {
-    if (ImGui::Button("Restore vitals (food / sleep / health)")) coop::dev::restore_vitals::Restore();
-    ImGui::SameLine();
-    ImGui::TextDisabled("(both peers)");
-    if (ImGui::Button("Set stamina low")) coop::dev::restore_vitals::SetStaminaLow();
-    ImGui::SameLine();
-    ImGui::TextDisabled("(local test -- sleep/energy=10 -> exhausted; nameplate syncs)");
+    if (coop::dev_gate::Allowed()) {
+        if (ImGui::Button("Restore vitals (food / sleep / health)")) coop::dev::restore_vitals::Restore();
+        ImGui::SameLine();
+        ImGui::TextDisabled("(both peers)");
+    } else {
+        ImGui::TextDisabled("%s", kHostOnlyLine);
+    }
+    if (coop::session::local_grants::Has(coop::permissions::grants::Projected::Stamina)) {
+        if (ImGui::Button("Set stamina low")) coop::dev::restore_vitals::SetStaminaLow();
+        ImGui::SameLine();
+        ImGui::TextDisabled("(local test -- sleep/energy=10 -> exhausted; nameplate syncs)");
+    } else {
+        ImGui::TextDisabled("%s", kNotAllowedLine);
+    }
 }
 
 void RenderSetClock() {
+    if (!coop::dev_gate::Allowed()) {
+        ImGui::TextDisabled("%s", kHostOnlyLine);
+        return;
+    }
     namespace SC = coop::dev::set_clock;
     int hour = 0, minute = 0, day = 0;
     float frac = 0.f;
@@ -128,6 +164,10 @@ void RenderSetClock() {
 }
 
 void RenderPosHud() {
+    if (!coop::session::local_grants::Has(coop::permissions::grants::Projected::Hud)) {
+        ImGui::TextDisabled("%s", kNotAllowedLine);
+        return;
+    }
     bool on = coop::dev::pos_hud::IsVisible();
     if (ImGui::Checkbox("Position / camera readout", &on)) coop::dev::pos_hud::SetVisible(on);
     ImGui::SameLine();
@@ -135,6 +175,10 @@ void RenderPosHud() {
 }
 
 void RenderObjectOverlay() {
+    if (!coop::session::local_grants::Has(coop::permissions::grants::Projected::Overlay)) {
+        ImGui::TextDisabled("%s", kNotAllowedLine);
+        return;
+    }
     namespace OO = coop::dev::object_overlay;
     bool on = OO::IsEnabled();
     if (ImGui::Checkbox("World object overlay", &on)) OO::SetEnabled(on);
@@ -166,6 +210,10 @@ void RenderObjectOverlay() {
 }
 
 void RenderRagdollBones() {
+    if (!coop::session::local_grants::Has(coop::permissions::grants::Projected::Overlay)) {
+        ImGui::TextDisabled("%s", kNotAllowedLine);
+        return;
+    }
     namespace RB = coop::dev::ragdoll_bone_overlay;
     bool on = RB::IsEnabled();
     if (ImGui::Checkbox("Ragdoll bone skeleton", &on)) RB::SetEnabled(on);
@@ -176,6 +224,10 @@ void RenderRagdollBones() {
 }
 
 void RenderSpawnNpc() {
+    if (!coop::dev_gate::Allowed()) {
+        ImGui::TextDisabled("%s", kHostOnlyLine);
+        return;
+    }
     if (ImGui::Button("Spawn kerfurOmega (in front)")) coop::dev::spawn_npc::SpawnKerfurOmega();
     ImGui::SameLine();
     ImGui::TextDisabled("(host spawns + syncs)");
@@ -202,15 +254,31 @@ void RenderSpawnNpc() {
         ImGui::SetTooltip("The night 'Eyes' stalker. Each peer keeps its OWN native eyer\n"
                           "(it targets the peer that rolled it); every other peer renders a\n"
                           "display mirror -- AI and killsphere disabled on the mirror.");
+    if (ImGui::Button("Spawn walking mannequin")) coop::dev::mannequin_drill::SpawnWalker();
+    ImGui::SameLine();
+    ImGui::TextDisabled("(the game's own creature: use a throwaway save)");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("The game's walking mannequin, spawned at its nearest spawn point that is not on screen "
+                          "(it normally appears from day 14).\n"
+                          "It opens doors, is saved with the world and returns angry after a load.\n"
+                          "In a session it crosses to each client as a prop mirror that runs a brain of its own.");
 }
 
 void RenderGivePoints() {
+    if (!coop::dev_gate::Allowed()) {
+        ImGui::TextDisabled("%s", kHostOnlyLine);
+        return;
+    }
     if (ImGui::Button("+1000 Points")) coop::dev::add_points::GivePoints(1000);
     ImGui::SameLine();
     ImGui::TextDisabled("(local balance -- afford drone orders)");
 }
 
 void RenderSpawnMenuUnlock() {
+    if (!coop::dev_gate::Allowed()) {
+        ImGui::TextDisabled("%s", kHostOnlyLine);
+        return;
+    }
     namespace SM = coop::dev::spawn_menu_unlock;
     bool on = SM::IsEnabled();
     if (ImGui::Checkbox("Prop spawn menu in story mode (Q)", &on)) SM::SetEnabled(on);
@@ -238,6 +306,10 @@ bool StrContainsI(const char* hay, const char* needle) {
 }
 
 void RenderEvents() {
+    if (!coop::dev_gate::Allowed()) {
+        ImGui::TextDisabled("%s", kHostOnlyLine);
+        return;
+    }
     namespace ET = coop::dev::event_trigger;
     namespace EF = coop::dev::event_force;
     EF::RequestRefresh();  // ~1 Hz internal limiter; keeps the ARMED badges live while the tab is open
@@ -345,12 +417,14 @@ void RenderNetStats() { ui::net_stats_panel::RenderMenuPref(); }
 // Peer action notifications: show a chat/feed line when another player does a shared
 // action everyone should see (first: deleting an email). A LOCAL view preference
 // (each peer decides whether IT sees these lines), persisted (multivoid.ini
-// ui.chat.peer_actions). Rendered locally from the existing wire event -- no extra
-// traffic; see coop::peer_action_feed.
+// ui.chat.peer_actions); the checkbox sets the row and peer_action_feed follows it.
+// Rendered locally from the existing wire event -- no extra traffic; see
+// coop::peer_action_feed.
 void RenderChatPref() {
     bool on = coop::peer_action_feed::Enabled();
     if (ImGui::Checkbox("Peer action notifications", &on))
-        coop::peer_action_feed::SetEnabled(on);
+        coop::config::SetValue(::coop::config_registry::rows::ui_chat_peer_actions,
+                               on ? "1" : "0");
     ImGui::TextDisabled("Show a chat line when another player does a shared action");
     ImGui::TextDisabled("(e.g. deletes an email). Local preference; persists across");
     ImGui::TextDisabled("sessions (ui.chat.peer_actions).");
@@ -361,7 +435,7 @@ void RenderChatPref() {
 void RenderNameplatePref() {
     bool on = coop::nameplate::LocalVisible();
     if (ImGui::Checkbox("Show my nameplate to other players", &on))
-        coop::nameplate::RequestLocalVisible(on);
+        coop::config::SetValue(::coop::config_registry::rows::nameplate, on ? "1" : "0");
     ImGui::TextDisabled("Off = your floating name/health bar disappears on every peer's");
     ImGui::TextDisabled("screen -- synced live and to late joiners; persists across sessions.");
 
@@ -395,7 +469,8 @@ void RenderNameplatePref() {
     };
     if (ImGui::Checkbox("Custom nickname color", &custom)) {
         sDirty = false;  // the toggle IS the commit
-        coop::nick_color::RequestLocal(custom ? packWorking() : 0u);
+        coop::config::SetValue(::coop::config_registry::rows::nick_color,
+                               coop::nick_color::IniTextFor(custom ? packWorking() : 0u).c_str());
     }
     if (coop::nick_color::IsCustom(coop::nick_color::LocalPacked())) {
         ImGui::SetNextItemWidth(S(220.f));
@@ -415,7 +490,8 @@ void RenderNameplatePref() {
             sDirty = false;
             const uint32_t packed = packWorking();
             sSeen = packed;  // the commit lands async (GT hop); don't re-seed meanwhile
-            coop::nick_color::RequestLocal(packed);
+            coop::config::SetValue(::coop::config_registry::rows::nick_color,
+                                   coop::nick_color::IniTextFor(packed).c_str());
         }
     }
     ImGui::TextDisabled("Colors your nick everywhere it shows -- nameplate, chat, player list --");
@@ -423,8 +499,8 @@ void RenderNameplatePref() {
 }
 
 // Overlay fonts -- GRANULAR per surface: chat, the net-stats widget, the nameplates
-// and the menu/panels each pick their OWN family. SetRoleFamily
-// persists multivoid.ini ui.font.<role> + requests the atlas rebuild (next frame).
+// and the menu/panels each pick their OWN family. A combo sets the ui.font.<role> row; the
+// render thread applies it and rebuilds the atlas on its next frame.
 void RenderFontPref() {
     namespace F = ui::fonts;
     const char* famItems[F::kFamilyCount];
@@ -437,10 +513,11 @@ void RenderFontPref() {
         ImGui::PushID(r);
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.f);
         if (ImGui::Combo(F::RoleLabel(role), &cur, famItems, F::kFamilyCount))
-            F::SetRoleFamily(role, static_cast<F::Family>(cur));
+            coop::config::SetValue(coop::config_registry::FontRoleRow(static_cast<size_t>(r)),
+                                   F::FamilyToken(static_cast<F::Family>(cur)));
         ImGui::PopID();
     }
-    ImGui::TextDisabled("Each surface picks its own family; applies instantly.");
+    ImGui::TextDisabled("Each surface picks its own family; applies on the next frame.");
     ImGui::TextDisabled("Saved to multivoid.ini (ui.font.menu/chat/net/nameplate/toast,");
     ImGui::TextDisabled("each with its own default). Fixedsys (VOTV) = game terminal pixel");
     ImGui::TextDisabled("font; JetBrains/Cascadia monospace; Roboto proportional.");
@@ -450,17 +527,22 @@ void RenderFontPref() {
     // one-frame ~100 ms hitch).
     ImGui::Spacing();
     ImGui::SeparatorText("UI size");
-    static float sPending = -1.f;   // -1 = mirror the live value
-    if (sPending < 0.f) sPending = ui::scale::UserScale();
+    // sPending is the handle while it is dragged; sSeen is the applied value it last mirrored. The
+    // render thread applies the row on its next frame, so the slider follows the applied value.
+    static float sPending = ui::scale::UserScale();
+    static float sSeen = -1.f;      // never a valid scale -> the first frame syncs
     ImGui::SetNextItemWidth(S(260.f));
     ImGui::SliderFloat("##uiscale", &sPending, ui::scale::UserScaleMin(),
                        ui::scale::UserScaleMax(), "%.2fx");
+    if (!ImGui::IsItemActive() && ui::scale::UserScale() != sSeen)
+        sPending = sSeen = ui::scale::UserScale();
     if (ImGui::IsItemDeactivatedAfterEdit()) {
-        ui::scale::SetUserScale(sPending);
+        const auto& scaleRow = *::coop::config_registry::rows::ui_scale.row;
+        if (sPending < static_cast<float>(scaleRow.lo)) sPending = static_cast<float>(scaleRow.lo);
+        if (sPending > static_cast<float>(scaleRow.hi)) sPending = static_cast<float>(scaleRow.hi);
         char v[16];
-        std::snprintf(v, sizeof(v), "%.2f", ui::scale::UserScale());
-        coop::config::WriteIniValue(coop::config_registry::rows::ui_scale, v);
-        sPending = ui::scale::UserScale();  // reflect the clamp
+        std::snprintf(v, sizeof(v), "%.2f", sPending);
+        coop::config::SetValue(::coop::config_registry::rows::ui_scale, v);
     }
     ImGui::SameLine();
     ImGui::TextDisabled("(?)");
@@ -481,8 +563,9 @@ void RenderWorldRules() { ui::world_rules_panel::Render(); }
 // ---- the strict nested taxonomy (refined as features land) -------------------
 // Organized by the GAME'S OWN DOMAINS: Player (the person) ; World (the simulation
 // state: rules/weather/clock/economy) ; Content (the game's spawnable/triggerable
-// content: entities + events) ; Network ; Administration ; Cosmetics -- there is no
-// catch-all category, per the folder-concept rule. Network subs are placeholders.
+// content: entities + events) ; Network ; Administration ; Cosmetics ; Report a bug
+// (the bug-report form) -- there is no catch-all category, per the folder-concept
+// rule. Network subs are placeholders.
 const std::vector<Cat>& Tree() {
     static const std::vector<Cat> kTree = {
         { "Player", {
@@ -517,12 +600,16 @@ const std::vector<Cat>& Tree() {
         { "Administration", {
             // HOST-role-gated (not dev): online/offline/banned player admin.
             { "Players", { { &RenderAdminPlayers, false } }, false, true },
+            { "Server settings", { { &ui::server_settings_pane::Render, false } }, false, true },
         }, false, true },
         { "Cosmetics", {
             { "Skins",     { { &RenderSkins, false } }, false },
             { "Nameplate", { { &RenderNameplatePref, false } }, false },
             { "Chat",      { { &RenderChatPref, false } }, false },
             { "Interface", { { &RenderFontPref, false } }, false },
+        }, false },
+        { "Report a bug", {
+            { "Report", { { &ui::bug_report_pane::Render, false } }, false },
         }, false },
     };
     return kTree;
@@ -551,10 +638,10 @@ void Init() {
 }
 
 bool DevMode() {
-    // The ini switch AND the live role gate: dev tools vanish the moment this
-    // peer is a connected CLIENT (coop::dev_gate -- "strictly no dev on a
-    // client"). Re-appear on disconnect / when hosting. Render-thread safe.
-    return g_devMode && ::coop::dev_gate::Allowed();
+    // The dev switch (this machine's own) AND something to show: host authority, or a local grant
+    // from the host. Render-thread safe.
+    return g_devMode &&
+           (::coop::dev_gate::Allowed() || ::coop::session::local_grants::AnyDevLocal());
 }
 
 void RequestSelect(const char* category, const char* sub) {
@@ -655,8 +742,7 @@ void Render() {
         if (!devMode) {
             ImGui::Spacing();
             if (g_devMode && !::coop::dev_gate::Allowed())
-                ImGui::TextWrapped("Developer tools are disabled while connected as a "
-                                   "client (host-only).");
+                ImGui::TextWrapped("As a client you see only what the host allows you.");
             else
                 ImGui::TextWrapped("Developer tools are hidden. Set [dev] devkeys=1 in "
                                    "multivoid.ini to show them.");

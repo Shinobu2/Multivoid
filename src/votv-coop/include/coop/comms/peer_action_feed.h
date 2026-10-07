@@ -10,8 +10,8 @@
 //
 // Renders "<nick> <action>" with the nick coloured per slot (chat_feed::PushChat). The subject
 // is ALWAYS the actor's nickname, so the local actor sees the same line everyone else sees.
-// Announce(), AnnounceDirect() and SetEnabled() are GAME THREAD, as every caller is; Enabled()
-// is lock-free.
+// Announce() and AnnounceDirect() are GAME THREAD, as every caller is; Enabled() is lock-free.
+// The toggle follows its config row through SubscribeRow()'s subscriber (game thread).
 #pragma once
 
 #include <cstdint>
@@ -31,9 +31,11 @@ void Announce(uint8_t slot, const std::wstring& action);
 // reduce the deny to a bare click sound). Game thread.
 void AnnounceDirect(uint8_t slot, const std::wstring& action);
 
-// The ui.chat.peer_actions toggle. SetEnabled persists to multivoid.ini + updates
-// the live value; Enabled reads it (lazy-loads the persisted value on first call).
-void SetEnabled(bool on);
+// The ui.chat.peer_actions toggle: Enabled reads the live value (lazy-loads the row's
+// resolved value on first call). A change is a config SetValue; the subscriber applies it.
 bool Enabled();
+
+// Follow the `ui.chat.peer_actions` row: once, at boot.
+void SubscribeRow();
 
 }  // namespace coop::peer_action_feed

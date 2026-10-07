@@ -4,10 +4,12 @@
 //
 // A joiner's world is built from a capture of the HOST's save object, and the carried items
 // live in that object (saveSlot.GObjStack[0]), so without a substitution every joiner carries
-// the host's items under the host's keys. In session order: the host sends a joining peer its
+// the host's items under the host's keys, and the host's status effects ride along as records
+// of its world, which the join hook resets out of the joiner's copy. In session order: the host sends a joining peer its
 // profile while that peer is still pre-world (a first join gets a starter kit under fresh
 // keys), and the client writes it into the save object before the world materialises; the
-// client streams its profile back as it changes, only from a world that was built from one;
+// client streams its profile back as it changes (and at once after an admin's order, SendProfileNow),
+// only from a world that was built from one;
 // the host holds each complete, changed blob by GUID and cuts the held profiles to disk when its
 // own world is saved, at no other moment (coop/player/player_profile_store.h says why). Nothing
 // held and no file IS the first-join test.
@@ -52,7 +54,8 @@ bool SendInventoryToSlot(int peerSlot);
 bool HasPendingApply();
 
 // CLIENT: the next save object to come ready belongs to a join, so the hook may substitute the
-// profile into it (or empty the host's items out of it when none arrived). One-shot, consumed by
+// profile into it (or empty the host's items out of it when none arrived), and the hook resets the
+// host's status effects out of it before either. One-shot, consumed by
 // the hook and cleared on disconnect; the join boot calls it right before each world load. Every
 // other load in the process -- a later Host-with-save above all -- is left alone. Any thread.
 void BeginJoinApply();
@@ -72,6 +75,12 @@ void OnDisconnectForSlot(int peerSlot);
 // Aggregate disconnect: the client clears its send-dedup and any pending apply. The host keeps
 // what the store holds -- on a host this edge is the last client leaving. Game thread.
 void OnDisconnect();
+
+// CLIENT: send this client's profile now, on the stream's path, past the stream's hash and cadence
+// checks; a send restarts the stream's 30 s cadence. False when the stream is shut (not connected,
+// or this world was not built from a host profile, so the host keeps the one it holds), when the
+// items do not read, or when the transport refused or the profile is too large. Game thread.
+bool SendProfileNow(coop::net::Session* s);
 
 // Per-tick: the client's outbound inventory stream, or the host's on-join push, by role. It
 // also carries a one-shot read-verify self-test (ini inventory_selftest=1) that reads the local

@@ -18,6 +18,7 @@
 
 #include "coop/config/config.h"           // the ini line a tab click must have written
 #include "coop/config/config_registry.h"
+#include "coop/config/config_selftest.h"
 #include "coop/net/lobby_client.h"        // LobbyRow -- the rows a tab click must bring
 #include "coop/net/lobby_password.h"      // kGeneratedLength -- what a minted password measures
 #include "coop/net/master_slots.h"
@@ -634,7 +635,9 @@ void Tick(void* scrim, void* list, void* exitBtn) {
                 g_selfCheckStep = kRowMove - 1;
                 return;
             }
-            g_tabIniBefore = coop::config::ResolveString(::coop::config_registry::rows::net_master);
+            const coop::config::IniSelftestRead before = coop::config::SelftestReadLiveValue(
+                ::coop::config_registry::rows::net_master.row->key);
+            g_tabIniBefore = before.found ? before.value : std::string();
             PlaceCursorOnAbsolute(tl.X + sz.X * 0.5f, tl.Y + sz.Y * 0.5f);
             break;
         }
@@ -661,8 +664,9 @@ void Tick(void* scrim, void* list, void* exitBtn) {
             const bool chosen = coop::net::master_slots::SelectedIndex() == want;
             const bool fromIt = !rows.empty() && listMaster == masters[static_cast<size_t>(want)].url;
             if ((!chosen || !fromIt) && nowMs < g_holdUntilMs) return;   // the fetch is out
-            const std::string saved =
-                coop::config::ResolveString(::coop::config_registry::rows::net_master);
+            const coop::config::IniSelftestRead r = coop::config::SelftestReadLiveValue(
+                ::coop::config_registry::rows::net_master.row->key);
+            const std::string saved = r.found ? r.value : std::string();
             // The ini keeps the choice only when the list is the player's own; one from the
             // environment (a test's) must leave the player's saved choice as it was.
             const bool remembers = coop::net::master_slots::ChoiceIsRemembered();

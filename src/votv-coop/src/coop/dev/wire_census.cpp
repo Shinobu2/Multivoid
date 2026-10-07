@@ -3,6 +3,7 @@
 #include "coop/dev/wire_census.h"
 
 #include "coop/config/config.h"
+#include "coop/config/config_registry.h"
 #include "ue_wrap/core/log.h"
 
 #include <windows.h>
@@ -15,7 +16,7 @@ namespace {
 constexpr int kSlots = 8;    // >= kMaxPeers; out-of-range slots are dropped
 constexpr int kTypes = 256;  // full uint8_t MsgType space
 
-int g_enabled = -1;  // -1 = env not read yet (latched on first Enabled())
+int g_enabled = -1;  // -1 = the row not resolved yet (latched on first Enabled())
 uint32_t g_streamCounts[kSlots][kTypes];
 uint64_t g_lastFlushTick = 0;
 
@@ -23,7 +24,7 @@ uint64_t g_lastFlushTick = 0;
 
 bool Enabled() {
     if (g_enabled < 0)
-        g_enabled = (coop::config::ReadEnv("VOTVCOOP_WIRE_CENSUS") == "1") ? 1 : 0;
+        g_enabled = coop::config::ResolveFlag(::coop::config_registry::rows::wire_census) ? 1 : 0;
     return g_enabled == 1;
 }
 
@@ -31,6 +32,10 @@ void Tick() {
     const uint64_t now = GetTickCount64();
     if (g_lastFlushTick == 0) { g_lastFlushTick = now; return; }
     if (now - g_lastFlushTick < 1000) return;
+    // The heartbeat comes first, whether or not a counter moved: a quiet second used to print
+    // nothing, so a reader waiting for "the census passed tick T" could not tell a quiet wire from
+    // a stopped census.
+    UE_LOGI("wire_census: tick=%llu", static_cast<unsigned long long>(now));
     for (int s = 0; s < kSlots; ++s) {
         for (int t = 0; t < kTypes; ++t) {
             if (g_streamCounts[s][t] == 0) continue;
@@ -40,9 +45,9 @@ void Tick() {
         }
     }
     g_lastFlushTick = now;
-    // Census lines are INFO and INFO rides the ~4 KB CRT buffer (flushed only on
-    // WARN/ERROR); a killed process discards that tail -- which here would be the
-    // wire window itself. 1 Hz explicit flush bounds the loss to <1 s.
+    // Census lines are INFO, and INFO is flushed only when a second has passed since the last
+    // flush; a killed process discards the tail -- which here would be the wire window itself.
+    // The explicit 1 Hz flush bounds the loss to under 1 s.
     ue_wrap::log::Flush();
 }
 

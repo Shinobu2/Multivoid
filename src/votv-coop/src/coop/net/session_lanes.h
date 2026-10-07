@@ -107,7 +107,8 @@ inline Lane LaneForKind(ReliableKind k) {
     // The host-to-client inventory blob must reach the joiner before its world loads (the inventory
     // is substituted before materialisation), so it rides Normal, ahead of the Bulk streams, and is
     // pre-world sendable; a self-contained blob with no in-lane dependency.
-    case ReliableKind::PlayerInventoryBlob: return Lane::Normal;
+    case ReliableKind::PlayerInventoryBlob: return Lane::Normal;  // StatOrderReply is pinned with it
+    case ReliableKind::StatOrderReply: return Lane::Normal;  // pinned with the profile blob: an order's reply must arrive after the profile it answers for
     // PropStickState and PropRelease are order-paired: the release gate reads the frozen state the
     // stick writes, and a release overtaking its stick re-enables physics on a just-stuck mirror.
     // Pinned, so a single-kind lane move cannot split them.
@@ -271,7 +272,7 @@ inline bool IsClientRelayableReliableKind(ReliableKind k) {
     // everyone. The relay fires on the net thread at receive time, before a sequence number can
     // exist, so a relayed copy would have no position in the order. EmailAppend is not relayable
     // either: emails are host-authored, and a client's append is a protocol violation the handler
-    // drops.
+    // drops. CommandRequest likewise: the host answers the sender alone.
     case ReliableKind::EmailDelete:       // player-symmetric
     case ReliableKind::SavedSignalAppend: // producer-symmetric
     case ReliableKind::SavedSignalDelete: // player-symmetric
@@ -322,6 +323,14 @@ inline bool IsPreWorldSendableKind(ReliableKind k) {
     // The join beacon is pre-world by definition: every phase it reports happens before the joiner
     // has a world, and the receiver only stamps a timestamp and two numbers.
     case ReliableKind::JoinPhaseNote:
+    // A server-scope setting is pre-world by design: the joiner's snapshot goes when its slot is
+    // ready, and the receiver only fills the config layer's session values and, for an announced
+    // row, prints one chat line, touching no world.
+    case ReliableKind::ServerSetting:
+    // The machine's own local dev grants: the receiver fills one atomic word, touching no world.
+    case ReliableKind::PermissionGrants:
+    // A command's answer is a private text line; the receiver touches no world.
+    case ReliableKind::CommandReply:
     // PropDriveEnd stays gated: it names a prop by eid, which a joiner has only after its world is up,
     // and the world-ready replay re-sends every driven prop's pose in any case.
         return true;

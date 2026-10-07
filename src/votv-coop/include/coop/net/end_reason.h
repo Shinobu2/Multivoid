@@ -102,6 +102,8 @@ enum class EndReason : uint8_t {
     AcceptFailed,
     HostClosed,             // a close with no code of ours behind it; the text says what it said
     ConnectFlood,           // over the per-source connection cap; refused before any handshake
+    UnofficialClientRefused, // an official host, a client of another build, and the host's setting off
+    OfficialClientRefused,   // a modified host, an official client of another build, and the setting off
 
     // T -- the transport decided. Values 90..127.
     Timeout = 90,           // no answer from the host, at the dial or later
@@ -115,7 +117,7 @@ enum class EndReason : uint8_t {
     kJoinerFirst = MasterUnreachable,
     kJoinerLast = RelayRefusesDirect,
     kHostFirst = WrongPassword,
-    kHostLast = ConnectFlood,
+    kHostLast = OfficialClientRefused,
     kTransportFirst = Timeout,
     kTransportLast = LinkLost,
 };

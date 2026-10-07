@@ -1,17 +1,22 @@
 // coop/session/player_handshake_version.cpp -- the wire version gate.
 //
-// Third TU of the player_handshake module (see player_handshake_detail.h). Owns the Paper-pair
-// equality validation that runs at the TOP of the Join handler: extract the peer's game target from
-// the Join payload (pure pre-pass, zero identity minting), byte-equality check against our own
-// coop::version::kGameTarget, and the refuse action on mismatch -- host: Kick-with-reason plus a
-// deduped feed line; client: join_progress::Fail popup. The identity's other half, the build
-// number, IS the packet header's protocol version: anything not byte-equal was cut upstream by
-// ParseHeader, so this gate only ever runs between same-build peers.
+// Third TU of the player_handshake module (see player_handshake_detail.h). Owns the validation that
+// runs at the TOP of the Join handler: extract the peer's game target and build claim from the Join
+// payload (pure pre-pass, zero identity minting), byte-equality check of the game target against
+// our own coop::version::kGameTarget, on a host the verdict on the build claim, and the refuse
+// action -- host: Kick-with-reason plus a deduped feed line; client: join_progress::Fail popup. The
+// identity's other half, the build number, IS the packet header's protocol version: anything not
+// byte-equal was cut upstream by ParseHeader, so this gate only ever runs between same-build
+// peers.
 
 #include "player_handshake_detail.h"
 
+#include "coop/build_trust/build_trust.h"
 #include "coop/comms/chat_feed.h"
+#include "coop/config/config.h"
+#include "coop/config/config_registry.h"
 #include "coop/net/session.h"
+#include "coop/player/roster_ledger.h"
 #include "coop/session/join_progress.h"
 #include "coop/version.h"
 #include "ue_wrap/core/log.h"
@@ -19,25 +24,29 @@
 #include <windows.h>
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 
 namespace coop::player_handshake {
 namespace {
 
-// Pure pre-pass over the Join payload chain (eid, nick, skin, flags, colour, game): extracts the
-// trailing game-target field and the nick, for the host feed line, WITHOUT any side effects.
+// Pure pre-pass over the Join payload chain (eid, nick, skin, flags, colour, game, build claim):
+// extracts the game-target field, the nick (for the host feed line) and the build claim (a pointer
+// into the payload and the official bit), WITHOUT any side effects.
 // Returns false on a malformed chain -- any length prefix overrunning the payload -- fail-closed,
 // because both peers are the same build by the header prologue, so a well-formed Join always
 // carries the full chain.
 //
 // THIS IS THE SECOND WALKER OF THAT CHAIN, and the two must agree field for field;
-// HandleJoinMessage in player_handshake.cpp is the other. When the guid field was deleted from the
+// HandleJoinMessage in player_handshake.cpp is the other; it stops after the colour, so the game
+// target and the build claim are read only here. When the guid field was deleted from the
 // Join, this walker still consumed TWO length-prefixed fields where one remained, read the flags
 // byte as a length, ran off the end and refused every Join with "version field missing" -- on BOTH
 // peers, with the pose stream then never starting. A field added or removed here must be changed in
 // both, and the failure is loud but names the wrong field.
 bool ExtractJoinVersionFields(const uint8_t* payload, size_t len,
-                              std::string* outGame, std::wstring* outNick) {
+                              std::string* outGame, std::wstring* outNick,
+                              const uint8_t** outSha, bool* outOfficial) {
     size_t off = 4;  // [u32 senderElementId] (caller already checked len >= 4)
     // [u8 nicklen][nick]
     if (off + 1 > len) return false;
@@ -61,11 +70,14 @@ bool ExtractJoinVersionFields(const uint8_t* payload, size_t len,
     off += 1 + 4;
     // [u8 gamelen][game]
     if (off + 1 > len) return false;
-    {
-        const size_t n = payload[off];
-        if (off + 1 + n > len || n > 23) return false;
-        outGame->assign(reinterpret_cast<const char*>(payload + off + 1), n);
-    }
+    const size_t n = payload[off];
+    if (off + 1 + n > len || n > 23) return false;
+    outGame->assign(reinterpret_cast<const char*>(payload + off + 1), n);
+    off += 1 + n;
+    // [sha256 32][u8 flags] -- the build claim; bit 0 = the build verified its own release signature.
+    if (off + coop::build_trust::kShaBytes + 1 > len) return false;
+    *outSha = payload + off;
+    *outOfficial = (payload[off + coop::build_trust::kShaBytes] & 1) != 0;
     return true;
 }
 
@@ -82,6 +94,18 @@ std::string WireVersionVerdict(const std::string& peerGame, bool peerIsClient) {
                ", client has VOTV " + cliGame + ".";
     }
     return {};
+}
+
+// The first four bytes of a build's hash as 8 lowercase hex, enough to tell two builds apart in a
+// log line and a popup's detail.
+std::string ShaPrefixHex(const uint8_t* sha) {
+    static const char kHex[] = "0123456789abcdef";
+    std::string out;
+    for (int i = 0; i < 4; ++i) {
+        out.push_back(kHex[sha[i] >> 4]);
+        out.push_back(kHex[sha[i] & 0xF]);
+    }
+    return out;
 }
 
 // Host feed-line dedup (a reconnect-looping refused client would otherwise spam
@@ -109,25 +133,67 @@ bool ValidateJoinVersionOrRefuse(coop::net::Session& session, int senderSlot,
                                  const uint8_t* payload, size_t payloadLen) {
     std::string peerGame;
     std::wstring refuseNick = L"A player";
+    const uint8_t* peerSha = nullptr;
+    bool peerOfficial = false;
     std::string verdict;
-    if (!ExtractJoinVersionFields(payload, payloadLen, &peerGame, &refuseNick)) {
+    net::EndReason code = net::EndReason::GameVersionRefused;
+    if (!ExtractJoinVersionFields(payload, payloadLen, &peerGame, &refuseNick, &peerSha,
+                                  &peerOfficial)) {
         verdict = "malformed join (version field missing)";
     } else {
         verdict = WireVersionVerdict(peerGame,
                                      session.role() == net::Role::Host);
     }
-    if (verdict.empty()) return false;
+    // The host decides, both ways. MTA's server admits a join only when the client's netcode version
+    // equals its own (reference/mtasa-blue/Server/mods/deathmatch/logic/CGame.cpp:1913). A non-public
+    // build carries a branch id in that version (reference/mtasa-blue/Shared/sdk/version.h:119-131; its
+    // note at :36 says a custom public server admits only custom clients), so a client of the other
+    // kind differs in the branch and is refused as DIFFERENT_BRANCH (CGame.cpp:2036-2039). Here the
+    // host holds the branch rule. net.allow_other_builds is a deliberate divergence: no MTA setting
+    // relaxes its kind check (the nearest is minclientversion, a version floor); kept so a self-built
+    // host can host friends on the official build. A client judges no host.
+    bool admittedOther = false;
+    if (verdict.empty() && session.role() == net::Role::Host) {
+        const bool sameBytes =
+            std::memcmp(peerSha, coop::build_trust::Self().sha256, coop::build_trust::kShaBytes) == 0;
+        // The signature check runs only for a differing hash: a same-build join cannot change the
+        // verdict. An official host refuses any other hash, a modified host an official client.
+        bool hostOfficial = false;
+        bool refusedKind = false;
+        if (!sameBytes) {
+            hostOfficial = coop::build_trust::SelfIsOfficial();
+            refusedKind = hostOfficial || peerOfficial;
+        }
+        if (refusedKind) {
+            if (coop::config::ResolveFlag(coop::config_registry::rows::net_allow_other_builds)) {
+                admittedOther = true;
+            } else if (hostOfficial) {
+                verdict = "unofficial build " + ShaPrefixHex(peerSha);
+                code = net::EndReason::UnofficialClientRefused;
+            } else {
+                verdict = "official build " + ShaPrefixHex(peerSha);
+                code = net::EndReason::OfficialClientRefused;
+            }
+        }
+    }
+    if (verdict.empty()) {
+        if (admittedOther) {
+            UE_LOGI("player_handshake: admitted another build (slot=%d nick='%ls' sha=%s): "
+                    "net.allow_other_builds is on",
+                    senderSlot, SanitizeNickname(refuseNick).c_str(), ShaPrefixHex(peerSha).c_str());
+            coop::roster_ledger::SetOtherBuild(senderSlot);
+        }
+        return false;
+    }
     refuseNick = SanitizeNickname(refuseNick);
     if (session.role() == net::Role::Host) {
         UE_LOGW("player_handshake: Join REFUSED (slot=%d nick='%ls' game='%s'): %s",
                 senderSlot, refuseNick.c_str(), peerGame.c_str(), verdict.c_str());
-        PushRefuseFeedLineDeduped(
-            refuseNick,
-            verdict + " [" + net::Describe(net::EndReason::GameVersionRefused).id + "]");
+        PushRefuseFeedLineDeduped(refuseNick, verdict + " [" + net::Describe(code).id + "]");
         char reason[128];
         std::snprintf(reason, sizeof(reason), "%s", verdict.c_str());
         // The close carries the code and the sentence: their popup names both.
-        session.Kick(senderSlot, net::EndReason::GameVersionRefused, reason);
+        session.Kick(senderSlot, code, reason);
     } else {
         // We-the-client refused the HOST's Join: surface our own popup -- a browser or direct join
         // is Active, so Fail pops the dialog and aborts, while an env boot is log-only -- and let

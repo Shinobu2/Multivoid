@@ -34,6 +34,17 @@
 #include "coop/dev/drone_probe.h"
 #include "coop/dev/end_play_probe.h"  // [dev] every end of play against the K2_DestroyActor seam
 #include "coop/dev/event_drill.h"  // [dev] the event lanes: a scheduler fire, a dev fire, the join snapshot
+#include "coop/dev/command_drill.h"  // [dev] a typed command is run by the host and answered privately
+#include "coop/dev/mv_drill.h"  // [dev] the /mv commands end to end against a seeded permission store
+#include "coop/dev/stats_probe.h"  // [dev] every player stat read, written and restored in one frame, and the game's status effects added, listed and removed
+#include "coop/dev/stat_order_drill.h"  // [dev] the host orders and queries a client's stats and effects and checks every answer
+#include "coop/dev/chat_drill.h"  // [dev] the chat checks, judged in memory
+#include "coop/dev/ban_drill.h"  // [dev] the host bans a joined client by the moderation verb
+#include "coop/dev/bug_report_drill.h"  // [dev] a bug report is saved and its zip judged in memory
+#include "coop/dev/grants_drill.h"  // [dev] this machine's local grants judged against an arm
+#include "coop/dev/pause_quit_drill.h"  // [dev] a peer quits through the pause menu's own button
+#include "coop/dev/settings_drill.h"  // [dev] the host sets its own rows and the modules show they followed
+#include "coop/dev/mannequin_drill.h"  // [dev] the walking mannequin's spawn and baseline drill
 #include "coop/dev/fireext_drill.h"  // [dev] a wall-mounted fire extinguisher taken off and carried, watched on both peers
 #include "coop/dev/floppy_selftest.h"  // [dev] the disc-into-server media transfer, driven
 #include "coop/dev/food_clock_probe.h"  // the food record's arrival catch-up and the two clocks behind it
@@ -133,12 +144,21 @@ void EndSession() {
     coop::dev::calib_drill::OnDisconnect();  // [dev] a rejoin's peers run their legs again
     coop::dev::drive_drill::OnDisconnect();  // [dev] the same for the drive drill
     coop::dev::download_drill::OnDisconnect();  // [dev] the same for the download drill
+    coop::dev::settings_drill::OnDisconnect();  // [dev] the steps start over
+    coop::dev::mannequin_drill::OnDisconnect();  // [dev] the client's samples belong to one session
     coop::dev::laptop_drill::OnDisconnect();  // [dev] a rejoin's peers run their legs again
     coop::dev::grid_drill::OnDisconnect();  // [dev] the panel and the legs belong to one world
     coop::dev::tower_drill::OnDisconnect();  // [dev] the tower and the legs belong to one world
     coop::dev::desk_verb_drill::OnDisconnect();  // [dev] the legs start over
     coop::dev::desk_crossing_drill::OnDisconnect();  // [dev] the legs start over, a held host step let go
     coop::dev::desk_ping_drill::OnDisconnect();  // [dev] the legs start over
+    coop::dev::command_drill::OnDisconnect();  // [dev] the phases start over, the reply observer cleared
+    coop::dev::mv_drill::OnDisconnect();  // [dev] the /mv script starts over, the reply observer cleared
+    coop::dev::stats_probe::OnDisconnect();  // [dev] a rejoin's peers run the probe again
+    coop::dev::stat_order_drill::OnDisconnect();  // [dev] the steps start over, an answer still in flight is ignored
+    coop::dev::chat_drill::OnDisconnect();  // [dev] the drill starts over, a chat it opened is closed
+    coop::dev::ban_drill::OnSessionEnd();  // [dev] empty by design: its one state, the step, stands
+    coop::dev::pause_quit_drill::OnDisconnect();  // [dev] a pending wait for the pause menu is dropped; the per-process latch stands
     coop::dev::order_selftest::OnDisconnect();  // [dev] a rejoin's peers run their legs again
     coop::dev::meadow_selftest::OnDisconnect();  // [dev] a rejoin's peers run their legs again
     coop::dev::lid_drill::OnDisconnect();  // [dev] the PC and the legs belong to one world
@@ -182,6 +202,8 @@ void TickDrills(coop::net::Session& session) {
     coop::dev::lookat_aim_drill::Tick(&session);  // [dev] walk to a prop and hold the aim (a single bool read when off)
     coop::dev::door_drill::Tick(&session);  // [dev] the door drill's sensor readings and walk (a single bool read when off)
     coop::dev::event_drill::Tick(&session);  // [dev] the event drill's fires and count (a single bool read when off)
+    coop::dev::settings_drill::Tick(&session);  // [dev] the settings drill's steps (a latched enum compare when off)
+    coop::dev::mannequin_drill::Tick(&session);  // [dev] the mannequin drill's phases (a single enum read when off)
     coop::dev::toggle_drill::Tick(&session);  // [dev] the toggle drill's toggles (a single check when off)
     coop::dev::world_first_check::Tick();  // [dev] client_world_first's verdict (a single bool read when off)
     coop::dev::blackout_drill::Tick(&session);  // [dev] the blackout drill's fire and reads (a single bool read when off)
@@ -210,6 +232,15 @@ void TickDrills(coop::net::Session& session) {
     coop::dev::desk_verb_drill::Tick(&session);  // [dev] the desk's save family drill (a latched read when off)
     coop::dev::desk_crossing_drill::Tick(&session);  // [dev] the needle's crossing drill (a latched read when off)
     coop::dev::desk_ping_drill::Tick(&session);  // [dev] the ping verdict drill (a latched read when off)
+    coop::dev::command_drill::Tick(&session);  // [dev] the commands drill (a latched read when off)
+    coop::dev::mv_drill::Tick(&session);  // [dev] the /mv drill (a latched read when off)
+    coop::dev::stats_probe::Tick(&session);  // [dev] the player stats and status effects probe (a latched read when off)
+    coop::dev::stat_order_drill::Tick(&session);  // [dev] the stat order drill's steps (a latched read when off)
+    coop::dev::chat_drill::Tick(&session);  // [dev] the chat drill (a latched read when off)
+    coop::dev::ban_drill::Tick(&session);  // [dev] the host ban drill (a latched read when off)
+    coop::dev::bug_report_drill::Tick(&session);  // [dev] the bug-report drill (a latched read when off)
+    coop::dev::grants_drill::Tick(&session);  // [dev] the local grants drill (a latched read when off)
+    coop::dev::pause_quit_drill::Tick(&session);  // [dev] the pause-quit drill (a latched read when off)
     coop::dev::drive_selftest::Tick();  // [dev] rack-lane e2e circles (single bool read when off; 5 s self-throttle)
     coop::dev::floppy_selftest::Tick();  // [dev] disc/server episodes (single bool read when off; 6 s census period)
     coop::dev::hookdrag_selftest::Tick();  // [dev] the hook drag and its 4 Hz position log (single bool read when off)

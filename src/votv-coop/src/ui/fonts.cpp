@@ -16,6 +16,8 @@
 
 #include <windows.h>
 
+#include <atomic>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -31,7 +33,14 @@ float   g_rolePx[kRoleCount]     = {};
 // Filled by ReadRoleFamiliesOnce, which every consumer path calls first; the per-role default
 // lives in the config registry's row list.
 Family  g_roleFamily[kRoleCount] = {};
-bool    g_rolesRead = false;     // the ini is read once; SetRoleFamily overrides after
+bool    g_rolesRead = false;     // the config is read once; ApplyRowsIfChanged updates after
+
+// The two atomics are the exception to the render-thread-only data above. g_rowsChanged is handed
+// from the game thread (the rows' subscriber stores true) to the render thread (the frame consumes
+// it); g_rowsApplies is incremented by the render thread's apply and read on any thread by
+// RowsApplies(). The render-thread data above is never written from the game thread.
+std::atomic<bool>     g_rowsChanged{false};
+std::atomic<uint32_t> g_rowsApplies{0};
 
 // The ini token per family lives in the config registry, in the same Family order; this table
 // keeps the UI-only columns.
@@ -51,9 +60,6 @@ constexpr FamilyDesc kFamilies[kFamilyCount] = {
 static_assert(coop::config_registry::kFontFamilyCount ==
                   static_cast<size_t>(kFamilyCount),
               "Family enum and config_registry::kFontFamilyTokens must stay in lockstep");
-inline const char* FamilyToken(int fi) {
-    return coop::config_registry::kFontFamilyTokens[fi];
-}
 
 // The ini key suffix per role lives in the config registry, in the same Role order; this table
 // keeps the UI-only columns.
@@ -79,7 +85,7 @@ static_assert(coop::config_registry::kFontRoleCount == static_cast<size_t>(kRole
 
 Family FamilyFromToken(const std::string& v, Family fallback) {
     for (int i = 0; i < kFamilyCount; ++i)
-        if (v == FamilyToken(i)) return static_cast<Family>(i);
+        if (v == FamilyToken(static_cast<Family>(i))) return static_cast<Family>(i);
     return fallback;
 }
 
@@ -96,6 +102,9 @@ void ReadRoleFamiliesOnce() {
     }
     g_rolesRead = true;
 }
+
+// Game thread, through the config notifier: only the flag is stored.
+void OnFontRowChanged() { g_rowsChanged.store(true, std::memory_order_release); }
 
 // An RCDATA TTF embedded in our own module, not the game's.
 const void* ResourceTtf(int id, int* outSize) {
@@ -366,18 +375,34 @@ Family RoleFamily(Role r) {
     return (i >= 0 && i < kRoleCount) ? g_roleFamily[i] : Family::Fixedsys;
 }
 
-void SetRoleFamily(Role r, Family f) {
-    const int ri = static_cast<int>(r);
-    const int fi = static_cast<int>(f);
-    if (ri < 0 || ri >= kRoleCount || fi < 0 || fi >= kFamilyCount) return;
-    ReadRoleFamiliesOnce();
-    if (g_roleFamily[ri] == f) return;
-    g_roleFamily[ri] = f;
-    g_rolesRead = true;  // the live choice wins over the ini read
-    coop::config::WriteIniValue(coop::config_registry::FontRoleRow(static_cast<size_t>(ri)),
-                                FamilyToken(fi));
-    ui::scale::RequestRebuild();  // atlas re-bakes before the next frame
+const char* FamilyToken(Family f) {
+    return coop::config_registry::kFontFamilyTokens[static_cast<int>(f)];
 }
+
+void SubscribeRows() {
+    for (size_t i = 0; i < coop::config_registry::kFontRoleCount; ++i)
+        coop::config::Subscribe(coop::config_registry::FontRoleRow(i), &OnFontRowChanged);
+}
+
+void ApplyRowsIfChanged() {
+    if (!g_rowsChanged.exchange(false, std::memory_order_acquire)) return;
+    ReadRoleFamiliesOnce();
+    int changed = 0;
+    for (int r = 0; r < kRoleCount; ++r) {
+        const std::string v =
+            coop::config::ResolveEnum(coop::config_registry::FontRoleRow(static_cast<size_t>(r)));
+        const Family f = FamilyFromToken(v, RoleDefaultFam(r));
+        if (f == g_roleFamily[r]) continue;
+        g_roleFamily[r] = f;
+        ++changed;
+    }
+    if (changed == 0) return;
+    g_rowsApplies.fetch_add(1, std::memory_order_relaxed);
+    ui::scale::RequestRebuild();  // atlas re-bakes once, before this frame's read
+    UE_LOGI("ui::fonts: rows applied (%d role(s) changed)", changed);
+}
+
+uint32_t RowsApplies() { return g_rowsApplies.load(std::memory_order_relaxed); }
 
 void OnContextDestroyed() {
     for (int r = 0; r < kRoleCount; ++r) g_roleFont[r] = nullptr;

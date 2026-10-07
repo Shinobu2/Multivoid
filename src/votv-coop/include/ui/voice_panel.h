@@ -4,9 +4,10 @@
 // interactive surface (it joins the input-capture set); the open state latches
 // until V / the window's X closes it.
 //
-// Setters write atomics (safe from the render thread); device/mode changes
-// rewrite multivoid.ini then RequestDevicesRestart() -- the reopen happens on
-// the next game tick, never here. Render thread only.
+// Rows are applied by their subscribers (voice_chat::SubscribeRows): a device/mode change reopens
+// the devices on the next game tick, never here. The panel calls voice_chat directly only for the
+// mute toggle and the sliders' live drag preview (its atomic setters); each slider commits its row
+// on release. Render thread only.
 
 #pragma once
 
@@ -16,5 +17,9 @@ void Toggle();
 void Close();
 bool IsOpen();
 void Render();
+
+// Render thread, once per drawn frame: a slider that was being dragged when the panel closed
+// commits its last previewed value to its row.
+void CommitAbandonedDrag();
 
 }  // namespace ui::voice_panel

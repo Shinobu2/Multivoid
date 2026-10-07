@@ -42,7 +42,12 @@ static_assert(static_cast<int>(Lane::Count) == 3,
 
 }  // namespace
 
-Session::~Session() { Stop(); }
+Session::~Session() {
+    // The listener's owner may be gone at process end, and the game's own quit runs no orderly
+    // shutdown: clear the slot first, so this Stop() reaches no other file's statics.
+    stopListener_.store(nullptr);
+    Stop();
+}
 
 bool Session::TryGetReliable(ReliableMessage& out) {
     std::lock_guard<std::mutex> lk(reliableInboxMutex_);
@@ -255,6 +260,21 @@ bool Session::SendEntityDestroy(uint32_t elementId) {
     return SendReliable(ReliableKind::EntityDestroy, &p, sizeof(p));
 }
 
+bool Session::SlotReliableIdle(int slot) {
+    if (slot < 0 || slot >= kMaxPeers) return false;
+    const uint32_t hConn = peerConns_[slot].load();
+    if (hConn == 0) return false;
+    auto* sockets = SteamNetworkingSockets();
+    if (!sockets) return false;
+    // The backlog first: a message moving from it into the transport between the two reads is
+    // then seen as pending, never as neither. Read directly, not through admission_.Anchor, which
+    // changes state.
+    if (backlog_.DepthBytes(slot) != 0) return false;
+    SteamNetConnectionRealTimeStatus_t st{};
+    if (sockets->GetConnectionRealTimeStatus(hConn, &st, 0, nullptr) != k_EResultOK) return false;
+    return st.m_cbPendingReliable == 0 && st.m_cbSentUnackedReliable == 0;
+}
+
 void Session::SampleLinkRates(uint64_t nowMs) {
     auto* sockets = SteamNetworkingSockets();
     if (!sockets) return;
@@ -330,6 +350,8 @@ void Session::SampleLinkRates(uint64_t nowMs) {
 }
 
 void Session::NetThread() {
+    // First thing: KickClaimed reads it to tell this thread from the game thread.
+    netThreadId_.store(std::this_thread::get_id());
     const auto sendInterval = std::chrono::milliseconds(
         cfg_.sendHz > 0 ? 1000 / cfg_.sendHz : 33);
     auto nextSend = std::chrono::steady_clock::now();
@@ -354,6 +376,12 @@ void Session::NetThread() {
     size_t   pauseWorstDepth = 0;
 
     while (running_.load()) {
+        // 0a) The slots an off-thread kick queued are freed, and the session's aggregate state is
+        // written, before anything of this pass: this thread is the only one that frees a slot or
+        // writes the aggregate, so a seat and a close never interleave inside a pass.
+        RunPendingFrees();
+        UpdateAggregateState();
+
         // 0) P2P: pump the signaling transport (inbound ICE rendezvous blobs advance the handshake;
         // outbound is flushed), before RunCallbacks so a state advance a signal triggers is
         // dispatched in the same iteration. nullptr for LanDirect; set before this thread spawned
@@ -461,7 +489,8 @@ void Session::NetThread() {
                     msgs[i]->Release();
                     continue;
                 }
-                HandleMessage(peerSlot, msgs[i]->m_pData, static_cast<int>(msgs[i]->m_cbSize));
+                HandleMessage(peerSlot, static_cast<uint32_t>(msgs[i]->m_conn), msgs[i]->m_pData,
+                              static_cast<int>(msgs[i]->m_cbSize));
                 msgs[i]->Release();
             }
             drained += n;

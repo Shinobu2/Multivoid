@@ -1,40 +1,36 @@
 // coop/config/config_census.cpp -- what this launch is actually configured with, said out loud.
 //
-// A drill that varies a setting and never checks the setting took effect is not an experiment: a
-// send-rate run measured a controller its own log said was off, and every conclusion drawn from
-// it described a binary that never ran the code under test. So a peer publishes the rows a layer
-// actually supplied -- the value as RESOLVED, and which layer won -- and a rig asserts its own
-// independent variables against that before it measures anything.
+// A drill that varies a setting and never checks it took effect is not an experiment: a send-rate
+// run measured a controller its own log said was off. So a peer publishes the rows a layer actually
+// supplied -- the value as RESOLVED, and which layer won -- for a rig to assert against first.
 //
 // The two lines are a contract with tools outside the tree, like coop/session/rig_ready.h's:
 //   config: EFFECTIVE <key>=<value> (<env|ini>)
 //   config: EFFECTIVE end -- <n> row(s) configured
 // An absent row means the peer took that row's default, which holds only if the ini was readable,
-// so the end line carries that verdict too. A credential row -- named by the registry, never
-// guessed from a spelling -- prints as <set>, and a refused raw value says so beside the default
-// it fell back to, or beside itself on a fail-closed row, where nothing falls back.
+// so the end line carries that verdict too. A value prints through config_registry::ValueForLog,
+// the one place that decides a printed form: a credential row is <set>, an address row is marked
+// unless it is the default, and a refused raw value says so beside the default it fell back to, or
+// beside itself on a fail-closed row, where nothing falls back. A bug report carries the ini in
+// that same form (IniLinesForReport, IniTextForReport; coop/config/config_report.h).
 
 #include "coop/config/config.h"
 
 #include "config_internal.h"
 #include "coop/config/config_registry.h"
+#include "coop/config/config_report.h"
 #include "ue_wrap/core/log.h"
+
+#include <windows.h>
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 namespace coop::config {
-namespace {
 
 using config_registry::Kind;
 using config_registry::Row;
-
-// A credential, or the minted identity, is reported as PRESENT and never quoted: this log is
-// pasted into bug reports and captured by CI, and a lobby password in it outlives the session.
-// Which keys those are is the registry's fact, not this file's guess at a spelling.
-bool Redacted(const Row& r) {
-    return r.kind == Kind::Identity || config_registry::IsCredentialKey(r.key);
-}
 
 // The resolved value in the one spelling a reader and a rig both compare: a flag is 1 or 0, an
 // integer its own digits, a float the catalog's C-locale emission, an enum its canonical token.
@@ -42,7 +38,7 @@ bool Redacted(const Row& r) {
 // exactly what the RESOLVER returns -- before a consumer's own clamp. Two consumers clamp further
 // and the census does not follow them there: ReadNickname caps length and repertoire, and
 // ReadPlayerSkin replaces an unknown skin with a random starter.
-std::string Resolved(const Row& r, const std::string& raw) {
+std::string ResolvedText(const Row& r, const std::string& raw) {
     char buf[64];
     switch (r.kind) {
         case Kind::Flag:
@@ -61,7 +57,14 @@ std::string Resolved(const Row& r, const std::string& raw) {
     return raw;  // free strings are unvalidated, and an identity never reaches here
 }
 
-// A refused value printed as itself, which is whatever a file or an environment held: printable
+// The announcement's decision, by resolved value: two spellings of one value are no change.
+bool ShouldAnnounce(const Row& row, const std::string& before, const std::string& after) {
+    return config_registry::IsNotify(&row) && ResolvedText(row, before) != ResolvedText(row, after);
+}
+
+namespace internal {
+
+// A value printed as itself, which is whatever a file, an environment or the host held: printable
 // ASCII only and capped, so the line stays one line a rig's pattern can read.
 std::string Printable(const std::string& raw) {
     constexpr size_t kMax = 64;
@@ -73,7 +76,7 @@ std::string Printable(const std::string& raw) {
     return s;
 }
 
-}  // namespace
+}  // namespace internal
 
 void ReportEffectiveConfig() {
     size_t count = 0;
@@ -107,7 +110,10 @@ void ReportEffectiveConfig() {
         const bool valid = !unread && ValueValidForKey(r.key, raw, &why);
         if (unread) why = std::string("multivoid.ini ") + IniFaultWords(fault);
         const bool refused = !valid && r.failClosed;
-        const std::string value = Redacted(r) ? "<set>" : refused ? Printable(raw) : Resolved(r, raw);
+        const std::string value = config_registry::ValueForLog(
+            &r, refused ? internal::Printable(raw) : ResolvedText(r, raw));
+        // The env/ini label holds only before the first SetValue: fromEnv is false when the
+        // runtime layer answered, so a row set this run reads "ini" here whatever its source.
         if (valid)
             UE_LOGI("config: EFFECTIVE %s=%s (%s)", r.key, value.c_str(),
                     fromEnv ? "env" : "ini");
@@ -128,6 +134,49 @@ void ReportEffectiveConfig() {
                 IniFaultWords(fault));
     else
         UE_LOGI("config: EFFECTIVE end -- %d row(s) configured", configured);
+}
+
+std::vector<std::string> IniLinesForReport(const std::vector<std::string>& lines) {
+    std::vector<std::string> out;
+    for (const std::string& raw : lines) {
+        const std::string line = internal::TrimEdgesStr(raw);
+        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
+        if (line[0] == '[') {
+            // Only the header: what follows its `]` is free text, as a comment is.
+            const size_t close = line.find(']');
+            if (close != std::string::npos) out.push_back(line.substr(0, close + 1));
+            continue;
+        }
+        std::string key, value;
+        if (!internal::ParseIniKeyValue(line, key, value)) continue;
+        out.push_back(key + "=" +
+                      config_registry::ValueForLog(config_registry::FindRow(key.c_str()),
+                                                   internal::CookIniValue(value, true)));
+    }
+    return out;
+}
+
+IniReport IniTextForReport(std::string& out) {
+    // A file that is not there is not a fault: the ini is optional, and a report says so.
+    const std::wstring path = internal::LiveIniPath();
+    WIN32_FILE_ATTRIBUTE_DATA attrs{};
+    if (path.empty()) return IniReport::NotPresent;
+    if (!::GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attrs)) {
+        const DWORD err = ::GetLastError();
+        if (err == ERROR_FILE_NOT_FOUND || err == ERROR_PATH_NOT_FOUND) return IniReport::NotPresent;
+    }
+    std::vector<std::string> lines;
+    IniFault fault = IniFault::None;
+    const int scan = ListLiveIniLines(lines, &fault);
+    if (scan == 1) return IniReport::NotPresent;
+    if (scan != 0) return IniReport::Unreadable;
+    std::string text;
+    for (const std::string& line : IniLinesForReport(lines)) {
+        if (!text.empty()) text += '\n';
+        text += line;
+    }
+    out = std::move(text);
+    return IniReport::Ok;
 }
 
 }  // namespace coop::config

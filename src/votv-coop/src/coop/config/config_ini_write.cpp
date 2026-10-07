@@ -1,15 +1,19 @@
 // coop/config/config_ini_write.cpp -- the guarded multivoid.ini mutation engine: the skeleton
-// seeder, the single-key writer, the owner reformat and the keep-line dedup. Shares the reader
-// core's primitives through config_internal.h; every public entry holds the one ini mutex.
+// seeder, the single-key writer, the reset's line removal, the owner reformat and the keep-line
+// dedup. Shares the reader core's primitives through config_internal.h; every public entry holds
+// the one ini mutex.
 // The destruction guards: never rebuild from a file that exists but cannot be read cleanly (a
-// lock, a mid-stream error, bytes that are not text), and every rebuild goes .new, checked
-// writes, then an atomic move; a locked-file write once rebuilt the host's ini from an empty line
-// list, and a file saved as UTF-16 was once cut to the one line a mint appended.
+// lock, a mid-stream error, bytes that are not text), and every rebuild is written whole by
+// coop/atomic_file (checked writes, a flush, one move); a locked-file write once rebuilt the
+// host's ini from an empty line list, and a file saved as UTF-16 was once cut to the one line a
+// mint appended.
 
 #include "coop/config/config.h"
 
 #include "config_internal.h"
+#include "coop/atomic_file/atomic_file.h"
 #include "coop/config/config_registry.h"
+#include "coop/config/config_selftest.h"
 #include "ue_wrap/core/log.h"
 
 #include <windows.h>
@@ -37,38 +41,26 @@ bool IsSectionHeader(const std::string& line, std::string& nameOut) {
     return true;
 }
 
-// The checked .new-then-atomic-swap tail shared by every file rebuild (the single-key write,
-// the reformat, the keep-line dedup). Every write is checked before the swap: a disk-full .new
-// must never replace the good ini.
+// The tail shared by every file rebuild (the single-key write, the reset's line removal, the
+// reformat, the keep-line dedup): every rebuild is written whole by coop/atomic_file, so a
+// disk-full write never replaces the good ini. The bytes are exactly the lines given (each ends in
+// its own newline): text mode translated every '\n' to CRLF on disk, which made the catalog's
+// byte compare permanently false, so every boot re-swapped. Rebuilds emit LF endings; the lexer
+// reads both.
 bool AtomicWriteLines(const std::wstring& path, const std::vector<std::string>& lines,
                       const char* what) {
-    const std::wstring tmp = path + L".new";
-    FILE* f = nullptr;
-    // Binary mode: the primitive writes exactly the bytes given. Text mode translated every '\n'
-    // to CRLF on disk, which made the catalog's byte compare permanently false, so every boot
-    // re-swapped. Rebuilds emit LF endings; the lexer reads both.
-    if (_wfopen_s(&f, tmp.c_str(), L"wb") != 0 || !f) {
-        UE_LOGW("config: %s could not open multivoid.ini.new for write", what);
-        return false;
-    }
-    bool wrote = true;
-    for (const auto& l : lines)
-        if (std::fputs(l.c_str(), f) == EOF) { wrote = false; break; }
-    if (std::ferror(f)) wrote = false;
-    if (std::fclose(f) != 0) wrote = false;
-    if (!wrote) {
-        ::DeleteFileW(tmp.c_str());
-        UE_LOGW("config: %s writing multivoid.ini.new FAILED (disk?) -- ini left unchanged",
-                what);
-        return false;
-    }
-    if (!::MoveFileExW(tmp.c_str(), path.c_str(),
-                       MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-        UE_LOGW("config: %s atomic swap failed (err=%lu) -- ini left unchanged, "
-                "multivoid.ini.new kept", what, ::GetLastError());
-        return false;
-    }
-    return true;
+    std::string bytes;
+    for (const auto& l : lines) bytes += l;
+    const atomic_file::Result r =
+        atomic_file::Write(path, bytes, atomic_file::Mode::Replace, atomic_file::Sync::ToDisk);
+    if (r.ok()) return true;
+    if (r.failedAt == atomic_file::Step::Move)
+        UE_LOGW("config: %s atomic swap failed (%s) -- ini left unchanged", what,
+                atomic_file::Describe(r).c_str());
+    else
+        UE_LOGW("config: %s could not write multivoid.ini (%s) -- ini left unchanged", what,
+                atomic_file::Describe(r).c_str());
+    return false;
 }
 
 // The ini section a key belongs to, for write placement and the reformat: a literal row's
@@ -83,30 +75,29 @@ const char* SectionForKey(const char* key) {
     return nullptr;
 }
 
-// The path-parameterised writer core, no lock: the public wrapper holds it, and the selftest
-// drives copies of corpus files, never the live ini.
+// The path-parameterised writer core, no lock: internal::WriteIniKeyAtPath holds it, and the
+// selftest drives copies of corpus files, never the live ini.
 bool WriteIniValueAt(const std::wstring& path, const char* key, const char* value) {
-    // Scrub CR and LF from the value (an embedded newline, pasted into a text field, would split
-    // the key line and corrupt the next key on read-back), then edge-trim. Interior spaces are
-    // part of the value (device names) and round-trip unchanged.
-    std::string safe;
-    for (const char* p = value; *p; ++p)
-        if (*p != '\n' && *p != '\r') safe.push_back(*p);
-    safe = internal::TrimEdgesStr(safe);
+    // The row kind decides both halves of the value's form: a String row keeps its edges and is
+    // quoted when the reader could not return it whole; every other row, and a key with no row (the
+    // string-keyed machinery), is trimmed and never quoted.
+    const config_registry::Row* r = config_registry::FindRow(key);
+    const bool stringRow = r && r->kind == config_registry::Kind::String;
+    const std::string safe = internal::NormalizeValue(value, !stringRow);
     // What this function may LOG. The value still goes to the file -- that is the whole job -- but
     // both lines below name the key and the outcome, and a lobby password printed beside them
-    // outlives the session in every pasted log. Same registry predicate the census asks, so the
-    // tree cannot redact a value in one writer and print it in the other.
-    const char* shown =
-        config_registry::IsCredentialKey(key) ? "<set>" : safe.c_str();
+    // outlives the session in every pasted log. ValueForLog is the one printed form every config
+    // printer uses, so the tree cannot redact a value in one writer and print it in the other.
+    const std::string shown = config_registry::ValueForLog(r, safe);
     const char* wantSec = SectionForKey(key);
     if (!ValueValidForKey(key, safe, nullptr)) {
-        UE_LOGW("config: WriteIniValue('%s'='%s') REFUSED -- the value would be rejected "
+        UE_LOGW("config: ini write('%s'='%s') REFUSED -- the value would be rejected "
                 "on read (registry kind/range/tokens); not persisting garbage (T3b)",
-                key, shown);
+                key, shown.c_str());
         return false;
     }
-    const std::string newLine = std::string(key) + "=" + safe + "\n";
+    const std::string newLine =
+        std::string(key) + "=" + internal::QuoteIniValueIfNeeded(safe, stringRow) + "\n";
     // Read the existing lines, replacing the key's line in place if present. The authoritative
     // line is the first case-insensitive key occurrence, edited in place with the canonical
     // spelling (distinct keys never collide case-insensitively). A case-sensitive writer missed
@@ -155,14 +146,15 @@ bool WriteIniValueAt(const std::wstring& path, const char* key, const char* valu
             }
             lines.push_back(s);
         }, &fault);
-        // A lock passes; bytes that are not text stay, so only a failed read is tried again.
+        // A lock passes; bytes that are not text stay, so only a failed read is tried again --
+        // and never slept after, since no try follows.
         if (st != IniScan::Unreadable || fault != IniFault::ReadFailed) break;
-        ::Sleep(20);
+        if (attempt + 1 < 5) ::Sleep(20);
     }
     if (st == IniScan::Unreadable) {
         // Locked, failing mid-read, or not text: whichever, the collected line list is not the
         // whole file, and rebuilding from it is the loss shape. Refuse.
-        UE_LOGW("config: WriteIniValue('%s') SKIPPED -- multivoid.ini %s; refusing to rebuild "
+        UE_LOGW("config: ini write('%s') SKIPPED -- multivoid.ini %s; refusing to rebuild "
                 "the file from a partial view", key, IniFaultWords(fault));
         return false;
     }
@@ -190,8 +182,8 @@ bool WriteIniValueAt(const std::wstring& path, const char* key, const char* valu
     } else {
         lines.push_back(newLine);  // headerless/unknown key: today's EOF append
     }
-    if (!AtomicWriteLines(path, lines, "WriteIniValue")) return false;
-    UE_LOGI("config: persisted %s=%s", key, shown);
+    if (!AtomicWriteLines(path, lines, "ini write")) return false;
+    UE_LOGI("config: persisted %s=%s", key, shown.c_str());
     return true;
 }
 
@@ -230,26 +222,15 @@ bool EnsureIniSkeleton() {
                 content += std::string(rows[r].key) + "=" +
                            config_registry::kMyNameDefault + "\n";
     }
-    // Atomic create: .new, then a move without replace-existing, so if the file appeared
-    // concurrently the seeder loses the race gracefully.
-    const std::wstring tmp = path + L".new";
-    FILE* f = nullptr;
-    if (_wfopen_s(&f, tmp.c_str(), L"w") != 0 || !f) {
-        UE_LOGW("config: skeleton seeder could not open multivoid.ini.new for write");
-        return false;
-    }
-    bool wrote = std::fputs(content.c_str(), f) != EOF;
-    if (std::ferror(f)) wrote = false;
-    if (std::fclose(f) != 0) wrote = false;
-    if (!wrote) {
-        ::DeleteFileW(tmp.c_str());
-        UE_LOGW("config: skeleton seeder write FAILED (disk?) -- no ini created");
-        return false;
-    }
-    if (!::MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_WRITE_THROUGH)) {
-        ::DeleteFileW(tmp.c_str());
-        UE_LOGW("config: skeleton seeder lost the create race (err=%lu) -- existing ini kept",
-                ::GetLastError());
+    // Created whole and only when absent (CreateOnly): a file that appeared meanwhile is kept.
+    const atomic_file::Result r = atomic_file::Write(path, content, atomic_file::Mode::CreateOnly,
+                                                     atomic_file::Sync::ToDisk);
+    if (!r.ok()) {
+        if (atomic_file::TargetExisted(r))
+            UE_LOGW("config: skeleton seeder lost the create race -- existing ini kept");
+        else
+            UE_LOGW("config: skeleton seeder could not create multivoid.ini (%s) -- no ini created",
+                    atomic_file::Describe(r).c_str());
         return false;
     }
     UE_LOGI("config: seeded fresh multivoid.ini skeleton ([net] first, net.nick=%s, [dev] last)",
@@ -257,41 +238,97 @@ bool EnsureIniSkeleton() {
     return true;
 }
 
-// The internal seam for the catalog generator: the same atomic-swap primitive every ini
-// rebuild uses, path-parameterised (the .example is never the live ini; a single writer at
-// boot, so no lock).
 namespace internal {
-bool AtomicWriteAllLines(const std::wstring& path, const std::vector<std::string>& lines,
-                         const char* what) {
-    return AtomicWriteLines(path, lines, what);
+// Scrub CR and LF from the value (an embedded newline, pasted into a text field, would split the
+// key line and corrupt the next key on read-back), then edge-trim when `trimEdges`: the typed
+// rows' validators need the trim, a String row keeps its edges (the writer quotes them). Interior
+// spaces are part of the value (device names) and round-trip unchanged.
+std::string NormalizeValue(const char* value, bool trimEdges) {
+    std::string safe;
+    for (const char* p = value; *p; ++p)
+        if (*p != '\n' && *p != '\r') safe.push_back(*p);
+    return trimEdges ? TrimEdgesStr(safe) : safe;
+}
+
+// The writer's half of the quoted-value grammar (CookIniValue, config.cpp): quote exactly when
+// the reader could not return `safe` whole. Deliberate divergence: MTA's XML settings
+// (reference/mtasa-blue/vendor/tinyxml/tinyxml.cpp:1278-1283, EncodeString on every attribute
+// value) and Source's KeyValues (reference/source-sdk-2013/src/tier1/KeyValues.cpp:874-878,
+// quotes written around every value) encode or quote every value; quoting only when needed
+// leaves a player's existing file unchanged.
+std::string QuoteIniValueIfNeeded(const std::string& safe, bool stringRow) {
+    if (!stringRow || safe.empty()) return safe;
+    const auto isBlank = [](char c) { return c == ' ' || c == '\t'; };
+    const bool needed = safe.front() == '"' || safe.front() == ';' || isBlank(safe.front()) ||
+                        isBlank(safe.back()) || safe.find(" ;") != std::string::npos ||
+                        safe.find("\t;") != std::string::npos;
+    if (!needed) return safe;
+    std::string out = "\"";
+    for (const char c : safe) {
+        if (c == '"' || c == '\\') out.push_back('\\');
+        out.push_back(c);
+    }
+    out.push_back('"');
+    return out;
+}
+
+// The one locked ini write: the key and the path are the caller's (SetValue, the identity write
+// door, the retired-value migration); everything below it is the string engine.
+bool WriteIniKeyAtPath(const std::wstring& path, const char* key, const char* value) {
+    std::lock_guard<std::mutex> lk(IniMutex());
+    return WriteIniValueAt(path, key, value);
 }
 }  // namespace internal
 
-// The one locked live-ini write behind every typed overload: the handle carries the canonical
-// key; everything below it is the string engine.
-static bool WriteIniValueRow(const config_registry::Row* row, const char* value) {
-    std::lock_guard<std::mutex> lk(internal::IniMutex());
-    return WriteIniValueAt(internal::LiveIniPath(), row->key, value);
+bool WriteIniValue(const config_registry::IdentityRow& row, const char* value) {
+    return internal::WriteIniKeyAtPath(internal::LiveIniPath(), row.row->key, value);
 }
 
-bool WriteIniValue(const config_registry::FlagRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
+// Drops every line whose key is `key` (case-insensitive): the keep-line's scan-and-rewrite
+// without a kept line, because a reset returns the row to whatever answers below the file. No
+// file means no line (true, nothing written); a file that cannot be read whole is left untouched
+// (false). A transient sharing lock is tried again as the single-key write tries it.
+static bool RemoveKeyLinesAt(const std::wstring& path, const char* key, int& removed) {
+    removed = 0;
+    std::vector<std::string> lines;
+    IniFault fault = IniFault::None;
+    IniScan scan = IniScan::Absent;
+    for (int attempt = 0; attempt < 5; ++attempt) {  // transient sharing locks
+        lines.clear();
+        scan = internal::ScanIniFile(path, [&](const std::string& l) { lines.push_back(l); },
+                                     &fault);
+        // A lock passes; bytes that are not text stay, so only a failed read is tried again --
+        // and never slept after, since no try follows.
+        if (scan != IniScan::Unreadable || fault != IniFault::ReadFailed) break;
+        if (attempt + 1 < 5) ::Sleep(20);
+    }
+    if (scan == IniScan::Absent) return true;
+    if (scan != IniScan::Ok) {
+        UE_LOGW("config: reset of '%s' SKIPPED -- multivoid.ini %s; nothing deleted", key,
+                fault == IniFault::None ? "is missing" : IniFaultWords(fault));
+        return false;
+    }
+    std::vector<std::string> out;
+    out.reserve(lines.size());
+    for (const auto& l : lines) {
+        std::string k, v;
+        if (internal::ParseIniKeyValue(l, k, v) && _stricmp(k.c_str(), key) == 0) {
+            ++removed;
+            continue;
+        }
+        out.push_back(l);
+    }
+    if (removed == 0) return true;
+    return AtomicWriteLines(path, out, "reset");
 }
-bool WriteIniValue(const config_registry::IntRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
+
+namespace internal {
+// The locked form of RemoveKeyLinesAt, the shape of WriteIniKeyAtPath.
+bool RemoveIniKeyAtPath(const std::wstring& path, const char* key, int& removed) {
+    std::lock_guard<std::mutex> lk(IniMutex());
+    return RemoveKeyLinesAt(path, key, removed);
 }
-bool WriteIniValue(const config_registry::FloatRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
-}
-bool WriteIniValue(const config_registry::EnumRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
-}
-bool WriteIniValue(const config_registry::StringRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
-}
-bool WriteIniValue(const config_registry::IdentityRow& row, const char* value) {
-    return WriteIniValueRow(row.row, value);
-}
+}  // namespace internal
 
 // Correlates by value, never by line number: the panel's snapshot ages while it sits on
 // screen, and an unrelated write elsewhere shifts every line index, so a stale index could
@@ -309,7 +346,7 @@ static bool RemoveDuplicateKeyLinesAt(const std::wstring& path, const char* key,
         return false;
     }
     auto displayValue = [](const std::string& v) {
-        return internal::StripInlineCommentStr(internal::TrimEdgesStr(v), true);
+        return internal::CookIniValue(v, true);
     };
     // Pass 1: does the clicked value still exist for this key?
     bool valuePresent = false;
@@ -348,13 +385,40 @@ static bool RemoveDuplicateKeyLinesAt(const std::wstring& path, const char* key,
     if (removed == 0) return false;  // nothing to delete (already resolved)
     if (!AtomicWriteLines(path, out, "keep-line dedup")) return false;
     UE_LOGI("config: duplicate resolution for '%s' -- kept value '%s', removed %d line(s) "
-            "(owner action from the config review)", key, keepValue, removed);
+            "(owner action from the config review)", key,
+            config_registry::ValueForLog(config_registry::FindRow(key), keepValue).c_str(), removed);
     return true;
 }
 
+namespace internal {
+// The player repaired the STORED value, so the disk answers again (the environment above it, as
+// at boot): a value set this run would otherwise shadow the kept line until relaunch. Not a
+// live set, so it does not go through SetValueAt. The rewrite and the drop sit under the set lock,
+// so a set cannot land between them; the notification runs after both locks are released: a
+// subscriber re-resolves. On the host in a session the session layer keeps its value; the kept
+// line answers again once the session ends.
+bool RemoveDuplicateKeyLinesLayered(const std::wstring& path, const char* key,
+                                    const char* keepValue) {
+    bool ok = false;
+    const config_registry::Row* row = nullptr;
+    {
+        std::lock_guard<std::mutex> setLock(SetMutex());
+        {
+            std::lock_guard<std::mutex> iniLock(IniMutex());
+            ok = RemoveDuplicateKeyLinesAt(path, key, keepValue);
+        }
+        if (ok) {
+            row = config_registry::FindRow(key);
+            if (row) RuntimeLayerDrop(row);
+        }
+    }
+    if (ok && row) PostNotify(row);
+    return ok;
+}
+}  // namespace internal
+
 bool RemoveDuplicateKeyLines(const char* key, const char* keepValue) {
-    std::lock_guard<std::mutex> lk(internal::IniMutex());
-    return RemoveDuplicateKeyLinesAt(internal::LiveIniPath(), key, keepValue);
+    return internal::RemoveDuplicateKeyLinesLayered(internal::LiveIniPath(), key, keepValue);
 }
 
 bool SelftestRemoveDuplicates(const std::wstring& path, const char* key, const char* keepValue) {

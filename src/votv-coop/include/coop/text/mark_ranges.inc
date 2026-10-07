@@ -2,9 +2,9 @@
 // Re-mint when a face changes, or this and the atlas fall out of step with nothing to say so.
 //
 // The combining marks this build can DRAW (General_Category Mn/Me/Mc, intersected with the render
-// set, minus anything the exclude set still holds). Its ONE consumer is the leading-mark rule in
-// SanitizeNickname: a mark at position 0 has no base to sit on, so it stacks onto whatever the UI
-// drew before the name.
+// set, minus anything the exclude set still holds). Its consumer is the leading-mark rule in
+// coop::text::FilterNameChars: a mark at position 0 has no base to sit on, so it stacks onto
+// whatever the UI drew before the name.
 //
 // It exists because the rule used to carry its own literal, `c >= 0x0300 && c <= 0x036F` -- one
 // block, written when no other mark could bake. The repertoire now admits Thaana, Tamil, Thai,

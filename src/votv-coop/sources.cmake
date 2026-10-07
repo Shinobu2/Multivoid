@@ -152,6 +152,7 @@ set(VOTVCOOP_SOURCES
     src/ue_wrap/actors/prop_events.cpp
     src/ue_wrap/actors/garbage_bag.cpp
     src/ue_wrap/actors/vitals.cpp
+    src/ue_wrap/actors/effects.cpp
     src/ue_wrap/world/game_mode.cpp
     src/ue_wrap/world/world_singleton.cpp
     src/ue_wrap/world/world_instances.cpp
@@ -331,12 +332,22 @@ set(VOTVCOOP_SOURCES
     src/coop/text/utf8_codec.cpp
     src/coop/text/case_fold.cpp
     src/coop/text/repertoire.cpp
+    src/coop/text/name_filter.cpp
     src/coop/config/config_census.cpp
     src/coop/config/config_example.cpp
     src/coop/config/config_ini_write.cpp
     src/coop/config/config_registry.cpp
+    src/coop/config/config_runtime.cpp
+    src/coop/config/config_session.cpp
     src/coop/config/config_selftest.cpp
     src/coop/config/config_review.cpp
+    src/coop/atomic_file/atomic_file.cpp
+    src/coop/atomic_file/atomic_file_selftest.cpp
+    src/coop/bug_report/report_redact.cpp
+    src/coop/bug_report/report_form.cpp
+    src/coop/bug_report/report_selftest.cpp
+    src/coop/bug_report/report_bundle.cpp
+    src/coop/bug_report/report_files.cpp
     src/coop/element/element.cpp
     src/coop/element/object_scan_hub.cpp
     src/coop/element/element_deleter.cpp
@@ -365,7 +376,9 @@ set(VOTVCOOP_SOURCES
     src/coop/net/session_trashcarry.cpp
     src/coop/net/session_propdrive.cpp
     src/coop/net/session_start.cpp
+    src/coop/net/session_serial.cpp
     src/coop/net/session_status.cpp
+    src/coop/net/session_teardown.cpp
     src/coop/net/link_kind.cpp
     src/coop/net/session_relay.cpp
     src/coop/net/origin_context.cpp
@@ -381,6 +394,7 @@ set(VOTVCOOP_SOURCES
     src/coop/net/http_client.cpp
     src/coop/net/lobby_client.cpp
     src/coop/net/lobby_announcer.cpp
+    src/coop/net/endpoint_log.cpp
     src/coop/net/master_slots.cpp
     src/coop/save/join_window_baseline.cpp
     src/coop/save/save_transfer.cpp
@@ -391,6 +405,9 @@ set(VOTVCOOP_SOURCES
     src/coop/session/join_beacon.cpp
     src/coop/session/join_progress.cpp
     src/coop/session/join_seed.cpp
+    src/coop/session/server_settings_sync.cpp
+    src/coop/session/local_grants.cpp
+    src/coop/session/grants_sync.cpp
     src/coop/session/net_pump.cpp
     src/coop/player/puppet_drive.cpp
     src/coop/props/registry_reaper.cpp
@@ -437,6 +454,12 @@ set(VOTVCOOP_SOURCES
     src/coop/creatures/wisp_tear_mirror.cpp
     src/coop/items/player_inventory_sync.cpp
     src/coop/player/player_profile_store.cpp
+    src/coop/player/stat_orders.cpp
+    src/coop/player/stat_orders_wire.cpp
+    src/coop/player/stat_orders_wire_selftest.cpp
+    src/coop/build_trust/build_trust.cpp
+    src/coop/build_trust/build_trust_selftest.cpp
+    src/coop/build_trust/self_identity.cpp
     src/coop/items/inventory_wire.cpp
     src/coop/items/save_record_wire.cpp
     src/coop/props/container_contents_sync.cpp
@@ -489,6 +512,15 @@ set(VOTVCOOP_SOURCES
     src/coop/dev/kerfus_throw_drill.cpp
     src/coop/dev/desk_crossing_drill.cpp
     src/coop/dev/desk_ping_drill.cpp
+    src/coop/dev/command_drill.cpp
+    src/coop/dev/mv_drill.cpp
+    src/coop/dev/stats_probe.cpp
+    src/coop/dev/stat_order_drill.cpp
+    src/coop/dev/chat_drill.cpp
+    src/coop/dev/ban_drill.cpp
+    src/coop/dev/bug_report_drill.cpp
+    src/coop/dev/grants_drill.cpp
+    src/coop/dev/pause_quit_drill.cpp
     src/coop/dev/game_window.cpp
     src/coop/dev/desk_verb_drill.cpp
     src/coop/dev/desk_verb_drill_desk.cpp
@@ -534,6 +566,8 @@ set(VOTVCOOP_SOURCES
     src/coop/dev/door_drill.cpp
     src/coop/dev/door_drill_aim.cpp
     src/coop/dev/event_drill.cpp
+    src/coop/dev/settings_drill.cpp
+    src/coop/dev/mannequin_drill.cpp
     src/coop/dev/toggle_drill.cpp
     src/coop/dev/world_first_check.cpp
     src/coop/dev/blackout_drill.cpp
@@ -610,6 +644,8 @@ set(VOTVCOOP_SOURCES
     src/ui/dev_menu.cpp
     src/ui/skins_panel.cpp
     src/ui/admin_panel.cpp
+    src/ui/bug_report_pane.cpp
+    src/ui/server_settings_pane.cpp
     src/ui/world_rules_panel.cpp
     src/ui/scoreboard.cpp
     src/ui/link_format.cpp
@@ -649,8 +685,47 @@ set(VOTVCOOP_SOURCES
     src/coop/player/roster.cpp
     src/coop/player/roster_ledger.cpp
     src/coop/moderation/ban_list.cpp
+    src/coop/moderation/ban_list_selftest.cpp
     src/coop/moderation/moderation.cpp
     src/coop/moderation/seen_players.cpp
+    src/coop/server_profile/server_profile.cpp
+    src/coop/server_profile/server_profile_selftest.cpp
+    src/coop/commands/command_line.cpp
+    src/coop/commands/command_targets.cpp
+    src/coop/commands/command_registry.cpp
+    src/coop/commands/command_dispatcher.cpp
+    src/coop/commands/command_args.cpp
+    src/coop/commands/action_source.cpp
+    src/coop/commands/commands_selftest.cpp
+    src/coop/commands/commands_cases_moderation.cpp
+    src/coop/commands/commands_cases_settings.cpp
+    src/coop/commands/commands_cases_grammar.cpp
+    src/coop/commands/commands_cases_mv.cpp
+    src/coop/commands/moderation_commands.cpp
+    src/coop/commands/mv_commands.cpp
+    src/coop/commands/mv_info.cpp
+    src/coop/commands/settings_commands.cpp
+    src/coop/permissions/context_set.cpp
+    src/coop/permissions/node.cpp
+    src/coop/permissions/node_map.cpp
+    src/coop/permissions/model.cpp
+    src/coop/permissions/inheritance.cpp
+    src/coop/permissions/resolution.cpp
+    src/coop/permissions/grants_core.cpp
+    src/coop/permissions/permission_files.cpp
+    src/coop/permissions/action_log.cpp
+    src/coop/permissions/permission_edit.cpp
+    src/coop/permissions/permissions_cases_edit.cpp
+    src/coop/permissions/permissions_cases_action_log.cpp
+    src/coop/permissions/permission_host.cpp
+    src/coop/permissions/permissions_selftest.cpp
+    src/coop/permissions/permissions_cases_context.cpp
+    src/coop/permissions/permissions_cases_store.cpp
+    src/coop/permissions/permissions_cases_inheritance.cpp
+    src/coop/permissions/permissions_cases_resolution.cpp
+    src/coop/permissions/permissions_cases_files.cpp
+    src/coop/permissions/permissions_cases_grants.cpp
+    src/coop/commands/command_sync.cpp
     src/harness/harness.cpp
     src/harness/session_runtime.cpp
     src/harness/join_leave.cpp

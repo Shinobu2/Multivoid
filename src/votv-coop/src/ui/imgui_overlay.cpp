@@ -304,6 +304,7 @@ bool BringUp(IDXGISwapChain* sc) {
 void RenderFrameGuarded(IDXGISwapChain* sc) {
     __try {
         ui::style::MaybeRescale(g_hwnd);
+        ui::voice_panel::CommitAbandonedDrag();
         overlay_backend::NewFrame();
         ImGui_ImplWin32_NewFrame();  // sets io.MousePos from the real OS cursor (WM_MOUSEMOVE / GetCursorPos)
         // The software cursor only for interactive surfaces; the passive client scoreboard shows

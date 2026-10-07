@@ -18,6 +18,11 @@ deploy and publish scripts refuse on a mismatch between the resource and the tre
 numbers themselves are minted in an append-only ledger in `.github/ci/`, and a tag or a
 release page is a drift detector, never the authority ([release.md](release.md)).
 
+An unofficial build -- any `main.dll` without its release signature -- shows `(unofficial build)`
+after the version. A host refuses a player on a build of the other kind -- an unofficial build on an
+official host (MV-H30), the official build on a modified host (MV-H31) -- unless it allows other
+builds (`net.allow_other_builds`).
+
 Two peers play together only when their pairs are byte-equal. The build number rides every
 packet header, so a peer on another build never parses a message; the game target rides the
 Join and is compared on the host, which refuses with a reason the client shows; and the browser

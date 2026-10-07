@@ -1,14 +1,16 @@
-// coop/config/config_registry_rows.inc -- the one registry row list, X-macro'd:
-// config_registry.h expands it into the typed handle declarations, and config_registry.cpp
-// expands it three times (the index enum, the row table, the handle definitions), so every
-// artifact comes from one list with no transcription. The entry forms (ident is the C++ handle
-// name, key the canonical ini spelling, desc the catalog's human text, semantics only, since
-// the allowed tokens, ranges and env twin are generator-emitted from the columns): CFG_FLAG
-// (ident, key, section, default, envVar, desc); CFG_INT and CFG_FLOAT add a range; CFG_ENUM
-// takes the token list, an empty default being the unset sentinel allowed only for the role
-// and ICE rows; CFG_STRING adds the seeded flag; CFG_IDENTITY is minted with no default;
-// CFG_FONTROLE takes the role suffix and the default family index. A default is either the
-// value the code used before the registry or an alias of the one owning constant.
+// coop/config/config_registry_rows.inc -- the one registry row list, X-macro'd: config_registry.h expands it into
+// the typed handle declarations and the font-role defaults, and config_registry.cpp expands it seven times (index
+// enum, row table, font-role row indices, row flags, row labels, handle definitions, font-role handle array), so
+// every artifact comes from one list with no transcription. The entry forms (ident is the C++ handle name, key
+// the canonical ini spelling, desc the catalog's human text, semantics only, since the allowed tokens, ranges and
+// env twin are generator-emitted from the columns): CFG_FLAG (ident, key, section, default, envVar, desc);
+// CFG_INT and CFG_FLOAT add a range; CFG_ENUM takes the token list, an empty default being the unset sentinel
+// allowed only for the role and ICE rows; CFG_STRING adds the seeded flag; CFG_IDENTITY is minted with no
+// default; CFG_FONTROLE takes the role suffix and the default family index. A default is either the value the
+// code used before the registry or an alias of the one owning constant. CFG_ROWFLAGS(ident, flags) marks the row
+// `ident` with RowFlag bits, by convention directly under it, as Source declares FCVAR_REPLICATED with the cvar
+// (config_registry.h). CFG_LABEL(ident, "text") gives the row `ident` a plain-English name for a generated pane
+// (a row without one is never drawn); directly under the row, beside its CFG_ROWFLAGS.
 
 // The [net] section.
 CFG_STRING(net_nick, "net.nick", "net", kMyNameDefault, "VOTVCOOP_NET_NICK", true,
@@ -47,6 +49,10 @@ CFG_ENUM(net_role, "net.role", "net", "", "host|client", "VOTVCOOP_NET_ROLE",
     "Multiplayer menu handles hosting and joining.")
 CFG_STRING(net_peer, "net.peer", "net", "127.0.0.1", "VOTVCOOP_NET_PEER", false,
     "Test framework: the host address a client connects to at auto-start (lan topology).")
+CFG_ROWFLAGS(net_peer, kRowAddress)
+CFG_STRING(net_server, "net.server", "net", "", "VOTVCOOP_NET_SERVER", false,
+    "The server this install hosts: the name of its folder under multivoid_servers beside the game. "
+    "Set from your nickname the first time you host; empty means you have not hosted yet.")
 CFG_INT(net_port, "net.port", "net", ::coop::net::kDefaultPort, 1, 65535, "VOTVCOOP_NET_PORT",
     "UDP port a DIRECT host listens on: the lan topology, and a DIRECT game hosted from the menu.")
 CFG_ENUM(net_topology, "net.topology", "net", "lan", "lan|p2p", "VOTVCOOP_NET_TOPOLOGY",
@@ -83,13 +89,16 @@ CFG_STRING(net_masters, "net.masters", "net", "default", "VOTVCOOP_NET_MASTERS",
     "Label=host:port after it, e.g. default,Home=my.host:10443 (host:port means TLS, "
     "http://host:port a master without a certificate); a list without default replaces the "
     "official ones. A label is what the browser's tab says, up to 16 plain characters.")
+CFG_ROWFLAGS(net_masters, kRowAddress)
 CFG_STRING(net_master, "net.master", "net", "", nullptr, false,
     "Which master the server browser lists and where a game you host is listed: a label from "
     "net.masters. Written when you pick a tab in the browser; empty means the first one.")
+CFG_ROWFLAGS(net_master, kRowAddress)
 CFG_STRING(net_signaling, "net.signaling", "net", "", "VOTVCOOP_NET_SIGNALING", false,
     "Signaling (rendezvous) server for a P2P connection made WITHOUT a master (a test, or a "
     "host's gen: line). Empty means the chosen master's own. Games found in the server browser "
     "always use the one their master hands out.")
+CFG_ROWFLAGS(net_signaling, kRowAddress)
 CFG_STRING(net_signaling_token, "net.signaling_token", "net", "", "VOTVCOOP_NET_SIGNALING_TOKEN", false,
     "Access token for a self-hosted signaling server. The official flow mints per-session "
     "tokens automatically -- leave empty.")
@@ -108,9 +117,11 @@ CFG_STRING(net_host_identity, "net.host_identity", "net", "", "VOTVCOOP_NET_HOST
     "not the one it names. Joining from the server browser never needs it.")
 CFG_STRING(net_stun, "net.stun", "net", "stun.l.google.com:19302", "VOTVCOOP_NET_STUN", false,
     "STUN server list for NAT discovery (host:port, comma-separated).")
+CFG_ROWFLAGS(net_stun, kRowAddress)
 CFG_STRING(net_turn, "net.turn", "net", "", "VOTVCOOP_NET_TURN", false,
     "Static TURN relay server list. Empty = none; the master mints ephemeral TURN "
     "credentials when a session needs a relay.")
+CFG_ROWFLAGS(net_turn, kRowAddress)
 CFG_STRING(net_turn_user, "net.turn_user", "net", "", "VOTVCOOP_NET_TURN_USER", false,
     "Static TURN username (dev / self-hosted relays only).")
 CFG_STRING(net_turn_pass, "net.turn_pass", "net", "", "VOTVCOOP_NET_TURN_PASS", false,
@@ -170,6 +181,7 @@ CFG_STRING(browser_lastdirect, "browser.lastdirect", "ui", ::coop::net::kDefault
     "automatically). Its default names the port a host actually listens on (net.port), "
     "not Unreal's 7777, which nothing in the mod has ever bound. Replacing the address "
     "while keeping the port is the natural edit.")
+CFG_ROWFLAGS(browser_lastdirect, kRowAddress)
 CFG_FLAG(multiplayer_menu_off, "multiplayer_menu_off", "ui", false, nullptr,
     "Set to 1 to hide the Multiplayer main-menu button (the mod stays loaded).")
 // The composed font family, per-role enum rows. The default family per role: the menus, chat
@@ -207,8 +219,18 @@ CFG_STRING(voice_output_device, "voice.output_device", "voice", "", nullptr, fal
     "Playback device name; empty = system default. Pick it via the in-game voice panel.")
 CFG_FLOAT(voice_volume, "voice.volume", "voice", 1.0f, 0, 10, nullptr,
     "Master playback volume multiplier for incoming voice.")
-CFG_FLOAT(voice_distance_cm, "voice.distance_cm", "voice", 4800.0f, 100, 1000000, nullptr,
-    "Maximum voice audibility distance in centimeters (4800 = 48 m).")
+CFG_FLOAT(voice_distance_cm, "voice.distance_cm", "voice", 4800.0f, 0, 1000000, nullptr,
+    "Maximum voice audibility distance in centimeters (4800 = 48 m); 0 = unlimited (a whisper "
+    "stays local); the host's setting in a session. A value of 1..99 is a near-mute range, the "
+    "host's to choose.")
+CFG_ROWFLAGS(voice_distance_cm, kRowServer | kRowReplicated | kRowLive | kRowNotify)
+CFG_LABEL(voice_distance_cm, "Voice range")
+CFG_FLAG(net_allow_other_builds, "net.allow_other_builds", "net", false, "VOTVCOOP_NET_ALLOW_OTHER_BUILDS",
+    "Let players whose Multivoid build differs from this server's join -- an unofficial build when this server runs "
+    "the official one, the official build when this server runs a modified one. Applies to the next joins; players "
+    "already in stay.")
+CFG_ROWFLAGS(net_allow_other_builds, kRowServer | kRowReplicated | kRowLive | kRowNotify)
+CFG_LABEL(net_allow_other_builds, "Allow other builds")
 CFG_INT(voice_jitter_threshold, "voice.jitter_threshold", "voice", 3, 0, 60, nullptr,
     "Jitter buffer: late-packet tolerance in frames before a reset.")
 CFG_INT(voice_prebuffer_frames, "voice.prebuffer_frames", "voice", 5, 0, 60, nullptr,

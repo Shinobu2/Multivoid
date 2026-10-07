@@ -352,7 +352,7 @@ Read against this project, two were already the transport's or ours (GameNetwork
 challenge; the pending band's deadline) and two were not. A per-source limit on connections now
 runs at the accept edge, in the shape of MTA's join-flood history (`coop/net/connect_history`,
 `MV-H29`), and the identity key file beside the game now carries a private access list, with an
-account that cannot own it keeping its own under its profile (`coop/net/peer_identity`). The list is
+account that cannot read it keeping its own beside it (`coop/net/peer_identity`). The list is
 Moddy's; the shapes are MTA's and the project's own.
 
 **The save record as the spawn payload (b153, b157).** *Source: the README Blueprint, the rule

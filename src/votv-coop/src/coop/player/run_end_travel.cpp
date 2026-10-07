@@ -15,9 +15,13 @@
 
 #include "coop/player/run_end_travel.h"
 
+#include "coop/config/config.h"
+#include "coop/config/config_registry.h"
 #include "coop/net/session.h"
 #include "coop/player/death_revive.h"
 #include "coop/player/players_registry.h"
+#include "coop/session/net_pump.h"
+#include "ue_wrap/core/game_thread.h"
 #include "ue_wrap/core/log.h"
 #include "ue_wrap/core/reflection.h"
 #include "ue_wrap/core/script_gate.h"
@@ -93,6 +97,25 @@ bool IsOrDerivesFromNamed(void* obj, const wchar_t* className) {
         c = R::SuperStructOf(c);
     }
     return false;
+}
+
+// A menu travel this seam lets through ends the session at the decision, before the travel runs:
+// the network first, then the world, so the menu world's own start-up (its gamemode rebuilds the
+// player's carried items and destroys the spawns) never reaches the wire. The decision is recorded
+// here and the work is posted as this seam's own task, which runs at the next outermost
+// ProcessEvent of the same frame: the call is inside the VM's body loop, where a teardown would
+// run ~200 ms of Stop under the gate's firewall, and a pump-rate flag could lose the race with
+// the travel, one or two frames after a click. `what` names the verdict in the log.
+void EndSessionAtDecision(const char* what) {
+    static const bool sRed = coop::config::ResolveFlag(::coop::config_registry::rows::quit_decision_red);
+    if (sRed) return;
+    UE_LOGI("run_end_travel: the session ends before the travel (%s)", what);
+    ue_wrap::game_thread::Post([] {
+        auto* s = g_session.load(std::memory_order_acquire);
+        if (s && s->running())
+            coop::net_pump::FleeAfterNativeMenuTravel(
+                *s, "left at the quit decision -- the session stops before the menu travel");
+    });
 }
 
 // The verdict, at the body's entry, on the game thread (the gate skips and counts any off-thread
@@ -175,6 +198,8 @@ sg::Verdict OnLoadLevelPre(const sg::Call& call) {
                     "player. net_pump's flee handles a death; a catch ending ends the run as it "
                     "did before this seam.", R::ClassNameOf(author).c_str());
         }
+        if (v == Judgement::RunPlayerAsked) EndSessionAtDecision("player asked");
+        else if (v == Judgement::RunNoRevive) EndSessionAtDecision("no revive");
         return sg::Verdict::Run;
     }
 

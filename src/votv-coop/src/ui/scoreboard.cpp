@@ -2,7 +2,7 @@
 
 #include "ui/scoreboard.h"
 
-#include "coop/moderation/moderation.h"
+#include "coop/commands/command_sync.h"
 #include "coop/session/session_manager.h"  // ListedState / SetListed -- the ONE mid-session edit
 #include "coop/player/nick_color.h"
 #include "coop/player/roster.h"
@@ -15,19 +15,24 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <string>
 
 namespace ui::scoreboard {
 namespace {
 
 using ui::scale::S;
 
-// The pending ban confirmation, render thread only: a slot at or above 0 means a ban awaits
-// the modal's confirm, with the nick copied for the prompt. The token is the load-bearing
-// part: the modal sits open across an arbitrary typing delay and slots recycle, so a ban aimed
-// at the slot alone could land on whoever inherited the seat.
-int  g_banConfirmSlot = -1;
-char g_banConfirmNick[24] = {};
-coop::moderation::PlayerToken g_banConfirmToken{};
+// The player an open action popup or ban confirmation names, render thread only. The person is
+// copied (proved id and nick) when the popup opens: the popup and the modal sit open across an
+// arbitrary delay and slots recycle, so an action aimed at the row's slot, or at whatever the
+// row shows by then, could land on whoever inherited the seat. A proved id names the person.
+char g_actId[33] = {};
+char g_actNick[coop::text::kNickBufBytes] = {};
+// The pending ban confirmation: an id awaits the modal's confirm, with the nick for the prompt.
+char g_banConfirmId[33] = {};
+char g_banConfirmNick[coop::text::kNickBufBytes] = {};
+// The modal's "Also refuse their address" box; set again each time the modal opens.
+bool g_banConfirmByAddress = true;
 
 // A small filled status dot before a name, green when connected, drawn on the window draw list
 // with a dummy spacer so the following name lands to its right, centred on the text line.
@@ -40,6 +45,20 @@ void StatusDot(bool connected) {
         ImVec2(p.x + radius, p.y + ImGui::GetTextLineHeight() * 0.5f),
         radius, ImGui::GetColorU32(col));
     ImGui::Dummy(ImVec2(radius * 2.0f + S(6.0f), ImGui::GetTextLineHeight()));
+}
+
+// On the host, a row's nick hovered shows the player id a permission file is named by.
+void IdTooltip(const coop::roster::Row& r, bool host) {
+    if (!host || r.playerId[0] == '\0' || !ImGui::IsItemHovered()) return;
+    ImGui::SetTooltip("%s %s", r.isLocal ? "Your player id" : "Player id", r.playerId);
+}
+
+// A menu item that is off, with the reason on hover, while the person has no proved id yet.
+bool IdMenuItem(const char* label, bool hasId) {
+    const bool clicked = ImGui::MenuItem(label, nullptr, false, hasId);
+    if (!hasId && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Their identity is not proved yet.");
+    return clicked;
 }
 
 }  // namespace
@@ -178,38 +197,42 @@ void Render() {
                     if (ImGui::Selectable(nick, false,
                                           ImGuiSelectableFlags_DontClosePopups |
                                               ImGuiSelectableFlags_SpanAllColumns |
-                                              ImGuiSelectableFlags_AllowOverlap))
+                                              ImGuiSelectableFlags_AllowOverlap)) {
+                        std::snprintf(g_actId, sizeof(g_actId), "%s", r.playerId);
+                        std::snprintf(g_actNick, sizeof(g_actNick), "%s", nick);
                         ImGui::OpenPopup("##act");
+                    }
+                    IdTooltip(r, host);
                     ImGui::PopStyleColor();
 
                     if (ImGui::BeginPopup("##act")) {
-                        ImGui::TextDisabled("%s", nick);
+                        ImGui::TextDisabled("%s", g_actNick);
                         ImGui::Separator();
-                        // Host-standard actions, not dev-gated. The token is captured, not the
-                        // slot: slots recycle, so a slot number stops naming this person the moment
-                        // they leave, and these actions execute later on the game thread, when the
-                        // seat may have a new occupant.
-                        const auto token =
-                            coop::moderation::TokenFor(r.slot, r.playerNo, r.generation);
-                        if (ImGui::MenuItem("Teleport to me"))
-                            coop::moderation::TeleportPlayerToMe(token);
-                        if (ImGui::MenuItem("Kick"))
-                            coop::moderation::KickPlayer(token);
+                        // Host-standard actions, not dev-gated: each submits a command line for
+                        // the person the popup opened on. The line names the proved id, which
+                        // survives the seat changing hands; the command's permission check and
+                        // its reply (in the host's chat) are the same as when it is typed.
+                        const bool hasId = g_actId[0] != '\0';
+                        if (IdMenuItem("Teleport to me", hasId))
+                            coop::command_sync::Submit(std::string("tphere ") + g_actId);
+                        if (IdMenuItem("Kick", hasId))
+                            coop::command_sync::Submit(std::string("kick ") + g_actId);
                         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.00f, 0.45f, 0.42f, 1.0f));
-                        const bool banClicked = ImGui::MenuItem("Ban (permanent)");
+                        const bool banClicked = IdMenuItem("Ban (permanent)", hasId);
                         ImGui::PopStyleColor();
                         if (banClicked) {
                             // The confirm modal executes after an arbitrary typing delay, exactly
-                            // the window a slot can change hands in, so the token is stashed and
-                            // the ban aimed at the person.
-                            g_banConfirmToken = token;
-                            g_banConfirmSlot = r.slot;
-                            std::snprintf(g_banConfirmNick, sizeof(g_banConfirmNick), "%s", nick);
+                            // the window a slot can change hands in, so the id is stashed and the
+                            // ban aimed at the person.
+                            std::snprintf(g_banConfirmId, sizeof(g_banConfirmId), "%s", g_actId);
+                            std::snprintf(g_banConfirmNick, sizeof(g_banConfirmNick), "%s", g_actNick);
+                            g_banConfirmByAddress = true;
                         }
                         ImGui::EndPopup();
                     }
                 } else {
                     ImGui::TextColored(nickCol, "%s", nick);
+                    IdTooltip(r, host);
                     if (r.isLocal) { ImGui::SameLine(0.0f, S(6.0f)); ImGui::TextDisabled("(you)"); }
                     // HOST belongs on the name, not in the link column: it is a fact about who the
                     // player is, while the link column answers how their traffic reaches the
@@ -336,23 +359,30 @@ void Render() {
         // The ban confirmation modal, shared across rows: a ban is destructive and irreversible
         // from the UI, so it gets an explicit confirm step. Opened once on the transition, closed
         // by either button.
-        if (g_banConfirmSlot >= 0 && !ImGui::IsPopupOpen("Confirm ban##coop"))
+        if (g_banConfirmId[0] != '\0' && !ImGui::IsPopupOpen("Confirm ban##coop"))
             ImGui::OpenPopup("Confirm ban##coop");
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
                                 ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         if (ImGui::BeginPopupModal("Confirm ban##coop", nullptr,
                                    ImGuiWindowFlags_AlwaysAutoResize)) {
             ImGui::Text("Permanently ban %s?", g_banConfirmNick);
-            ImGui::TextDisabled("Disconnected now and blocked by IP on reconnect.");
+            ImGui::TextDisabled("Disconnected now and refused whenever they rejoin.");
+            ImGui::Checkbox("Also refuse their address", &g_banConfirmByAddress);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Also refuses anyone connecting from the same address -- people who share "
+                                  "their router or their provider's address are refused too. It only works "
+                                  "on a direct connection: a player who comes through a relay is refused by "
+                                  "their identity alone.");
             ImGui::Spacing();
             if (ImGui::Button("Ban", ImVec2(S(110.f), 0))) {
-                coop::moderation::BanPlayer(g_banConfirmToken, "banned by host");
-                g_banConfirmSlot = -1;
+                coop::command_sync::Submit(std::string(g_banConfirmByAddress ? "ban " : "banid ") +
+                                           g_banConfirmId);
+                g_banConfirmId[0] = '\0';
                 ImGui::CloseCurrentPopup();
             }
             ImGui::SameLine();
             if (ImGui::Button("Cancel", ImVec2(S(110.f), 0))) {
-                g_banConfirmSlot = -1;
+                g_banConfirmId[0] = '\0';
                 ImGui::CloseCurrentPopup();
             }
             ImGui::EndPopup();

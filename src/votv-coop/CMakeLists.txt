@@ -205,6 +205,14 @@ add_subdirectory(third_party/opus EXCLUDE_FROM_ALL)
 add_library(miniaudio STATIC third_party/miniaudio/miniaudio.c)
 target_include_directories(miniaudio PUBLIC third_party/miniaudio)
 
+# miniz (MIT, vendored, pinned 3.0.2) -- deflate + zip writer for the bug-report bundle
+# (coop/bug_report). One C TU, miniaudio's pattern. MINIZ_NO_ZLIB_COMPATIBLE_NAMES: else miniz.h
+# #defines crc32 and the other zlib names, and the one named crc32 is a field of a wire struct
+# (protocol.h).
+add_library(miniz STATIC third_party/miniz/miniz.c)
+target_include_directories(miniz PUBLIC third_party/miniz)
+target_compile_definitions(miniz PUBLIC MINIZ_NO_ZLIB_COMPATIBLE_NAMES)
+
 # nlohmann/json (MIT, header-only, via the vcpkg manifest) -- parses the master
 # server's JSON (lobby list + host/join responses) in coop/net/lobby_*. RULE 13:
 # don't hand-roll a JSON parser for untrusted network input.
@@ -275,6 +283,10 @@ target_link_libraries(votv-coop PRIVATE
     crypt32
     opus       # v66 voice codec (third_party/opus, static)
     miniaudio  # v66 capture/playback devices (third_party/miniaudio, static)
+    miniz      # the bug-report zip (third_party/miniz, static)
+    shell32    # SHGetKnownFolderPath, ShellExecuteW (the bug report's folders and Show in folder)
+    ole32      # CoTaskMemFree for SHGetKnownFolderPath's answer
+    uuid       # the FOLDERID_* GUIDs
 )
 target_include_directories(votv-coop PRIVATE
     third_party/GameNetworkingSockets/include)

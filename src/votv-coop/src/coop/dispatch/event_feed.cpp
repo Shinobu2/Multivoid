@@ -34,6 +34,8 @@
 #include "coop/player/nick_color.h"  // ResetSlots() at bringup -- a colour lands before its row
 #include "coop/player/nameplate.h"   // ResetSlots() at bringup -- so does a hidden-plate pref
 #include "coop/session/player_handshake.h"
+#include "coop/session/grants_sync.h"  // HostTick: the local dev grants to a proved slot
+#include "coop/session/server_settings_sync.h"  // HostTick: the snapshot to a ready slot
 #include "coop/player/players_registry.h"
 #include "coop/player/remote_player.h"
 #include "coop/player/roster_ledger.h"
@@ -140,6 +142,10 @@ void Update(net::Session& session, void* localPlayer) {
                 session, slot, joinPayload, joinPayloadBuilt);
         }
     }
+    // The host's server-scope settings follow the Join: the snapshot to each slot that is ready.
+    coop::server_settings_sync::HostTick(session);
+    // The local dev grants follow: each proved client's own bits, and the host's own.
+    coop::session::grants_sync::HostTick(session);
 
     // The drain. The switch handles the inline cases; everything else falls to the default, which
     // chains the family routers (each returns true iff it owns the kind, so the family's own switch

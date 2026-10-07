@@ -76,6 +76,8 @@ UiSnapshot g_uiSnap;
 bool g_captureOk = false;
 bool g_playbackOk = false;
 std::atomic<bool> g_restartRequested{false};
+// Device reopens Tick has performed since boot; any thread reads it (the settings drill's readiness).
+std::atomic<uint32_t> g_reopens{0};
 
 int ParseKey(const std::string& s, int def) {
     if (s.empty()) return def;
@@ -98,7 +100,7 @@ void SendLocalState(coop::net::Session* s) {
 }
 
 // Open (or reopen) both devices from the current voice.* config. Game thread
-// only -- Install + the panel-requested restart path.
+// only -- Install + the device-row restart path.
 void StartDevices() {
     coop::voice::CaptureConfig cc;
     // Typed registry reads (arc 2): the env twins (VOTVCOOP_VOICE_MODE /
@@ -119,6 +121,8 @@ void StartDevices() {
     coop::voice::PlaybackConfig pc;
     pc.device = CFG::ResolveString(coop::config_registry::rows::voice_output_device);
     pc.volume = CFG::ResolveFloat(coop::config_registry::rows::voice_volume);
+    // The host's value in a session (the row's session layer); the subscriber below keeps
+    // it applied live, so this read is only the initial value.
     pc.distanceCm = CFG::ResolveFloat(coop::config_registry::rows::voice_distance_cm);
     pc.jitterThreshold = static_cast<int>(CFG::ResolveInt(coop::config_registry::rows::voice_jitter_threshold));
     pc.prebufferFrames = static_cast<int>(CFG::ResolveInt(coop::config_registry::rows::voice_prebuffer_frames));
@@ -151,12 +155,63 @@ void PublishUiSnapshot(coop::net::Session* s) {
     snap.masterVolume = g_playback.MasterVolume();
     snap.thresholdDb = g_capture.ThresholdDb();
     snap.gainDb = g_capture.GainDb();
+    // The APPLIED value (an atomic): a Resolve here would run every game tick.
+    snap.distanceCm = g_playback.DistanceCm();
     (void)s;
     std::lock_guard<std::mutex> lk(g_uiMutex);
     g_uiSnap = snap;
 }
 
+// Atomic, any thread; the next Tick in a session reopens both devices.
+void RequestDevicesRestart() { g_restartRequested.store(true, std::memory_order_release); }
+
+// The row subscribers (game thread, through the config notifier). Each re-resolves its row.
+// The mode and the two device rows change what StartDevices reads, so they reopen the devices;
+// outside a session no Tick runs and Install clears the flag, hence "in a session".
+void OnVoiceDeviceRowChanged() {
+    UE_LOGI("voice_chat: a device row changed (mode=%s); the devices reopen at the next voice tick in a session",
+            CFG::ResolveEnum(coop::config_registry::rows::voice_mode).c_str());
+    RequestDevicesRestart();
+}
+
+// The three slider rows are applied here. The panel's drag shows the same value live through the
+// public setters (a preview) and commits its row on release, which reaches these.
+void OnVoiceThresholdRowChanged() {
+    g_capture.SetThresholdDb(CFG::ResolveFloat(coop::config_registry::rows::voice_threshold_db));
+}
+
+void OnVoiceGainRowChanged() {
+    g_capture.SetGainDb(CFG::ResolveFloat(coop::config_registry::rows::voice_mic_gain_db));
+}
+
+void OnVoiceVolumeRowChanged() {
+    g_playback.SetMasterVolume(CFG::ResolveFloat(coop::config_registry::rows::voice_volume));
+}
+
+// The range row is the host's in a session (its session layer carries the host's value): its
+// subscriber hands the effective value to the mixer's atomic, with no device restart. 0 = unlimited.
+void OnVoiceRangeRowChanged() {
+    const float cm = CFG::ResolveFloat(coop::config_registry::rows::voice_distance_cm);
+    g_playback.SetDistanceCm(cm);
+    if (cm > 0.0f)
+        UE_LOGI("voice_chat: range %.0f cm (vertical fade %.0f cm)", cm,
+                cm * coop::voice::kVerticalFadeRatio);
+    else
+        UE_LOGI("voice_chat: range unlimited (whisper %.0f cm)",
+                coop::voice::DefaultRangeCm() * 0.5f);
+}
+
 }  // namespace
+
+void SubscribeRows() {
+    CFG::Subscribe(::coop::config_registry::rows::voice_mode, &OnVoiceDeviceRowChanged);
+    CFG::Subscribe(::coop::config_registry::rows::voice_mic_device, &OnVoiceDeviceRowChanged);
+    CFG::Subscribe(::coop::config_registry::rows::voice_output_device, &OnVoiceDeviceRowChanged);
+    CFG::Subscribe(::coop::config_registry::rows::voice_threshold_db, &OnVoiceThresholdRowChanged);
+    CFG::Subscribe(::coop::config_registry::rows::voice_mic_gain_db, &OnVoiceGainRowChanged);
+    CFG::Subscribe(::coop::config_registry::rows::voice_volume, &OnVoiceVolumeRowChanged);
+    CFG::Subscribe(::coop::config_registry::rows::voice_distance_cm, &OnVoiceRangeRowChanged);
+}
 
 void Install(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
@@ -175,6 +230,9 @@ void Install(coop::net::Session* session) {
         UE_LOGI("voice_chat: disabled (voice.enabled=0)");
         return;
     }
+    // A device row set before the session (the panel opens only while voice runs) would queue a
+    // reopen that the first Tick runs right after this open of the same devices.
+    g_restartRequested.store(false, std::memory_order_release);
     StartDevices();
     g_started = true;
 }
@@ -183,11 +241,12 @@ void Tick() {
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->running() || !g_started || !g_enabled) return;
 
-    // Panel-requested device reopen (ini already rewritten by the panel).
+    // Device-row reopen (a row subscriber raised the flag).
     if (g_restartRequested.exchange(false, std::memory_order_acq_rel)) {
         g_capture.Stop();
         g_playback.Stop();
         StartDevices();
+        g_reopens.fetch_add(1);
     }
 
     // Mute-key toggle edge (GT poll, GetAsyncKeyState -- foreground-gated: the key is
@@ -309,12 +368,17 @@ void ReplayPeerStatesToSlot(int peerSlot) {
 void OnDisconnectSlot(int slot) {
     if (slot < 0 || slot >= coop::net::kMaxPeers) return;
     g_playback.ResetSlot(slot);
+    // The local player's volume for the person in this slot leaves with them; not in ResetSlot,
+    // which also runs at a device reopen (Tick) for people who stay.
+    g_playback.SetSlotVolume(slot, 1.0f);
     g_peerState[slot] = WireState{};
 }
 
 void OnDisconnect() {
     g_capture.Stop();
     g_playback.Stop();
+    // A session's volumes end with it (Stop returns early when playback never ran, so it cannot be the place).
+    for (int i = 0; i < coop::net::kMaxPeers; ++i) g_playback.SetSlotVolume(i, 1.0f);
     g_started = false;
     g_installed = false;   // the next session's Install must decide again
     g_sentOnce = false;
@@ -365,6 +429,7 @@ bool Muted() { return g_capture.Muted(); }
 void SetMuted(bool m) { g_capture.SetMuted(m); }
 float MicLevelDb() { return g_capture.MicLevelDb(); }
 float MasterVolume() { return g_playback.MasterVolume(); }
+uint32_t Reopens() { return g_reopens.load(); }
 void SetMasterVolume(float v) { g_playback.SetMasterVolume(v); }
 
 void GetUiSnapshot(UiSnapshot& out) {
@@ -375,6 +440,5 @@ void SetSlotVolume(int slot, float v) { g_playback.SetSlotVolume(slot, v); }
 float SlotVolume(int slot) { return g_playback.SlotVolume(slot); }
 void SetThresholdDb(float db) { g_capture.SetThresholdDb(db); }
 void SetGainDb(float db) { g_capture.SetGainDb(db); }
-void RequestDevicesRestart() { g_restartRequested.store(true, std::memory_order_release); }
 
 }  // namespace coop::voice_chat

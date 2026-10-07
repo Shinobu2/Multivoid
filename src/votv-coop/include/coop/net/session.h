@@ -2,6 +2,7 @@
 // kMaxPeers-1 clients over GameNetworkingSockets, driven by one net thread (RunCallbacks and the
 // receive loop). Remote state is indexed by peerSlot, the players::Registry index (0 = the host).
 // Topology-blind past Session::Start: a LAN dial and an ICE rendezvous are driven the same way.
+// One owner may be told when a session stops (Session::SetStopListener).
 
 #pragma once
 
@@ -126,6 +127,11 @@ public:
     // is CouldNotStart with no detail when the failing site names nothing of its own.
     bool Start(const Config& cfg, Refusal* why = nullptr);
     void Stop();
+    // One function, set once at boot, called from inside Stop() the first time it stops a running
+    // session -- whoever stops it, on whatever thread. Not called from the destructor, which
+    // clears the slot before its own Stop(): at process end no other file's statics are reached.
+    // A second, different listener is refused with an error line: one owner, by design.
+    void SetStopListener(void (*onStopped)());
 
     bool running() const { return running_.load(); }
     // Aggregate connection state (any peer connected -> Connected).
@@ -351,6 +357,11 @@ public:
         return peerLanesConfigured_[peerSlot].load(std::memory_order_acquire);
     }
 
+    // Every reliable byte sent to this slot has been acknowledged: a kick now drops nothing queued
+    // for it. False for an out-of-range slot, a slot with no connection, or a failed read. Game
+    // thread. Not const: SendBacklog::DepthBytes is not.
+    bool SlotReliableIdle(int slot);
+
     // The slot's occupancy generation: a host-minted, never reused, non-zero token naming who holds
     // the slot; 0 = empty. A change between reads is a replacement, which lowest-free slot reuse
     // hides from a connected boolean. Never on the wire; kick and ban validate a captured token
@@ -365,18 +376,20 @@ public:
 
     // --- Moderation (host-only admin actions) ---
 
-    // The host's accept predicate over an incoming connection's remote IP (dotted decimal); false
-    // closes it as banned, and whatever the filter wrote into `whyOut` (the ban's stored reason)
-    // rides the close as its text, so the banned player reads why. Set once before Start spawns
-    // the net thread (the harness wires coop::ban_list::IsBanned). MTA: the join-time ban check
-    // in CGame::Packet_PlayerJoinData, whose disconnect carries the reason string.
-    using AcceptFilterFn = bool (*)(const char* remoteIp, char* whyOut, int whyLen);
-    void SetAcceptFilter(AcceptFilterFn fn) { acceptFilter_ = fn; }
+    // The host's ban predicate over a joiner's PROVED player id and its connection's own address
+    // (empty when the path is relayed or GNS knows none), asked right after the identity proof and
+    // before a seat is given; true refuses the connection as banned, and whatever it wrote into
+    // `whyOut` rides the close. Set once before Start spawns the net thread. MTA: the serial and IP
+    // checks in CGame::Packet_PlayerJoinData (CGame.cpp:1956, :1973).
+    using BanCheckFn = bool (*)(const char* playerId, const char* address, char* whyOut, int whyLen);
+    void SetBanCheck(BanCheckFn fn) { banCheck_ = fn; }
 
     // Host: disconnect the client at peerSlot with no linger; `code` and `reason` reach the peer's
-    // status callback, the code as the transport's application end reason. Runs the ClosedByPeer
-    // teardown itself (GNS gives no callback for a connection we close). False if out of range,
-    // slot 0, or not connected. Thread-safe. MTA: CGame::QuitPlayer(QUIT_KICK).
+    // status callback, the code as the transport's application end reason. Runs the slot's
+    // teardown itself (GNS gives no callback for a connection we close): on the net thread all of
+    // it, from any other thread all but freeing the slot (its generation), which the net thread
+    // does at the top of its next pass. False if out of range, slot 0, or not connected.
+    // Thread-safe. MTA: CGame::QuitPlayer(QUIT_KICK).
     bool Kick(int peerSlot, EndReason code, const char* reason);
 
     // Kick only while `peerSlot` is still held by `expectedGeneration`'s owner; otherwise false. A
@@ -391,10 +404,25 @@ public:
     bool GetPeerAddressWithToken(int peerSlot, uint32_t expectedGeneration,
                                  char* out, int outLen) const;
 
+    // The slot's proved id only while it was proved for `expectedGeneration`'s occupancy; empty
+    // otherwise, so a ban never records a successor's id. Any thread.
+    std::string ProvedGuidForSlotWithToken(int slot, uint32_t expectedGeneration) const;
+
   private:
     // Shared teardown for a slot the caller has already claimed (peerConns_ exchanged or CAS'd to
-    // 0).
+    // 0), in session_teardown.cpp. On the net thread it is the whole teardown, the generation clear
+    // included, and marks aggregateDue_. From any other thread it does every step but that clear,
+    // which it queues for the net thread's RunPendingFrees; the slot is free only after it.
     bool KickClaimed(int peerSlot, uint32_t hConn, EndReason code, const char* reason);
+    // Net thread, first in each loop pass (and Stop, after the join): frees every slot an
+    // off-thread kick queued -- re-sweeps the slot's remote state for what an in-flight receive
+    // wrote after the kick, then clears its generation last -- and marks aggregateDue_.
+    void RunPendingFrees();
+    // Net thread, right after RunPendingFrees, once per pass: when a close marked aggregateDue_,
+    // and the session has no peer left, state_ goes to Disconnected, linkStage_ to Idle and every
+    // slot's RTT to -1. The session's aggregate is written by this function, Start, Stop and the
+    // net thread's admission, and by nothing else.
+    void UpdateAggregateState();
 
   public:
 
@@ -417,8 +445,9 @@ private:
 
     void NetThread();
     // Per-peer message dispatch; peerSlot is the sender (from m_nConnUserData on the host, 0 on a
-    // client). A pending tag routes to HandlePendingMessage instead.
-    void HandleMessage(int peerSlot, const void* data, int len);
+    // client). A pending tag routes to HandlePendingMessage instead. `hConn` is the connection the
+    // message arrived on: the reliable inbox takes it only while the slot still holds that handle.
+    void HandleMessage(int peerSlot, uint32_t hConn, const void* data, int len);
     // Everything a pending (unadmitted) connection sends. Net thread, from the single drain site.
     void HandlePendingMessage(int pendIdx, uint32_t hConn, const void* data, int len);
     // NPC pose batch (session_npc.cpp): Serialize builds the body after the PacketHeader into `buf`
@@ -501,7 +530,20 @@ private:
     Config cfg_;
     std::thread thread_;
     std::atomic<bool> running_{false};
+    // SetStopListener's one slot; a plain function pointer, the transport knows nothing of its owner.
+    std::atomic<void (*)()> stopListener_{nullptr};
     std::atomic<ConnState> state_{ConnState::Disconnected};
+    // The net thread's id, stored first thing in NetThread: KickClaimed compares it to tell the net
+    // thread (frees the slot inline) from any other (queues the free).
+    std::atomic<std::thread::id> netThreadId_{};
+    // Slots an off-thread kick claimed and tore down but could not free: the net thread drains
+    // them in RunPendingFrees. teardownMutex_ is a leaf lock, held for a push, a pop or a clear.
+    struct PendingFree { int slot; };
+    std::mutex teardownMutex_;
+    std::vector<PendingFree> pendingFrees_;
+    // Set by every close (an inline teardown, a ClosedByPeer, RunPendingFrees); UpdateAggregateState
+    // consumes it. Cleared by Start.
+    std::atomic<bool> aggregateDue_{false};
 
     // GNS handles as uint32_t, so this header does not include the GNS API.
     std::atomic<uint32_t> hListen_{0};     // host only
@@ -580,13 +622,22 @@ public:
     // The guid of the peer in `slot`, hex(SHA-256(pub)[0..16]) of the key it proved at admission;
     // empty if the slot is free or unproved. Not a Join-packet field: a value the peer chooses
     // cannot name whose stored inventory it is.
-    void        SetProvedGuidForSlot(int slot, const std::string& guid);
+    // The id is stored WITH the generation it was proved for (ProvedGuidForSlotWithToken reads it
+    // back against a captured token); the teardowns clear it with generation 0.
+    void        SetProvedGuidForSlot(int slot, uint32_t generation, const std::string& guid);
     std::string ProvedGuidForSlot(int slot) const;
 
     // Refuse a pending connection: retire the band entry, then close with `code` and `reason`.
     // Retiring first keeps a refusal O(1); a bare CloseConnection would re-log for every message
     // left in the batch. Net thread.
     void RetirePending(int pendIdx, uint32_t hConn, EndReason code, const char* reason);
+
+    // The close of a socket the host ends without ever seating it, for a reason the host decides: a
+    // refusal at the proof, the proof deadline, the band's eviction, an accept-edge refusal, a Stop.
+    // One line per end, so a reader of the log sees how every join the HOST ended without a seat
+    // ended (a socket the client or the transport ends prints its own line or none). Net thread, or
+    // Stop once the net thread has joined.
+    void EndPendingSocket(uint32_t hConn, EndReason code, const char* reason);
 
     // Drop a pending entry (its connection closed, or it was refused).
     void ReleasePending(uint32_t hConn);
@@ -613,7 +664,11 @@ private:
     // Per-slot proved guid, under its own mutex: remoteMutex_ is taken at 60 Hz by every pose
     // store, and this is written once per admission.
     mutable std::mutex                     provedGuidMutex_;
-    std::array<std::string, kMaxPeers>     provedGuidBySlot_;
+    struct ProvedId {
+        uint32_t    generation = 0;
+        std::string guid;
+    };
+    std::array<ProvedId, kMaxPeers>        provedGuidBySlot_;
 
     // --- Per-slot occupancy generation ---
     // Minted here because slots recycle: lowest-free reuse can replace person X with Y with no
@@ -663,7 +718,10 @@ private:
     // next occupant re-latches. Under remoteMutex_.
     std::array<uint32_t, kMaxPeers> expectedEpoch_{};
 
-    // The reliable inbox (shared across peers; a FIFO of arrival order).
+    // The reliable inbox (shared across peers; a FIFO of arrival order). The receive path enqueues
+    // only while peerConns_[slot] still holds the arrival's handle, read under this mutex; an
+    // off-thread kick zeroes that handle before it takes the mutex to erase the slot's entries, so
+    // a message is either erased by the kick or never enqueued.
     std::mutex reliableInboxMutex_;
     std::deque<ReliableMessage> reliableInbox_;
     // The high-water of reliableInbox_ since the last ~1 Hz net-diag sample, stamped at the enqueue
@@ -711,16 +769,17 @@ private:
     // teardown of the host connection. Net thread.
     void FatalCloseSlot(int slot, const char* reason);
     // The client's only way to end its host link: records `code` and `why`, claims slot 0 and runs
-    // the KickClaimed teardown, which drives state_ to Disconnected, the edge net_pump needs to
-    // show the player a reason. Net thread.
+    // the KickClaimed teardown, which marks aggregateDue_; UpdateAggregateState, at the top of the
+    // next pass, drives state_ to Disconnected, the edge net_pump needs to show the player a
+    // reason. Net thread.
     void LeaveHost(EndReason code, const char* why);
     // Per-slot RTT in ms from GNS's m_nPing, sampled ~1 Hz on the net thread; -1 without a live
     // connection. event_feed fans it to each puppet.
     std::array<std::atomic<int>, kMaxPeers> rttMsBySlot_{};
 
-    // The host's accept predicate (the ban filter); nullptr = accept all. Set before Start spawns
+    // The host's ban predicate (SetBanCheck); nullptr = nobody is banned. Set before Start spawns
     // the net thread.
-    AcceptFilterFn acceptFilter_ = nullptr;
+    BanCheckFn banCheck_ = nullptr;
 
     // Client: what the host or the transport said when the link ended (the end reason decoded, and
     // its text); written on the net thread, taken on the game thread by TakeHostCloseReason. Its

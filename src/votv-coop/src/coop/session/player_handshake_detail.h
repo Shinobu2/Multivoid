@@ -59,13 +59,16 @@ void AppendNickColorField(std::vector<uint8_t>& out, uint32_t packed);
 size_t ParseNickColorField(const uint8_t* p, size_t remaining, int slot);
 
 // The WIRE VERSION GATE (player_handshake_version.cpp). Runs at the TOP of HandleJoinMessage,
-// before any identity side effect: a pure pre-pass over the Join payload chain, byte-equality
-// validation of the peer's game target -- the build half is the packet header's protocol version,
-// equal by construction -- and fail-closed on a malformed chain.
+// before any identity side effect: a pure pre-pass over the Join payload chain (eid, nick, skin,
+// flags, colour, game target, build claim), byte-equality validation of the peer's game target --
+// the build half is the packet header's protocol version, equal by construction -- on a host the
+// verdict on the peer's build claim (its hash and whether it is the official build), and
+// fail-closed on a malformed chain.
 //
 // Returns true when the Join was REFUSED, and the caller drops the message. On the host that means
 // a Kick with the reason plus the deduped "<nick> was turned away" feed line; on a client it fails
-// the join with a popup and lets the host's symmetric gate close the wire. Game thread only.
+// the join with a popup and lets the host's symmetric gate close the wire. A client judges no
+// host's build claim. Game thread only.
 bool ValidateJoinVersionOrRefuse(coop::net::Session& session, int senderSlot,
                                  const uint8_t* payload, size_t payloadLen);
 

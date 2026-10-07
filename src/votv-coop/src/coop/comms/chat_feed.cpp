@@ -1,8 +1,10 @@
 #include "coop/comms/chat_feed.h"
 
 #include "coop/config/config.h"
+#include "coop/config/config_registry.h"
 #include "coop/text/utf8_codec.h"
 
+#include "ue_wrap/core/hot_path_guard.h"
 #include "ue_wrap/core/log.h"
 
 #include <atomic>
@@ -51,8 +53,8 @@ std::atomic<int> g_count{0};
 
 // The reveal state, the one place that answers whether the history is on screen. Written from
 // whichever thread closed the chat surface (the window-procedure escape path, the render-thread
-// submit, the SEH unlatch), so atomics only; it never touches the line store, which stays
-// game-thread-only.
+// submit, the SEH unlatch, the game-thread chat drill), so atomics only; it never touches the line
+// store, which stays game-thread-only.
 std::atomic<bool>     g_chatOpen{false};
 std::atomic<uint64_t> g_closeAtMs{0};
 std::atomic<bool>     g_retentionFrozen{false};
@@ -65,7 +67,8 @@ uint64_t NowMs() {
 
 // The suspended TTL clock, game thread. While the reveal is up the TTL must not advance, or a
 // player reading history watches it expire under them. Stamping the birth forward is not
-// available, since the open and close edges arrive on three different threads while the store
+// available, since the open and close edges arrive on different threads (the window procedure, the
+// render thread, the game thread's chat drill) while the store
 // is game-thread-only; so wall time keeps running and the suspended portion is accumulated,
 // then subtracted. The subtraction is the trap: a line born during a reveal has a near-zero
 // wall age while the accumulator is large, so a global total would underflow an unsigned age
@@ -132,7 +135,7 @@ uint64_t WireKey(uint32_t lineSeq) { return static_cast<uint64_t>(lineSeq) << 32
 // working passes by construction; with this set, a retire drops instead of retaining, so the
 // drill must go red.
 bool NoRetain() {
-    static const bool v = coop::config::ReadEnv("VOTVCOOP_CHAT_NO_RETAIN") == "1";
+    static const bool v = coop::config::ResolveFlag(::coop::config_registry::rows::chat_no_retain);
     return v;
 }
 
@@ -146,31 +149,37 @@ bool NoRetain() {
 // fade-out tail, the cannot-happen detector. The probe keys on the key, not the birth stamp:
 // two lines promoted in one tick carry the same birth stamp. A retired line is not noted as
 // expired, since it still exists and a legitimate re-push must not read as a resurrection.
+// No feed log line carries a line's text: each names the entry's key and, except ALPHA-JUMP, its
+// byte count, and the record keeps the destroyed entry's key so a RESURRECT line pairs with that
+// entry's retire line.
 struct Expired {
-    char     text[64] = {};
-    uint64_t atMs = 0;
+    char               text[64] = {};
+    uint64_t           atMs = 0;
+    unsigned long long key = 0;
 };
 Expired g_expired[8];
 int     g_expiredNext = 0;
 
-void NoteDestroyed(const std::string& text, uint64_t now) {
+void NoteDestroyed(const std::string& text, uint64_t key, uint64_t now) {
     Expired& x = g_expired[g_expiredNext];
     g_expiredNext = (g_expiredNext + 1) % 8;
     std::snprintf(x.text, sizeof(x.text), "%s", text.c_str());
     x.atMs = now;
+    x.key = key;
 }
 
 void ProbeOnPush(const char* via, const Entry& e, size_t linesNow) {
-    UE_LOGI("feed: push via=%s keep=%s nickLen=%u lines=%zu text=\"%.40s\"",
+    UE_LOGI("feed: push via=%s keep=%s nickLen=%u lines=%zu key=%llu textBytes=%zu",
             via, e.keep == Keep::History ? "history" : "transient",
-            static_cast<unsigned>(e.nickLen), linesNow, e.text.c_str());
+            static_cast<unsigned>(e.nickLen), linesNow,
+            static_cast<unsigned long long>(e.key), e.text.size());
     for (const Expired& x : g_expired) {
         if (!x.text[0] || x.atMs == 0) continue;
         if (e.bornMs - x.atMs > 60000) continue;
         if (std::strncmp(x.text, e.text.c_str(), sizeof(x.text) - 1) == 0) {
             UE_LOGW("feed: RESURRECT -- same text re-pushed %.1f s after it was destroyed "
-                    "(via=%s) text=\"%.40s\"",
-                    static_cast<double>(e.bornMs - x.atMs) / 1000.0, via, e.text.c_str());
+                    "(via=%s) key=%llu textBytes=%zu",
+                    static_cast<double>(e.bornMs - x.atMs) / 1000.0, via, x.key, e.text.size());
         }
     }
 }
@@ -245,13 +254,14 @@ private:
     void Retire(const char* via, uint64_t now) {
         Entry& f = live_.front();
         const bool keep = (f.keep == Keep::History) && !NoRetain();
-        UE_LOGI("feed: retire via=%s %s age=%.1fs text=\"%.40s\"", via,
+        UE_LOGI("feed: retire via=%s %s age=%.1fs key=%llu textBytes=%zu", via,
                 keep ? "-> history" : "(destroyed)",
-                static_cast<double>(EffectiveAgeMs(f, now)) / 1000.0, f.text.c_str());
+                static_cast<double>(EffectiveAgeMs(f, now)) / 1000.0,
+                static_cast<unsigned long long>(f.key), f.text.size());
         if (keep) {
             InsertRetained(std::move(f));
         } else {
-            NoteDestroyed(f.text, now);
+            NoteDestroyed(f.text, f.key, now);
         }
         live_.pop_front();
         CapRetained();
@@ -284,7 +294,7 @@ private:
                 UE_LOGW("feed: retained ceiling hit while paged back (%zu > %zu) -- "
                         "evicting the oldest history line", retained_.size(), cap);
             }
-            NoteDestroyed(retained_.front().text, NowMs());
+            NoteDestroyed(retained_.front().text, retained_.front().key, NowMs());
             retained_.pop_front();
             retainedDirty_ = true;
         }
@@ -359,9 +369,8 @@ void Republish(uint64_t now) {
             for (int p = 0; p < g_prevLiveCount; ++p) {
                 if (g_prevLive[p].key == e.key && g_prevLive[p].alpha < 0.5f &&
                     a > g_prevLive[p].alpha + 0.25f) {
-                    UE_LOGW("feed: ALPHA-JUMP -- \"%.40s\" (key=%llu) published alpha %.2f -> %.2f",
-                            g_pub.lines[n].text, static_cast<unsigned long long>(e.key),
-                            g_prevLive[p].alpha, a);
+                    UE_LOGW("feed: ALPHA-JUMP -- (key=%llu) published alpha %.2f -> %.2f",
+                            static_cast<unsigned long long>(e.key), g_prevLive[p].alpha, a);
                 }
             }
         }
@@ -491,6 +500,21 @@ bool GetSnapshotIfNewer(Snapshot& out, uint32_t& gen) {
 
 bool HasAny() {
     return g_count.load(std::memory_order_relaxed) > 0;
+}
+
+void ForEachRow(const std::function<void(const RowView&)>& fn) {
+    UE_ASSERT_GAME_THREAD("g_store (chat_feed::ForEachRow)");
+    auto walk = [&fn](const std::deque<Entry>& tier, bool retained) {
+        for (const Entry& e : tier) {
+            const std::string_view text = e.text;
+            size_t cut = e.nickLen;  // the pushers keep nickLen <= text.size()
+            const std::string_view nick = text.substr(0, cut);
+            if (cut != 0 && text.compare(cut, 2, ": ") == 0) cut += 2;
+            fn(RowView{e.key, nick, text.substr(cut), retained});
+        }
+    };
+    walk(g_store.live(), false);
+    walk(g_store.retained(), true);
 }
 
 void SetChatOpen(bool open) {

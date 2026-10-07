@@ -64,7 +64,7 @@ attacker. Encrypting this leg is the next transport-security item on the list.
 - **Peer identity is proven; the path is not.** Every install holds a key that is its network
   identity, kept beside the game under a private access list that admits only the account that
   made it, and before a seat is spent each end signs the other's challenge with the key its
-  identity names, so nobody can join as someone else. A ban is still by address, not by key. The host's connection cap (four
+  identity names, so nobody can join as someone else. A ban is by the proved identity, and also by the address when the host saw a direct one. The host's connection cap (four
   connections per thirty seconds by default, then thirty seconds of refusal) counts by address
   where the transport knows one and by the proved identity over a relayed route, so it bounds a
   join flood but not a peer that changes address, nor one that changes identity over a relay.

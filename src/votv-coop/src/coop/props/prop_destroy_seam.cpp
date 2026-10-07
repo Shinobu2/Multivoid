@@ -7,6 +7,7 @@
 #include "prop_lifecycle_detail.h"  // co-located private header (src tree, not include/)
 
 #include "coop/creatures/kerfur_convert.h"  // TryCaptureKerfurPropDestroy, the conversion's hold on a kerfur prop death
+#include "coop/dev/prop_birth_key_probe.h"   // NoteDestroy (who destroyed a prop it saw born)
 #include "coop/dev/spawn_match_probe.h"      // NoteDestroy (the fuzzy-adoption watch)
 #include "coop/element/prop.h"
 #include "coop/net/protocol.h"
@@ -162,9 +163,10 @@ void DestroySeamBody(void* self) {
 }
 
 // The patch callback for the actor's destroy: the dying actor is the dispatch context (a member
-// call runs on the actor), and the frame's object is merely the caller. Game thread only, the
-// same contract the observer had.
-void OnK2DestroyFunc(void* context, void* /*srcObj*/, void* /*result*/) {
+// call runs on the actor), and the frame's object is merely the caller -- which the birth probe
+// names. Game thread only, the same contract the observer had.
+void OnK2DestroyFunc(void* context, void* srcObj, void* /*result*/) {
+    coop::dev::prop_birth_key_probe::NoteDestroy(context, srcObj, LoadSession());
     DestroySeamBody(context);
 }
 

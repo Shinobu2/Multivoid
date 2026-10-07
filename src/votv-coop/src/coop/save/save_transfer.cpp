@@ -6,6 +6,7 @@
 
 #include "coop/save/save_transfer.h"
 
+#include "coop/atomic_file/atomic_file.h"
 #include "coop/comms/chat_feed.h"  // the join-window cue, behind the pile_delta_probe flag
 #include "coop/element/element.h"   // Element::GetActor
 #include "coop/element/registry.h"  // the host's eid-to-actor lookup
@@ -41,7 +42,6 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
@@ -230,21 +230,14 @@ void MaybeFinishLocked_() {
         blobLen = g_cliBuf.size() - g_cliSidecarBytes;
     }
     const fs::path dir = coop::save_guard::SaveGamesDir();
-    const fs::path tmp = dir / (CoopSlotFileNameNoExt_() + L".sav.part");
     const fs::path dst = dir / (CoopSlotFileNameNoExt_() + L".sav");
-    {
-        std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
-        if (!f || !f.write(reinterpret_cast<const char*>(blobStart),
-                           static_cast<std::streamsize>(blobLen))) {
-            UE_LOGE("save_transfer: slot write failed ('%ls')", tmp.c_str());
-            g_cliState = ClientState::Failed;
-            return;
-        }
-    }
-    std::error_code ec;
-    fs::rename(tmp, dst, ec);
-    if (ec) {
-        UE_LOGE("save_transfer: slot rename failed ('%ls' -> '%ls')", tmp.c_str(), dst.c_str());
+    // Cached: the net thread, and the host sends the save again when it is lost.
+    const atomic_file::Result wr = atomic_file::Write(
+        dst, std::string_view(reinterpret_cast<const char*>(blobStart), blobLen),
+        atomic_file::Mode::Replace, atomic_file::Sync::Cached);
+    if (!wr.ok()) {
+        UE_LOGE("save_transfer: slot write of '%ls' failed (%s)", dst.c_str(),
+                atomic_file::Describe(wr).c_str());
         g_cliState = ClientState::Failed;
         return;
     }
@@ -718,7 +711,6 @@ void OnDisconnect() {
     const fs::path dir = coop::save_guard::SaveGamesDir();
     if (!dir.empty()) {
         DeleteFileLogged_(dir / (CoopSlotFileNameNoExt_() + L".sav"));
-        DeleteFileLogged_(dir / (CoopSlotFileNameNoExt_() + L".sav.part"));
     }
     for (int slot = 0; slot < coop::net::kMaxPeers; ++slot) {
         g_host[slot] = HostStream{};

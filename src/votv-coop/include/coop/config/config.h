@@ -1,13 +1,16 @@
 // coop/config/config.h -- the env and ini configuration readers. multivoid.ini lives next to the
 // mod DLL; the LAN test framework overrides through environment variables, since one DLL location
-// serves two instances and per-file configs would alias. Precedence: the environment variable (set
-// by the test launcher), then the ini value, then the row default.
+// serves two instances and per-file configs would alias. Precedence: the session's value of a
+// server-scope row while a session runs (the session layer), then a value set while the game runs
+// (the runtime layer), then the environment variable (set by the test launcher), then the ini
+// value, then the row default.
 
 #pragma once
 
 #include "coop/config/config_registry.h"
 #include "coop/net/session.h"
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -31,23 +34,115 @@ std::string ReadScenario();
 // launch.
 bool EnsureIniSkeleton();
 
-// Create or update one key=value line in multivoid.ini. The authoritative line is the first
-// case-insensitive occurrence of the key, edited in place with the canonical spelling;
-// duplicates are left alone, other bytes stay as they are, and the rewritten line's inline
-// comment is deleted, since it described the old value. Best-effort: a read-only directory
-// means the setting is not remembered, logged and false; true means the atomic swap landed.
-// ASCII values. Keyed by typed handle, so product code cannot persist an unregistered key; the
-// value stays a string, refused by ValueValidForKey exactly as the reader would refuse it. The
-// string-keyed machinery below (reformat, keep-line, skeleton, selftests) operates on keys
+// The identity write door: one key=value line in multivoid.ini, by typed handle, with no reader
+// and no layer. The authoritative line is the first case-insensitive occurrence of the key,
+// edited in place with the canonical spelling; duplicates are left alone, other bytes stay as
+// they are, and the rewritten line's inline comment is deleted. Best-effort: a read-only
+// directory means the value is not remembered, logged and false; true means the atomic swap
+// landed. Any value is accepted (ValueValidForKey is true for identity rows). The
+// string-keyed machinery below (reformat, keep-line, skeleton) operates on keys
 // discovered in the file.
-bool WriteIniValue(const config_registry::FlagRow& row, const char* value);
-bool WriteIniValue(const config_registry::IntRow& row, const char* value);
-bool WriteIniValue(const config_registry::FloatRow& row, const char* value);
-bool WriteIniValue(const config_registry::EnumRow& row, const char* value);
-bool WriteIniValue(const config_registry::StringRow& row, const char* value);
 bool WriteIniValue(const config_registry::IdentityRow& row, const char* value);
 
-// The typed layered reads: Resolve(row) is env, then ini, then the row's default, validated
+// What SetValue did. Refused: the value is one the reader would refuse, the call came from
+// inside a subscriber, or a replicated row's value is longer than
+// kServerSettingTextMax bytes; nothing changed. HeldNotSaved: held for this run, but the ini
+// could not be written. Saved: held and written.
+enum class SetResult : unsigned char { Refused, HeldNotSaved, Saved };
+
+// Set a row's value while the game runs. The value is normalised as the ini writer normalises it
+// (line breaks removed, edges trimmed unless the row is a String row, which keeps them), refused
+// if the reader would refuse it, held in the runtime layer (which every Resolve reads above the
+// environment), written to multivoid.ini, logged, and announced to the row's subscribers. Held
+// means every later Resolve returns it (a server-scope row on a client in a session excepted: the
+// session's value answers once the host's value has arrived); a reader that latched the row at
+// its first use keeps what it latched until the next launch. Any thread; two sets are
+// serialised.
+// A server-scope row (config_registry::IsServerScope): on the host in a session the value also
+// goes into the session layer, inside the setter and before its one notification, so the session
+// sees it; on a client in a session the set changes the install's own hosting default and nothing
+// the session sees. A replicated row's value longer than config_registry::kServerSettingTextMax
+// is Refused.
+SetResult SetValue(const config_registry::FlagRow& row, const char* value);
+SetResult SetValue(const config_registry::IntRow& row, const char* value);
+SetResult SetValue(const config_registry::FloatRow& row, const char* value);
+SetResult SetValue(const config_registry::EnumRow& row, const char* value);
+SetResult SetValue(const config_registry::StringRow& row, const char* value);
+
+// Return a row to its default while the game runs: the runtime layer forgets it, its line leaves
+// multivoid.ini (an environment twin, if set, answers again; on the host in a session, a
+// server-scope row's session layer then holds what the layers below it answer), the reset is
+// logged, and the row's subscribers are called -- what SetValue is to a chosen value, this is to
+// the default. Refused from inside a subscriber. HeldNotSaved: the runtime layer forgot it, but
+// the ini could not be rewritten, so the FILE's stored value answers again until it can (a reader
+// sees the old value, not the default -- the drill's probe then prints `did not follow back`).
+// Saved: forgotten and the line removed (or there was none). Any thread; serialised with SetValue.
+SetResult ResetValue(const config_registry::FlagRow& row);
+SetResult ResetValue(const config_registry::IntRow& row);
+SetResult ResetValue(const config_registry::FloatRow& row);
+SetResult ResetValue(const config_registry::EnumRow& row);
+SetResult ResetValue(const config_registry::StringRow& row);
+
+// A server setting named by a person (Source finds a cvar by its name): exactly SetValue /
+// ResetValue for a row FindRow returned. Refused, with nothing changed, for a null row, a row not
+// in the table, or a row that is not server-scope -- so a local row cannot be set by name.
+SetResult SetServerRow(const config_registry::Row* row, const char* value);
+SetResult ResetServerRow(const config_registry::Row* row);
+
+// Call `onChange` after each SetValue or ResetValue of `row` that was not Refused; it re-resolves
+// what it needs. It runs through the notifier (below): on the game thread in the game. Registering
+// the same (row, function) pair again is a no-op. Any thread. Subscribe before the first read of
+// the row; a set in between is then delivered. A subscriber never sets a row: a SetValue or
+// ResetValue made synchronously on its own stack is refused, but a set it defers
+// (game_thread::Post) or hands to another thread is not, and loops inside one drain, so a
+// subscriber never posts or hands off a set either. On a client in a session, a set or reset of a
+// server-scope row changes the install's own hosting default and nothing the session sees (its
+// subscribers are still called and re-resolve the session's value). They are also called after
+// each put into the session layer and when the layer is emptied.
+void Subscribe(const config_registry::FlagRow& row, void (*onChange)());
+void Subscribe(const config_registry::IntRow& row, void (*onChange)());
+void Subscribe(const config_registry::FloatRow& row, void (*onChange)());
+void Subscribe(const config_registry::EnumRow& row, void (*onChange)());
+void Subscribe(const config_registry::StringRow& row, void (*onChange)());
+// Follow every REPLICATED server-scope row with one function: the session module's sender. Any
+// thread, once, at boot.
+void SubscribeServerScope(void (*onChange)());
+
+// How a change notification reaches its thread: `post` is handed a task that calls the row's
+// subscribers. The game wires it to the game thread's queue at boot; a process that sets none
+// has the subscribers called inside SetValue, on the setter's thread. Set once, before the first
+// SetValue.
+void SetNotifier(void (*post)(std::function<void()> task));
+
+// The SESSION layer: the session's value of every server-scope row (config_registry.h), above the
+// runtime layer while a session runs, on the host and on a client alike.
+//
+// A session opened. Any layer left by an earlier session is dropped first (a stale layer can only
+// mean a stop seam that was missed, so it is logged as a warning). On the host, every server-scope
+// row's value is read from the layers below the session (the runtime layer, the environment twin,
+// the ini, the default), sanitised (a value the reader would refuse, or too long for a replicated
+// row, becomes the row's default), held, logged `config: SESSION <key>=<v> (host start)` and
+// announced; a stale row the new layer does not hold again is announced too, so its subscribers
+// resolve the layer below. On a client the layer stays empty until the host's rows arrive. Any
+// thread.
+void SessionLayerBegin(bool host);
+// A server-scope row's session value from the wire (a length-carried value: the wire's bytes are
+// not NUL-terminated): validated as the reader validates, held, logged `(from the host)` and
+// its subscribers told; a value the reader would refuse, or one that arrives with no client session
+// running, is dropped with a warning. True when the value was held, false for either refusal. Game
+// thread (the receiver's).
+bool SessionLayerPut(const config_registry::Row* row, const std::string& text);
+// The session ended: the layer empties and the role is none, logged `config: SESSION cleared`;
+// every row it held tells its subscribers, so a consumer resolves the install's own value again.
+// Any thread. Idempotent: with nothing held and no role it logs nothing.
+void SessionLayerEnd();
+// Game thread: the notify rows whose resolved value changed since the last take, in the order first
+// marked; a session's begin and end clear them.
+std::vector<const config_registry::Row*> TakePendingAnnouncements();
+
+// The typed layered reads: Resolve(row) is the session's value of a server-scope row while a
+// session runs (the session layer), then a value set while the game runs (the runtime layer),
+// then the environment variable, then the ini value, then the row's default, validated
 // against the row's kind and range or tokens. One vocabulary for flags (1, true, yes, on and
 // their negations, case-insensitive); a number must parse whole and land in range; an enum must
 // match a token case-insensitively, and the canonical token is returned. Anything else, an
@@ -80,14 +175,31 @@ FailClosedRead ResolveFailClosed(const config_registry::FailClosedEnumRow& row, 
                                  std::string* refusedOut = nullptr,
                                  std::string* originOut = nullptr,
                                  IniFault* faultOut = nullptr);
-// Free strings: env, ini, row default, no validation.
+// Free strings: the session's value of a server-scope row while a session runs (the session layer),
+// then a value set while the game runs (the runtime layer), then the environment variable, then
+// the ini value, then the row default; no validation.
 std::string ResolveString(const config_registry::StringRow& row);
+// The text every Resolve of this row starts from: the top layer that answers, or the default as
+// text. Any thread.
+std::string EffectiveText(const config_registry::Row& row);
+// The census's rendering of `raw` as the row's resolved type -- a float `%.9g`, a flag `1`/`0` -- so
+// two spellings of one value render as one text.
+std::string ResolvedText(const config_registry::Row& row, const std::string& raw);
+// True when `row` is notify and its resolved value differs between the two raw texts.
+bool ShouldAnnounce(const config_registry::Row& row, const std::string& before,
+                    const std::string& after);
+// What a pane draws from EffectiveText, the readers' own steps exposed unchanged. FlagVerdict: 1 for
+// 1/true/yes/on, -1 for 0/false/no/off, 0 for anything else (a reader answers the row's default);
+// CookValue: the text cooked as the typed readers cook it, to compare with a row's tokens.
+int FlagVerdict(const std::string& raw);
+std::string CookValue(const std::string& raw);
 
-// The net Config from env and ini; `enabled` is true iff a host or client role is configured,
-// otherwise hands-on play stays single-machine.
+// The net Config from the runtime layer, env and ini; `enabled` is true iff a host or client role
+// is configured, otherwise hands-on play stays single-machine.
 coop::net::Config ReadNetConfig(bool& enabled);
 
-// The display nickname: env, then ini, then the registry's my-name default.
+// The display nickname: a value set while the game runs (the runtime layer), then the environment
+// variable, then the ini value, then the registry's my-name default.
 std::wstring ReadNickname();
 
 // The persisted body-skin choice (the ini's player_skin). Absent or invalid, the default is
@@ -110,7 +222,8 @@ bool ValueValidForKey(const char* key, const std::string& rawValue, std::string*
 // value equals `keepValue`, drop every other occurrence. Correlated by value, never by line
 // number, since the panel's snapshot ages and a stale index could delete the wrong copy of an
 // identity key; refused when no current line carries the value. The automatic write path never
-// deletes. An atomic swap.
+// deletes. An atomic swap. On success the key's runtime-layer value is dropped (the stored value
+// answers again) and its subscribers are notified.
 bool RemoveDuplicateKeyLines(const char* key, const char* keepValue);
 
 // The review panel's opt-in reformat, never automatic. It collapses value-identical duplicate
@@ -171,12 +284,6 @@ void MigrateRetiredIniValues();
 // This boot's generation outcome, plus the emitted key count when green.
 ExampleGen ExampleGenStatus(int* keyCountOut);
 
-// The selftest verification of a generated catalog: the detectors (grammar, wrap, exactly-once
-// in each direction, env-only, orphan, section placement) and the round trip (every copyable
-// line uncommented into `scratchPath`, through the one lexer, found and typed-equal to the row
-// defaults). Returns the failure count; each failure logs one catalog FAIL line.
-int SelftestExampleVerify(const std::wstring& examplePath, const std::wstring& scratchPath);
-
 // Identity and durability state, set during the boot mints: whether this launch's skin is
 // session-only (the ini was unreadable at the mint, or the persist failed), and the fault of
 // the last live-ini read that failed this launch (None while none did), in which case that read
@@ -189,36 +296,5 @@ IniFault LastIniFault();
 // False only when the ini or its env twin holds an explicit falsy `enabled`, the dev master
 // kill-switch; absent or garbage is true, and the granular switches decide.
 bool MasterEnabled();
-
-// The dev selftest seams: path-parameterised twins of the readers, the raw line list and a
-// failing-source scan, so the env-gated autotest runs the real lexer over corpus ini files and
-// proves the tri-state branches. Not for product use. `scan` codes: 0 ok, 1 absent, 2
-// unreadable (an open failure other than absence, a mid-stream read error, or bytes that are not
-// text), with `fault` saying which.
-struct IniSelftestRead {
-    int scan = 0;
-    IniFault fault = IniFault::None;
-    bool found = false;
-    std::string value;
-};
-IniSelftestRead SelftestReadValue(const std::wstring& path, const char* key);
-int SelftestFlagTriState(const std::wstring& path, const char* key);
-// The typed-resolver twins: the ini and default halves of the layered resolve over `path`, the
-// same per-kind validate and default cores as the live Resolve functions, with no env layer.
-// The env layer is drilled by its own control on the live resolver through a dedicated
-// env-twinned row.
-bool        SelftestResolveFlagAt(const std::wstring& path, const config_registry::FlagRow& row);
-long        SelftestResolveIntAt(const std::wstring& path, const config_registry::IntRow& row);
-float       SelftestResolveFloatAt(const std::wstring& path, const config_registry::FloatRow& row);
-std::string SelftestResolveEnumAt(const std::wstring& path, const config_registry::EnumRow& row);
-std::string SelftestResolveStringAt(const std::wstring& path, const config_registry::StringRow& row);
-FailClosedRead SelftestResolveFailClosedAt(const std::wstring& path,
-                                           const config_registry::FailClosedEnumRow& row,
-                                           std::string& out, IniFault* faultOut);
-int SelftestListLines(const std::wstring& path, std::vector<std::string>& out);
-int SelftestScanWithFailure(int failAfterLines);
-bool SelftestWriteValue(const std::wstring& path, const char* key, const char* value);
-bool SelftestRemoveDuplicates(const std::wstring& path, const char* key, const char* keepValue);
-bool SelftestReformat(const std::wstring& path, ReformatStats& stats);
 
 }  // namespace coop::config

@@ -30,10 +30,9 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-// Fork-experimental build (Shinobu2/Multivoid exp/untested): new kinds 165/166 and the burning pose bit
-// change the wire, so it must not meet a stock 209 peer. 20901 is outside the release ledger on purpose;
-// a release folding these changes in mints its own number there.
-inline constexpr uint16_t kProtocolVersion = 20901;
+// Experimental fork: kinds 173/174, the burning pose bit and ServerRepair's reward fields
+// extend stock 217. This cohort cannot meet stock 217 or the earlier fork 20901.
+inline constexpr uint16_t kProtocolVersion = 21701;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;
@@ -129,9 +128,11 @@ enum class MsgType : uint8_t {
 // 22, 24, 26, 29 and 138 stay unassigned; 32 and 128 are reserved.
 enum class ReliableKind : uint8_t {
     // Each peer to the other, once after admission: the sender's Player element id, then the nick,
-    // the skin, the display flags, the nick colour and the game target, parsed field by field. The
-    // receiver compares the game target with its own first and refuses the connection on a mismatch,
-    // before any identity side effect; then it establishes the mirror for the slot and names the puppet.
+    // the skin, the display flags, the nick colour, the game target and the build claim (the build's
+    // SHA-256, 32 bytes, then a flags byte whose bit 0 is "this build verified its own release
+    // signature"), parsed field by field. The receiver compares the game target with its own first
+    // and refuses the connection on a mismatch, before any identity side effect; a host then judges
+    // the build claim; then it establishes the mirror for the slot and names the puppet.
     Join = 1,
 
     // The holder released a held prop: the prop by key, the inherited linear and angular velocity,
@@ -405,8 +406,7 @@ enum class ReliableKind : uint8_t {
     WispTear = 68,
 
     // Client to host: the peer's serialized inventory, on change; the host persists it under the
-    // peer's guid. Host to client on join with the stored inventory. BlobChunkPayload on the Bulk
-    // lane; never relayed.
+    // peer's guid. Host to client on join with the stored inventory. BlobChunkPayload; never relayed.
     PlayerInventoryBlob = 69,
 
     // Client to host: a kerfur radial-menu verb for this kerfur. The host runs it; Follow follows
@@ -931,15 +931,60 @@ enum class ReliableKind : uint8_t {
     // presser alone with the state row (ServerState). Never relayed. ServerRepairPayload.
     ServerRepair = 164,
 
+    // Host to client: one server-scope setting of the session, a row named by its KEY (as Source names a
+    // replicated cvar on the wire by its name -- the SDK's SavedConvar message, gamerules.cpp:906-907;
+    // NET_SetConVar's format is the engine's) and its value as text. The join carries every replicated row when the
+    // slot is ready, a change carries each again. A flags byte precedes the text: bit 0 says the change is
+    // announced (a notify row's value changed), which the join never sets. A client never sends it. Never relayed.
+    // Pre-world. ServerSettingPayload.
+    ServerSetting = 165,
+
+    // Client to host: one chat line that began with `/`, the text after the slash, as a command for the host to run
+    // for the sender. The host answers with CommandReply lines to that client alone. Never relayed. Late join: none
+    // (a command carries no state). Trust: the host resolves the sender from the connection and checks its node; a
+    // client never acts on a CommandRequest. CommandRequestPayload.
+    CommandRequest = 166,
+
+    // Host to one client: one line answering that client's command, a private feed line that never enters the chat
+    // history; a command that can answer only later sends its line when it is ready. Never relayed. Pre-world: the
+    // answer to a line typed while loading still arrives. Late join: none. Trust: only the host sends it; a line
+    // from any other slot is dropped. CommandReplyPayload.
+    CommandReply = 167,
+
+    // host -> one client, not relayed, the host trusted: this machine's local dev grants
+    // (coop/session/grants_sync); a late joiner gets them at its proof
+    PermissionGrants = 168,
+
+    // Host to one client: set one row of that player's stat table, add a status effect or remove one. The owner
+    // applies it and answers with StatOrderReply, after its own fresh profile. Never relayed. Late join: none (the
+    // host sends only to a world-ready slot). Trust: a client takes it only from the host (slot 0); an order it
+    // cannot apply is answered, never dropped. StatOrderPayload.
+    StatOrder = 169,
+
+    // Client to host: what became of a StatOrder (its token, a result, the value now in force). Never relayed.
+    // Late join: none. Trust: the host takes it only from the slot its token went to, and checks every byte before
+    // using it. StatOrderReplyPayload.
+    StatOrderReply = 170,
+
+    // Host to one client: read the whole stat table and the effect list of that player. Never relayed. Late join:
+    // none (the host sends only to a world-ready slot). Trust: a client takes it only from the host (slot 0), one
+    // query outstanding per slot. StatQueryPayload.
+    StatQuery = 171,
+
+    // Client to host: the answer to a StatQuery under its token: every row's value with a mask of the rows that
+    // read, the first five effect entries and the effect total. Never relayed. Late join: none. Trust: as
+    // StatOrderReply. StatQueryReplyPayload.
+    StatQueryReply = 172,
+
     // Client to host: my player opened this point sack; the host pays the sack's own points from its copy
     // and destroys it, within the player's reach. Never relayed. PointSackRedeemPayload.
-    PointSackRedeem = 165,
+    PointSackRedeem = 173,
 
     // A fire on the sender's machine reached another peer's puppet there: that peer's own body is told, and runs
     // the same ignite verb on itself under the game's rules (chance, firesuit, water, its own damage loop). A
     // client's goes to the host, which applies it to its own player or forwards it to the named slot.
     // PlayerIgnitePayload.
-    PlayerIgnite = 166,
+    PlayerIgnite = 174,
 };
 
 #pragma pack(push, 1)
@@ -2000,6 +2045,27 @@ struct DeskPingVerdictPayload {
 static_assert(sizeof(DeskPingVerdictPayload) == 48, "DeskPingVerdictPayload must be 48 bytes");
 static_assert(sizeof(DeskPingVerdictPayload) <= 228, "DeskPingVerdictPayload must fit the inline reliable buffer");
 
+// A server-scope setting's session value (ServerSetting): a flags byte, then the row's key and its
+// value as text, `keyLen + valueLen` bytes of `text`, no terminator, sent as
+// `3 + keyLen + valueLen` bytes. Bit 0 of `flags` (kServerSettingAnnounced): the row is a notify row
+// whose value changed, so each peer prints one line; the receiver acts on that bit alone. The bit
+// means changed since the last take; a change undone inside one take still announces. Source raises
+// a separate server_cvar event (clientmode_shared.cpp:1235); here the bit rides the value, so the
+// line cannot overtake it. The two limits mirror config_registry::kServerSettingKeyMax (equal) and
+// kServerSettingTextMax (the registry's is at most this one), which this catalog cannot include; the
+// sender's file asserts it.
+inline constexpr uint8_t kServerSettingKeyMax  = 24;
+inline constexpr uint8_t kServerSettingTextMax = 200;
+inline constexpr uint8_t kServerSettingAnnounced = 0x01;
+struct ServerSettingPayload {
+    uint8_t keyLen;
+    uint8_t valueLen;
+    uint8_t flags;
+    char    text[kServerSettingKeyMax + kServerSettingTextMax];
+};
+static_assert(sizeof(ServerSettingPayload) == 227 && sizeof(ServerSettingPayload) <= 228,
+              "ServerSettingPayload must be 227 bytes and fit the inline reliable buffer");
+
 // The shared payload of the keyed monotone-decreasing dirt scalars (WindowCleanState, GrimeState):
 // the instance's identity string (a Key for a window, a quantized position for a grime decal), the
 // value, and adopt: 0 applies the minimum of local and wire, 1 (a host snapshot, trusted from slot
@@ -2675,6 +2741,34 @@ static_assert(sizeof(ChatMessagePayload) == 204, "ChatMessagePayload must be 204
 static_assert(sizeof(ChatMessagePayload) <= 256 - 20 - 8,
               "ChatMessagePayload must fit in one reliable datagram");
 
+// A command line a client sends the host (CommandRequest): the text after the `/`, UTF-8, length-prefixed, not
+// NUL-terminated. The sender is the transport's slot; the payload names no one.
+struct CommandRequestPayload {
+    uint8_t len;        // bytes used in text[] (0 < len <= sizeof(text))
+    char    text[203];  // the line after the slash, UTF-8
+};
+static_assert(sizeof(CommandRequestPayload) == 204, "CommandRequestPayload must be 204 bytes");
+static_assert(sizeof(CommandRequestPayload) <= 256 - 20 - 8,
+              "CommandRequestPayload must fit in one reliable datagram");
+
+// One reply line the host sends one client (CommandReply): UTF-8, length-prefixed, not NUL-terminated.
+struct CommandReplyPayload {
+    uint8_t len;        // bytes used in text[] (<= sizeof(text))
+    char    text[203];  // the line, UTF-8
+};
+static_assert(sizeof(CommandReplyPayload) == 204, "CommandReplyPayload must be 204 bytes");
+static_assert(sizeof(CommandReplyPayload) <= 256 - 20 - 8,
+              "CommandReplyPayload must fit in one reliable datagram");
+
+// PermissionGrantsPayload -- the receiving machine's own local dev grants (PermissionGrants). Host to one
+// client. `count` is the number of projected nodes the host's table holds, `bits` one bit per node in table
+// order (coop/permissions/grants_core.h); a client whose own table has another count refuses the message.
+struct PermissionGrantsPayload {
+    uint8_t  count;
+    uint32_t bits;
+};
+static_assert(sizeof(PermissionGrantsPayload) == 5, "PermissionGrantsPayload must be 5 bytes");
+
 // ChatSpeakerPayload -- WHO the ChatLine that immediately follows is from
 // (ChatSpeaker). Host to client only.
 //
@@ -3267,6 +3361,73 @@ struct JoinPhaseNotePayload {
     uint32_t total;
 };
 static_assert(sizeof(JoinPhaseNotePayload) == 12, "JoinPhaseNotePayload must be 12 bytes");
+
+// The admin's order and query of one player's stats and effects (StatOrder, StatOrderReply, StatQuery
+// and StatQueryReply). The packing, every check of a client's answer and the table of the tokens
+// awaiting an answer live in coop/player/stat_orders_wire; an order is judged by the client that
+// takes it, which answers Refused and never drops it.
+constexpr int kStatRows = 22;        // the stat table's rows (ue_wrap::vitals::Field::Count), carried by a query reply
+constexpr int kStatEffectName = 12;  // an effect name: up to 11 ASCII characters and a NUL
+
+// Host to one client: set a row, add an effect or remove one. `token` is the host's, echoed in the reply.
+struct StatOrderPayload {
+    uint32_t token;
+    uint8_t  op;       // stat_orders::Op
+    uint8_t  field;    // the stat table's row, for a set
+    uint16_t pad;
+    float    value;    // a set's value
+    float    strength; // an added effect's strength
+    float    seconds;  // an added effect's seconds
+    char     effect[kStatEffectName];
+};
+static_assert(sizeof(StatOrderPayload) == 32, "StatOrderPayload must be 32 bytes");
+static_assert(sizeof(StatOrderPayload) <= 256 - 20 - 8,
+              "StatOrderPayload must fit in one reliable datagram");
+
+// Client to host: what became of the order. `valueNow` is the row's read after the write, or the
+// number of live entries of the effect's name listed after.
+struct StatOrderReplyPayload {
+    uint32_t token;
+    uint8_t  result;   // stat_orders::Result, 0-3 on the wire
+    uint8_t  op;
+    uint16_t pad;
+    float    valueNow;
+};
+static_assert(sizeof(StatOrderReplyPayload) == 12, "StatOrderReplyPayload must be 12 bytes");
+static_assert(sizeof(StatOrderReplyPayload) <= 256 - 20 - 8,
+              "StatOrderReplyPayload must fit in one reliable datagram");
+
+// Host to one client: send the whole stat table and the effects.
+struct StatQueryPayload {
+    uint32_t token;
+};
+static_assert(sizeof(StatQueryPayload) == 4, "StatQueryPayload must be 4 bytes");
+static_assert(sizeof(StatQueryPayload) <= 256 - 20 - 8,
+              "StatQueryPayload must fit in one reliable datagram");
+
+struct StatEffectEntry {
+    char     name[kStatEffectName];
+    float    strength;
+    float    time;
+    uint8_t  live;
+};
+static_assert(sizeof(StatEffectEntry) == 21, "StatEffectEntry must be 21 bytes");
+
+// Client to host: every row's value with a mask of the rows that read, the first five effect
+// entries and the total. 23 bytes are left: five more rows (row 27); a 28th row changes this layout.
+struct StatQueryReplyPayload {
+    uint32_t token;
+    uint32_t validMask;               // bit i: row i read
+    float    values[kStatRows];
+    uint8_t  effectTotal;             // the effects listed, clamped to 255
+    uint8_t  effectCount;             // the entries below
+    uint8_t  result;                  // stat_orders::Result, 0-3 on the wire
+    uint8_t  pad;
+    StatEffectEntry effects[5];
+};
+static_assert(sizeof(StatQueryReplyPayload) == 205, "StatQueryReplyPayload must be 205 bytes");
+static_assert(sizeof(StatQueryReplyPayload) <= 256 - 20 - 8,
+              "StatQueryReplyPayload must fit in one reliable datagram");
 
 #pragma pack(pop)
 

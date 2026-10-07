@@ -37,14 +37,17 @@ struct Row {
     // never reused within a session. 0 only out of session (see kNoPlayerNo).
     // Deliberately NOT the slot: slots recycle, IDs do not.
     unsigned short playerNo = 0;
-    // The occupancy generation this row was born from (HOST-side; 0 on a client
-    // and out of session). Never displayed and never sent -- it exists so a
-    // destructive action captured off this snapshot can be validated against the
-    // live net-layer authority at execution time. See coop::moderation::PlayerToken.
-    unsigned int   generation = 0;
+    // The occupant's proved player id (32 lower-case hex), the name a moderation command line
+    // addresses a person by and the name a permission file is stored under. Filled by the HOST's
+    // publisher from the ledger (slot 0: the local id); empty when the proof has not landed, on a
+    // client (it never learns other players' ids) and out of session.
+    char playerId[33] = {};
     bool isLocal = false;    // this row is YOU
     bool isHost  = false;    // this row's peer is the host (slot 0)
     bool connected = false;
+    // Host only: this player was admitted under net.allow_other_builds with another build. False on a
+    // client and for the host's own row.
+    bool otherBuild = false;
     // BOTH connection facts are the HOST's measurement, republished on RosterRow.
     // They answer ONE question -- "how is THIS PLAYER connected to the session" --
     // rather than "how do I reach them", so no row is special-cased by what the

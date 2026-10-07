@@ -5,11 +5,12 @@
 #include "coop/moderation/ban_list.h"
 #include "coop/moderation/seen_players.h"
 #include "coop/session/teleport_client.h"
+#include "coop/net/link_kind.h"
 #include "coop/net/session.h"
 #include "coop/player/roster_ledger.h"
 #include "coop/player/players_registry.h"
 #include "coop/text/utf8_codec.h"
-#include "ue_wrap/core/game_thread.h"
+#include "ue_wrap/core/hot_path_guard.h"
 #include "ue_wrap/core/log.h"
 
 #include <windows.h>
@@ -19,25 +20,34 @@
 
 namespace coop::moderation {
 
-namespace GT = ue_wrap::game_thread;
-
 namespace {
 
 std::atomic<coop::net::Session*> g_session{nullptr};
 
-// Resolve the Session iff we are the host. Returns nullptr (and logs) otherwise,
-// so every action is a no-op off-host.
-coop::net::Session* HostSession(const char* action) {
+// The session iff it is running and hosted, else null: the one place the question is answered.
+coop::net::Session* HostedSession() {
     auto* s = g_session.load(std::memory_order_acquire);
-    if (!s || s->role() != coop::net::Role::Host) {
-        UE_LOGI("moderation: %s ignored -- host-only (local role is not Host)", action);
-        return nullptr;
-    }
+    if (s == nullptr || !s->running() || s->role() != coop::net::Role::Host) return nullptr;
     return s;
 }
 
-bool ValidClientSlot(int slot) {
-    return slot >= 1 && slot < static_cast<int>(coop::players::kMaxPeers);
+// Resolve the hosted session, or null with a log line, so every action is a no-op outside one.
+coop::net::Session* HostSession(const char* action) {
+    auto* s = HostedSession();
+    if (!s) UE_LOGI("moderation: %s ignored -- no running hosted session", action);
+    return s;
+}
+
+// The text a verb stores and sends: the typed reason, else the constant that stands in.
+std::string ReasonOr(const char* reason, const char* fallback) {
+    return (reason && reason[0]) ? std::string(reason) : std::string(fallback);
+}
+
+std::string LowerAscii(const char* s) {
+    std::string out(s ? s : "");
+    for (char& c : out)
+        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + ('a' - 'A'));
+    return out;
 }
 
 }  // namespace
@@ -46,109 +56,157 @@ void SetSession(coop::net::Session* session) {
     g_session.store(session, std::memory_order_release);
 }
 
-void KickPlayer(const PlayerToken& token) {
-    if (!token.valid()) return;
-    GT::Post([token] {
-        auto* s = HostSession("kick");
-        if (!s) return;
-        if (s->KickWithToken(token.slot, token.generation, coop::net::EndReason::KickedByHost,
-                             "kicked by host"))
-            UE_LOGI("moderation: kicked #%u (slot %d)",
-                    static_cast<unsigned>(token.playerNo), token.slot);
-        else
-            UE_LOGW("moderation: kick of #%u (slot %d) did nothing -- they are already "
-                    "gone, or someone else now holds that slot",
-                    static_cast<unsigned>(token.playerNo), token.slot);
-    });
+bool HostedSessionRunning() { return HostedSession() != nullptr; }
+
+std::string EnforceableAddress(const coop::net::Session& s, int slot, uint32_t generation) {
+    char a[64] = {};
+    if (!s.GetPeerAddressWithToken(slot, generation, a, sizeof(a))) return {};
+    if (!coop::ban_list::IsBannableAddress(a)) return {};
+    const coop::net::LinkKind kind = s.LinkKindForSlot(slot);
+    if (kind != coop::net::LinkKind::Lan && kind != coop::net::LinkKind::Direct) return {};
+    // The kind read is not token-gated: the slot must still be the same occupancy after it.
+    if (s.peerGenerationForSlot(slot) != generation) return {};
+    return a;
 }
 
-void BanPlayer(const PlayerToken& token, const char* reason) {
-    if (!token.valid()) return;
-    GT::Post([token, reason = std::string(reason ? reason : "")] {
-        auto* s = HostSession("ban");
-        if (!s) return;
-        // Capture the IP + nick BEFORE the kick -- Kick() zeroes the slot, after
-        // which the address can no longer be resolved. BOTH reads are token-gated:
-        // reading the successor's address and writing it to the permanent banlist
-        // is exactly the failure this path exists to prevent.
-        char ip[64] = {};
-        const bool haveIp = s->GetPeerAddressWithToken(token.slot, token.generation,
-                                                       ip, sizeof(ip));
-        char nick[coop::text::kNickBufBytes] = {};
-        coop::text::CopyUtf8ToBuffer(nick, coop::roster_ledger::Get(token.slot).nick);
-
-        // ABORT before writing anything if the captured player is gone. A ban is
-        // permanent and IP-keyed; applying it to whoever inherited the seat would
-        // be both wrong and effectively irreversible for them.
-        if (coop::roster_ledger::Get(token.slot).playerNo != token.playerNo) {
-            UE_LOGW("moderation: ban of #%u ABORTED -- slot %d now holds #%u",
-                    static_cast<unsigned>(token.playerNo), token.slot,
-                    static_cast<unsigned>(coop::roster_ledger::Get(token.slot).playerNo));
-            return;
-        }
-
-        if (haveIp && ip[0]) {
-            coop::ban_list::Add(ip, nick, reason.c_str());
-        } else {
-            // No resolvable IP (already disconnected, or GNS has no remote addr):
-            // still kick, but we can't persist a ban. Surface it rather than
-            // silently doing a kick-shaped no-ban.
-            UE_LOGW("moderation: ban #%u (slot %d) -- no resolvable IP, kicking WITHOUT "
-                    "a persistent ban", static_cast<unsigned>(token.playerNo), token.slot);
-        }
-        // The typed reason rides the close as its text, so the banned player reads it under the
-        // code; the constant stands in when none was typed.
-        const char* why = reason.empty() ? "banned by host" : reason.c_str();
-        if (!s->KickWithToken(token.slot, token.generation, coop::net::EndReason::BannedByHost, why))
-            UE_LOGW("moderation: ban #%u -- kick did nothing (already gone?)",
-                    static_cast<unsigned>(token.playerNo));
-        else
-            UE_LOGI("moderation: banned + kicked #%u (slot %d, ip=%s)",
-                    static_cast<unsigned>(token.playerNo), token.slot, ip[0] ? ip : "?");
-    });
+ModResult KickPlayer(const PlayerToken& token, const char* reason) {
+    UE_ASSERT_GAME_THREAD("moderation::KickPlayer");
+    auto* s = HostSession("kick");
+    if (!s) return ModResult::NoSession;
+    if (!token.valid()) return ModResult::Gone;
+    // The ledger's player number, as in the ban and the teleport: a slot whose roster row moved on
+    // while the net layer's generation still matches is another player's seat.
+    if (coop::roster_ledger::Get(token.slot).playerNo != token.playerNo) {
+        UE_LOGW("moderation: kick of #%u skipped -- slot %d changed hands",
+                static_cast<unsigned>(token.playerNo), token.slot);
+        return ModResult::Gone;
+    }
+    const std::string why = ReasonOr(reason, kKickDefaultReason);
+    if (!s->KickWithToken(token.slot, token.generation, coop::net::EndReason::KickedByHost,
+                          why.c_str())) {
+        UE_LOGW("moderation: kick of #%u (slot %d) did nothing -- they are already "
+                "gone, or someone else now holds that slot",
+                static_cast<unsigned>(token.playerNo), token.slot);
+        return ModResult::Gone;
+    }
+    UE_LOGI("moderation: kicked #%u (slot %d)", static_cast<unsigned>(token.playerNo), token.slot);
+    return ModResult::Done;
 }
 
-void BanOffline(const char* guid, const char* reason) {
-    if (!guid || !guid[0]) return;
-    GT::Post([guid = std::string(guid), reason = std::string(reason ? reason : "")] {
-        auto* s = HostSession("offline ban");
-        if (!s) return;
-        coop::seen_players::Entry e;
-        if (!coop::seen_players::FindByGuid(guid.c_str(), e)) {
-            UE_LOGW("moderation: offline ban -- unknown GUID %s", guid.c_str());
-            return;
-        }
-        if (!e.ip[0]) {
-            // A record without an IP has nothing the accept filter can enforce
-            // against. Surface it rather than writing a no-op ban row.
-            UE_LOGW("moderation: offline ban '%s' -- record has no stored IP, cannot ban",
-                    e.nick);
-            return;
-        }
-        coop::ban_list::Add(e.ip, e.nick, reason.c_str());
-        UE_LOGI("moderation: offline-banned '%s' (ip=%s)", e.nick, e.ip);
-    });
+ModResult BanPlayer(const PlayerToken& token, const char* reason, bool byAddress) {
+    UE_ASSERT_GAME_THREAD("moderation::BanPlayer");
+    auto* s = HostSession("ban");
+    if (!s) return ModResult::NoSession;
+    // The generation FIRST, before the proved id or the ledger is read: a stale token (the seat
+    // changed hands) is Gone without touching anything that now describes the successor.
+    if (!token.valid() || s->peerGenerationForSlot(token.slot) != token.generation) {
+        UE_LOGW("moderation: ban of #%u ABORTED -- slot %d no longer holds that player, or "
+                "their identity proof has not landed",
+                static_cast<unsigned>(token.playerNo), token.slot);
+        return ModResult::Gone;
+    }
+    // The proved id, token-gated: it is the ban's key, and reading a successor's id and writing it
+    // to the permanent list is exactly the failure this path exists to prevent. Read before the
+    // kick, which clears the slot.
+    const std::string id = s->ProvedGuidForSlotWithToken(token.slot, token.generation);
+    if (id.empty()) {
+        UE_LOGW("moderation: ban of #%u refused -- slot %d has no proved identity yet",
+                static_cast<unsigned>(token.playerNo), token.slot);
+        return ModResult::NoId;
+    }
+    char nick[coop::text::kNickBufBytes] = {};
+    coop::text::CopyUtf8ToBuffer(nick, coop::roster_ledger::Get(token.slot).nick);
+
+    // The second abort: the ledger's player number, for a slot whose roster row moved on while
+    // the net layer's generation still matches.
+    if (coop::roster_ledger::Get(token.slot).playerNo != token.playerNo) {
+        UE_LOGW("moderation: ban of #%u ABORTED -- slot %d now holds #%u",
+                static_cast<unsigned>(token.playerNo), token.slot,
+                static_cast<unsigned>(coop::roster_ledger::Get(token.slot).playerNo));
+        return ModResult::Gone;
+    }
+
+    const std::string address =
+        byAddress ? EnforceableAddress(*s, token.slot, token.generation) : std::string();
+    // The typed reason rides the close as its text, so the banned player reads it under the code;
+    // the constant stands in when none was typed, and is what the record stores.
+    const std::string why = ReasonOr(reason, kBanDefaultReason);
+    if (!coop::ban_list::Add(id.c_str(), nick, address.c_str(), why.c_str())) return ModResult::NoId;
+    // Accepted window: the banned player's re-proof over a second connection, whose ban check
+    // ran on the net thread just before the Add above, is seated for this session. MTA has
+    // none: its join packets are queued by the sync thread and handled on the main thread
+    // that also runs its bans (CNetBuffer.cpp:1289-1294, :932-952). Ours proves on the net
+    // thread and runs the verbs on the game thread.
+    if (!s->KickWithToken(token.slot, token.generation, coop::net::EndReason::BannedByHost,
+                          why.c_str()))
+        UE_LOGW("moderation: ban #%u -- kick did nothing (already gone?)",
+                static_cast<unsigned>(token.playerNo));
+    else
+        UE_LOGI("moderation: banned + kicked #%u (slot %d, id %.8s..., address %s)",
+                static_cast<unsigned>(token.playerNo), token.slot, id.c_str(),
+                address.empty() ? "not enforced" : ue_wrap::log::Addr(address).c_str());
+    return ModResult::Done;
 }
 
-void Unban(const char* ip) {
-    if (!ip || !ip[0]) return;
-    if (!coop::ban_list::Remove(ip))
-        UE_LOGW("moderation: unban %s -- was not banned", ip);
+ModResult BanOffline(const char* id, const char* reason, bool byAddress) {
+    UE_ASSERT_GAME_THREAD("moderation::BanOffline");
+    auto* s = HostSession("offline ban");
+    if (!s) return ModResult::NoSession;
+    const std::string guid = LowerAscii(id);
+    coop::seen_players::Entry e;
+    const bool known = coop::seen_players::FindByGuid(guid.c_str(), e);
+    // The record's last address, only when it can name one machine: an old record's "::" or
+    // loopback is dropped. An id with no record is banned by id alone.
+    const std::string address =
+        (known && byAddress && coop::ban_list::IsBannableAddress(e.ip)) ? std::string(e.ip)
+                                                                        : std::string();
+    const std::string why = ReasonOr(reason, kBanDefaultReason);
+    if (!coop::ban_list::Add(guid.c_str(), known ? e.nick : "", address.c_str(), why.c_str()))
+        return ModResult::NoId;
+    UE_LOGI("moderation: offline-banned '%s' (id %.8s..., address %s)", known ? e.nick : "",
+            guid.c_str(), address.empty() ? "not enforced" : ue_wrap::log::Addr(address).c_str());
+    // A matching player still seated goes too. MTA's AddBan also kicks every seated player
+    // matching the ban's IP (CStaticFunctionDefinitions.cpp:12157-12170); ours kicks the banned
+    // id only, so bystanders at a shared address keep their session and meet the refusal at
+    // their next proof (the named cost of an address key, undone by Unban).
+    // Accepted window, both conditions at once: a joiner whose ban check ran on the net
+    // thread just before the Add above AND whose id is published just after this scan is
+    // seated for this session. MTA has none: its join packets are queued by the sync thread
+    // and handled on the main thread that also runs its bans (CNetBuffer.cpp:1289-1294,
+    // :932-952). Ours proves on the net thread and runs the verbs on the game thread.
+    for (int k = 1; k < static_cast<int>(coop::players::kMaxPeers); ++k) {
+        const uint32_t gen = s->peerGenerationForSlot(k);
+        if (gen != 0 && s->ProvedGuidForSlotWithToken(k, gen) == guid)
+            s->KickWithToken(k, gen, coop::net::EndReason::BannedByHost, why.c_str());
+    }
+    return ModResult::Done;
 }
 
-void TeleportPlayerToMe(const PlayerToken& token) {
-    if (!token.valid()) return;
-    // teleport_client self-gates on host + posts to the game thread itself. The
-    // token is re-checked there, on the game thread, where the ledger is legal to
-    // read -- a slot whose occupant changed teleports nobody.
-    GT::Post([token] {
-        if (coop::roster_ledger::Get(token.slot).playerNo != token.playerNo) {
-            UE_LOGW("moderation: teleport of #%u skipped -- slot %d changed hands",
-                    static_cast<unsigned>(token.playerNo), token.slot);
-            return;
-        }
-        coop::teleport_client::TeleportSlotToHost(token.slot);
-    });
+ModResult Unban(const char* playerId) {
+    UE_ASSERT_GAME_THREAD("moderation::Unban");
+    if (!HostSession("unban")) return ModResult::NoSession;
+    return coop::ban_list::Remove(playerId) ? ModResult::Done : ModResult::NotBanned;
+}
+
+ModResult TeleportPlayerToMe(const PlayerToken& token) {
+    UE_ASSERT_GAME_THREAD("moderation::TeleportPlayerToMe");
+    auto* s = HostSession("teleport");
+    if (!s) return ModResult::NoSession;
+    if (!token.valid() || s->peerGenerationForSlot(token.slot) != token.generation ||
+        coop::roster_ledger::Get(token.slot).playerNo != token.playerNo) {
+        UE_LOGW("moderation: teleport of #%u skipped -- slot %d changed hands",
+                static_cast<unsigned>(token.playerNo), token.slot);
+        return ModResult::Gone;
+    }
+    if (!coop::teleport_client::TeleportSlotToHostWithToken(token.slot, token.generation)) {
+        // A seat that changed hands since the check above is Gone; otherwise the host's own pose
+        // could not be read, and nothing was sent.
+        if (s->peerGenerationForSlot(token.slot) != token.generation) return ModResult::Gone;
+        UE_LOGW("moderation: teleport of #%u failed -- the host's pose could not be read",
+                static_cast<unsigned>(token.playerNo));
+        return ModResult::Failed;
+    }
+    return ModResult::Done;
 }
 
 }  // namespace coop::moderation
