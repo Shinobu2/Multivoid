@@ -336,7 +336,9 @@ void PrimeQuadIfLaptop(FS::DeviceKind kind) {
 // does not cancel it, since the content is already right and only the look is behind. Bounded per slot.
 struct LookPending { void* device = nullptr; int32_t idx = -1; uint32_t tries = 0; };
 std::map<uint32_t, LookPending> g_lookPending;   // ShadowKey -> device
-constexpr uint32_t kLookTries = 600;             // about ten seconds of ticks
+constexpr uint32_t kLookTries = 100;             // ten seconds at kLookRetryMs
+constexpr uint64_t kLookRetryMs = 100;
+uint64_t g_nextLookTry = 0;
 
 void NoteLook(FS::DeviceKind kind, size_t index, void* device, bool drawn) {
     const uint32_t key = ShadowKey(kind, index);
@@ -604,11 +606,14 @@ void Install(coop::net::Session* session) {
 }
 
 void Tick() {
-    RetryLooks();
     if (!GT::IsGameThread()) return;
     auto* s = g_session.load(std::memory_order_acquire);
     if (!s || !s->connected()) return;
     const uint64_t now = NowMs();
+    if (now >= g_nextLookTry) {          // the look redraws, a tenth of a second apart
+        g_nextLookTry = now + kLookRetryMs;
+        RetryLooks();
+    }
     if (now < g_nextSweep) return;
     g_nextSweep = now + kSweepMs;
 

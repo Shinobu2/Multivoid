@@ -301,7 +301,10 @@ Take HostTakeClientRow(coop::net::Session* s, uint32_t eid, void* actor, const S
     if (!DC::ReadDriveRow(actor, mine)) return Take::WriteFailed;
     if (author == g_brought.end() || author->second.slot != senderSlot || author->second.ref.Get() != actor)
         why = "not a drive that client brought";
-    else if (!IsClassDefault(actor, Hash(mine))) why = "the host already holds a row for it";
+    // A retry of this drive's own failed write may find the drive part-written by that write; only a
+    // first attempt asks for the class default.
+    else if (g_writeFails.find(eid) == g_writeFails.end() && !IsClassDefault(actor, Hash(mine)))
+        why = "the host already holds a row for it";
     else if (!RowSane(row)) why = "a row with a non-finite or negative amount";
     if (why) {
         SendBytes(s, eid, Bytes(mine), senderSlot);
@@ -316,7 +319,10 @@ Take HostTakeClientRow(coop::net::Session* s, uint32_t eid, void* actor, const S
         coop::desk_snd_fx::ScopedWireApply guard;
         SD::Row landed;
         if (!DC::WriteDriveRow(actor, row) || !DC::ReadDriveRow(actor, landed) || Hash(landed) != Hash(row)) {
-            DC::WriteDriveRow(actor, mine);
+            SD::Row back;
+            if (!DC::WriteDriveRow(actor, mine) || !DC::ReadDriveRow(actor, back) || Hash(back) != Hash(mine))
+                UE_LOGW("drive_payload_sync: eid=%u -- the failed write's rollback did not land either; the retry "
+                        "rewrites it", eid);
             return Take::WriteFailed;
         }
         DC::CallDriveUpd(actor);

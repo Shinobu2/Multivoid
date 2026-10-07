@@ -30,7 +30,10 @@ inline constexpr uint32_t kMagic = 0x564D5450u;
 // This file is past the 1500-line hard cap and stays there: it is the single-feature exception the
 // rule names. One wire format, whose enum, payload structs and static_asserts are read together;
 // splitting it would put a kind's number in one file and its bytes in another.
-inline constexpr uint16_t kProtocolVersion = 209;
+// Fork-experimental build (Shinobu2/Multivoid exp/untested): new kinds 165/166 and the burning pose bit
+// change the wire, so it must not meet a stock 209 peer. 20901 is outside the release ledger on purpose;
+// a release folding these changes in mints its own number there.
+inline constexpr uint16_t kProtocolVersion = 20901;
 
 // Default LAN port (overridable via multivoid.ini "net.port=").
 inline constexpr uint16_t kDefaultPort = 47621;

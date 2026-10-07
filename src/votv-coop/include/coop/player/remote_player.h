@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include <chrono>
+
 #include "coop/element/lerp_window.h"
 #include "coop/net/protocol.h"
 #include "coop/player/puppet_body_yaw.h"
@@ -205,7 +207,8 @@ private:
     // component, switched on and off; never ignite, its damage loop, its 2D pain sound or its camera
     // turn, which are the owner's. Re-asserted while the bit holds, so a respawned body shows it again.
     bool             burningShown_ = false;
-    uint32_t         burningReassert_ = 0;
+    bool             burningTried_ = false;   // a switch to the other state was attempted and not yet taken
+    std::chrono::steady_clock::time_point burningNextTry_{};
     ue_wrap::FVector targetPos_{};
     float            targetYaw_ = 0.f;
     float            targetPitch_ = 0.f;

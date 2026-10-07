@@ -388,9 +388,15 @@ void RemotePlayer::SetRagdollPose(const coop::net::RagdollPoseSnapshot& snap) {
 }
 
 void RemotePlayer::ShowBurning(bool burning) {
-    // An edge switches the flame; a held bit re-asserts it about once a second (poses arrive at the
-    // stream rate), which covers a body whose components were rebuilt.
-    if (burning == burningShown_ && (!burning || ++burningReassert_ % 30 != 0)) return;
+    // The wanted state is the owner's bit; the shown state changes only when the flame switch
+    // succeeded. Either direction is retried about once a second until it takes, and a held ON is
+    // re-asserted at the same cadence, which covers a body whose components were rebuilt.
+    const auto now = std::chrono::steady_clock::now();
+    const bool due = now >= burningNextTry_;
+    if (burning == burningShown_ && !(burning && due)) return;
+    if (burning != burningShown_ && !due && burningTried_) return;
+    burningNextTry_ = now + std::chrono::seconds(1);
+    burningTried_ = true;
     if (!actor_ || !R::IsLiveByIndex(actor_, internalIdx_)) return;
     static void* sCls = nullptr;
     static int32_t sOffEffect = -1;
@@ -399,9 +405,11 @@ void RemotePlayer::ShowBurning(bool burning) {
     if (sOffEffect < 0) return;
     void* effect = *reinterpret_cast<void**>(static_cast<uint8_t*>(actor_) + sOffEffect);
     if (!effect || !R::IsLive(effect)) return;
-    ue_wrap::component_calls::SetActive(effect, burning, /*reset=*/false);
-    if (burning != burningShown_)
+    if (!ue_wrap::component_calls::SetActive(effect, burning, /*reset=*/false)) return;
+    if (burning != burningShown_) {
         UE_LOGI("remote_player: puppet %p flame %s (its owner's burning bit)", actor_, burning ? "on" : "off");
+        burningTried_ = false;
+    }
     burningShown_ = burning;
 }
 

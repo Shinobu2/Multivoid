@@ -240,12 +240,13 @@ sg::Verdict OnMirrorActionNamePre(const sg::Call& c) {
     static int32_t sOff = -1;
     if (c.function != sFn) { sFn = c.function; sOff = R::FindParamOffset(c.function, L"name"); }
     if (sOff < 0) return sg::Verdict::Run;
-    std::wstring name;
-    {
-        R::FName n{};
-        std::memcpy(&n, c.locals + sOff, sizeof(n));
-        name = R::ToString(n);
-    }
+    // actionName's `name` is an FString (the 16-byte TArray<wchar_t> {Data, Num, Max}), as
+    // kerfur_convert reads it: bounded, memory reads only.
+    const uint8_t* base = c.locals + sOff;
+    const auto* data = *reinterpret_cast<const wchar_t* const*>(base);
+    const int32_t num = *reinterpret_cast<const int32_t*>(base + 8);
+    if (!data || num <= 1 || num > 256) return sg::Verdict::Run;  // Num includes the terminator
+    const std::wstring name(data, static_cast<size_t>(num - 1));
     if (name != L"get_reports") return sg::Verdict::Run;
     UE_LOGI("kerfur_command: refused get_reports reaching an Omega's body on this client -- the host runs it");
     return sg::Verdict::Cancel;

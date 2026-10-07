@@ -112,8 +112,11 @@ void OnRedeem(coop::net::Session& session, const coop::net::PointSackRedeemPaylo
         return;
     }
     // Key first, as a sale resolves its prop: the eid is the keyless fallback. Index only, no walk.
-    void* sack = key.empty() ? nullptr : coop::prop_element_tracker::FindLiveActorByKey(key);
-    if (!sack && p.elementId != 0u) sack = EL::LivePropActor(static_cast<EL::ElementId>(p.elementId));
+    // A named key that does not resolve is that sack gone; it never falls back to the eid, which may
+    // name another prop by now. Only a keyless sack is named by its eid.
+    void* sack = nullptr;
+    if (!key.empty()) sack = coop::prop_element_tracker::FindLiveActorByKey(key);
+    else if (p.elementId != 0u) sack = EL::LivePropActor(static_cast<EL::ElementId>(p.elementId));
     // No sack is the ordinary end of a second request, or of two players opening one sack.
     if (!sack) { Refuse(senderSlot, key, p.elementId, "no such sack here -- already opened"); return; }
     if (!IsSack(sack)) { Refuse(senderSlot, key, p.elementId, "not a point sack"); return; }
@@ -129,9 +132,19 @@ void OnRedeem(coop::net::Session& session, const coop::net::PointSackRedeemPaylo
     if (sOffPoints < 0) { Refuse(senderSlot, key, p.elementId, "the sack's points did not resolve"); return; }
     int32_t points = 0;
     std::memcpy(&points, static_cast<const uint8_t*>(sack) + sOffPoints, sizeof(points));
-    // Destroyed first, so no second request can reach it; the destroy seam sends it to every peer.
-    ue_wrap::engine::DestroyActor(sack);
-    ue_wrap::economy::AddPoints(points);
+    // Consumed once: the sack is destroyed first and paid only if it really went, so a destroy that
+    // failed leaves it for a later request instead of paying for a sack that is still there. The
+    // destroy seam sends the destroy to every peer.
+    const int32_t idx = R::InternalIndexOf(sack);
+    if (!ue_wrap::engine::DestroyActor(sack) && R::IsLiveByIndex(sack, idx)) {
+        Refuse(senderSlot, key, p.elementId, "the sack's destroy did not run -- not paid");
+        return;
+    }
+    if (!ue_wrap::economy::AddPoints(points)) {
+        UE_LOGW("point_sack: slot %u's sack key='%ls' was consumed but the payment of %d did not run", senderSlot,
+                key.c_str(), points);
+        return;
+    }
     ++g_paid;
     UE_LOGI("point_sack: HOST paid slot %u's sack key='%ls' eid=%u: %+d (%llu paid)", senderSlot, key.c_str(),
             p.elementId, points, static_cast<unsigned long long>(g_paid));

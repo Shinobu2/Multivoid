@@ -517,6 +517,7 @@ void DeferSpawn(const std::wstring& key, const coop::net::AtvSpawnPayload& paylo
         if (g_pendingSpawn.size() >= kSpawnPendingCap) return;
         it = g_pendingSpawn.emplace(key, PendingSpawn{payload, 0, 0}).first;
     }
+    it->second.payload = payload;   // the newest description of this ATV wins
     PendingSpawn& p = it->second;
     if (++p.tries > kSpawnTries) {
         UE_LOGW("atv: runtime-ATV synthKey='%ls' still not spawned after %u tries (%s) -- given up", key.c_str(),
@@ -535,6 +536,19 @@ void OnAtvSpawn(const coop::net::AtvSpawnPayload& payload, uint8_t /*senderPeerS
     if (!s || s->role() == coop::net::Role::Host) return;  // client-only (the host owns the real ATV)
     std::wstring synthKey = StringFromWireKey(payload.synthKey);
     if (synthKey.empty()) { UE_LOGW("atv: OnAtvSpawn empty synthKey -- dropping"); return; }
+    // The payload is checked before any wait: a malformed spawn is dropped, only a sound one is deferred.
+    if (!std::isfinite(payload.x) || !std::isfinite(payload.y) || !std::isfinite(payload.z) ||
+        !std::isfinite(payload.pitch) || !std::isfinite(payload.yaw) || !std::isfinite(payload.roll)) {
+        UE_LOGW("atv: OnAtvSpawn non-finite pose synthKey='%ls' -- dropping", synthKey.c_str());
+        g_pendingSpawn.erase(synthKey);  // a malformed spawn is final, never retried
+        return;
+    }
+    std::wstring className = WireClassNameToString(payload.className);
+    if (className.empty()) {
+        UE_LOGW("atv: OnAtvSpawn empty className synthKey='%ls' -- dropping", synthKey.c_str());
+        g_pendingSpawn.erase(synthKey);
+        return;
+    }
     if (!A::EnsureResolved()) { DeferSpawn(synthKey, payload, "the ATV wrapper is not resolved"); return; }
     auto known = g_atvs.find(synthKey);
     if (known != g_atvs.end()) {
@@ -542,13 +556,6 @@ void OnAtvSpawn(const coop::net::AtvSpawnPayload& payload, uint8_t /*senderPeerS
         if (known->second.actor) g_synthForActor.erase(known->second.actor);
         g_atvs.erase(known);   // a dead row is not "already spawned"
     }
-    if (!std::isfinite(payload.x) || !std::isfinite(payload.y) || !std::isfinite(payload.z) ||
-        !std::isfinite(payload.pitch) || !std::isfinite(payload.yaw) || !std::isfinite(payload.roll)) {
-        UE_LOGW("atv: OnAtvSpawn non-finite pose synthKey='%ls' -- dropping", synthKey.c_str());
-        return;
-    }
-    std::wstring className = WireClassNameToString(payload.className);
-    if (className.empty()) { UE_LOGW("atv: OnAtvSpawn empty className synthKey='%ls' -- dropping", synthKey.c_str()); return; }
     const FVector loc{ payload.x, payload.y, payload.z };
     const FRotator rot{ payload.pitch, payload.yaw, payload.roll };
     void* spawned = A::SpawnMirror(className, loc, rot);  // physics LEFT ON -- a native idle grabbable ATV
