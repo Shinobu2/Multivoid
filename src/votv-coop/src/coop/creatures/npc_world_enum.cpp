@@ -124,19 +124,23 @@ coop::element::ElementId EnrollUntrackedNpcActor(void* obj, const std::wstring& 
 // chain (four killer wisps on the NPC lane and one pyramid on the world-actor lane, a spawn
 // the interceptor never sees); the ambient sky-wisp ticker and its colour variants (it
 // anchors at absolute map coordinates, not around a player, so the host rolls them and the
-// client's ticker is cancelled in the spawn authority); and the sell gun's coin mint, whose
-// deferred spawn inside the sell verb is bytecode-internal on the host's own sale and on the
-// re-commit of a client's sale alike, so the world-actor lane's interceptor never sees it and
-// without this row the coin allowlist entry is inert; and the jellyfish path, whose spawn makes
-// its seven fish inside its own graph. The four story-event spawners below close the same gap
-// for the event creatures: every one of their BeginDeferred sites is bytecode-internal
-// (a CallFunc inside the ubergraph, never ProcessEvent-dispatched), so without the row the
-// creature mirrors never exist. Their outputs still pass the allowlist gates in the queue
-// branch below (NPC main-or-late, else world-actor), so no arbitrary EX spawn enrolls.
+// client's ticker is cancelled in the spawn authority); the night-egg ticker, the same
+// world-anchored shape (its tick's weighted roll mints one eg_C at fixed map coordinates and
+// writes gamemode->eg, and the client's own tick is refused in the spawn authority); and the
+// sell gun's coin mint, whose deferred spawn inside the sell verb is bytecode-internal on the
+// host's own sale and on the re-commit of a client's sale alike, so the world-actor lane's
+// interceptor never sees it and without this row the coin allowlist entry is inert; and the
+// jellyfish path, whose spawn makes its seven fish inside its own graph. The four story-event
+// spawners below close the same gap for the event creatures: every one of their BeginDeferred
+// sites is bytecode-internal (a CallFunc inside the ubergraph, never ProcessEvent-dispatched),
+// so without the row the creature mirrors never exist. Their outputs still pass the allowlist
+// gates in the queue branch below (NPC main-or-late, else world-actor), so no arbitrary EX
+// spawn enrolls.
 constexpr const wchar_t* kExSpawnSourceClasses[] = {
     L"trigger_wispSwarm_C",        // the wisps event swarm
     L"piramidSpawner_C",           // the piramid event chain
     L"ticker_wispSpawner_C",       // the ambient sky wisps
+    L"ticker_egSpawner_C",         // the ambient night eggs (one eg_C per successful roll)
     L"prop_coingun_C",             // the sell gun's coin mint
     L"jellyfishPath_C",            // the space jellyfish's seven, on the world-actor lane
     L"trigger_eventer_C",          // the scheduler's dispatcher: ventCrawler_C, superEgger_C,
@@ -222,7 +226,7 @@ void InstallExSpawnCatch(void* beginDeferredFn) {
         UE_LOGI("npc-sync[ex-spawn]: Func-thunk catch installed on BeginDeferred (source-gated: "
                 "trigger_wispSwarm_C -> wisp_C, piramidSpawner_C -> killerwisp_C + piramid2_C, "
                 "jellyfishPath_C -> jellyfish_C, trigger_eventer_C -> event outputs, "
-                "grayEventController_C -> grayTest_C, superEgger_C -> eg_C, "
+                "grayEventController_C -> grayTest_C, superEgger_C + ticker_egSpawner_C -> eg_C, "
                 "tentacleBallsFollower_C -> tentacleBall_C; EX_CallMath spawns now enroll)");
     } else {
         UE_LOGW("npc-sync[ex-spawn]: InstallPostHook FAILED -- EX_CallMath creature spawns will "

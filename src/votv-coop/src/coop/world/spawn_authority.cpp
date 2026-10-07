@@ -5,7 +5,10 @@
 // spawn refused the lifespan reaps it; the yellow-wisp ticker spawns at a navmesh random-walk point,
 // not around the player, and its product is host-mirrored, so the client must not run its own
 // spawner; the sky-wisp ticker spawns the sky wisps at absolute map coordinates, so the host rolls
-// and clients mirror through the source-gated catch and the variant allowlist; the roach master's
+// and clients mirror through the source-gated catch and the variant allowlist; the night-egg
+// ticker rolls the same world-anchored shape (a weighted night roll mints one eg_C at fixed map
+// coordinates and writes gamemode->eg), so the host rolls and a client's own tick is refused;
+// the roach master's
 // summon and its three looping timer entries fire independently of its tick. The tick rows: the
 // insomniac and fossilhound tickers roll inside their tick with no delay chains or reap duties, so
 // refusing the tick stops the roll and the product, and the products are host-mirrored; the roach
@@ -65,6 +68,11 @@ constexpr Row kRows[] = {
     // Sky wisps: world-anchored, so the host rolls; the source-gated catch and the variant
     // allowlist mirror the products.
     {L"ticker_wispSpawner_C",        L"ReceiveTick",    "wispSpawner.ReceiveTick",       false},
+    // The night-egg ticker: the same world-anchored shape -- its tick re-arms a 60-300 s
+    // interval and rolls a weighted night spawn of one eg_C at fixed map coordinates, writing
+    // gamemode->eg (ticker_egSpawner_C UG:6-44). The host rolls, the catch mirrors the egg;
+    // a client's own tick would mint a second, unsynced egg.
+    {L"ticker_egSpawner_C",          L"ReceiveTick",    "egSpawner.ReceiveTick",         false},
     // The space jellyfish: the host's run is mirrored through the source-gated catch.
     {L"jellyfishPath_C",             L"spawn",          "jellyfishPath.spawn",           false},
     // The roach sim's entries: the ticker's cross-object call and the three looping timer

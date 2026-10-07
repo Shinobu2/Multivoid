@@ -122,9 +122,9 @@ inline constexpr size_t kNpcAllowlistSize = sizeof(kNpcAllowlist) / sizeof(kNpcA
 // The late NPC allowlist: event-scene creatures whose classes may load only when their event
 // approaches, so they can never join the install's all-resolved gate (an event that never
 // fires would stall the whole NPC lane). Nothing resolves these at Install; the allowlist
-// test resolves each lazily, the first time a live class name-matches an entry
-// (npc_sync.cpp), the leaf-name rule the world-actor lane uses for the same reason. The
-// cached pointer then carries subclasses through the same descendant walk as the main list.
+// test name-matches them statelessly along the SuperStruct chain (npc_sync.cpp), so a
+// subclass answers true through its loaded base and no cached pointer can go stale across a
+// class reload.
 // grayboar_C stays out deliberately: its SuperStruct is prop_C, not Character -- the boar-war
 // prop belongs to the prop lane; only the grayboarPawn_C helper it mints is a Character.
 inline constexpr const wchar_t* NpcClass_GrayTest     = L"grayTest_C";      // graysforest pack
